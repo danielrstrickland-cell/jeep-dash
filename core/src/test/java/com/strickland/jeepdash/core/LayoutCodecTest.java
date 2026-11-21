@@ -31,4 +31,16 @@ public class LayoutCodecTest {
             }
         }
     }
+
+    public static void jeepDefaultLeavesRoomForLabelsAndNothingOverlaps() {
+        Layout l = LayoutCodec.defaultFor("jeep", 1280, 800);
+        GaugeSpec small = l.find("g3");
+        T.ok(small.h >= small.w + 40, "small dials are taller than wide: name and reading go under the dial");
+        for (GaugeSpec a : l.gauges)
+            for (GaugeSpec b : l.gauges) {
+                if (a == b) continue;
+                boolean apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+                T.ok(apart, a.key + " overlaps " + b.key);
+            }
+    }
 }

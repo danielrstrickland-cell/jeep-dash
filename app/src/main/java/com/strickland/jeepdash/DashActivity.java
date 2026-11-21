@@ -2,56 +2,92 @@ package com.strickland.jeepdash;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
-import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.provider.Settings;
+import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
-import android.widget.TextView;
 
-import com.strickland.jeepdash.core.Catalog;
+import com.strickland.jeepdash.core.Layout;
+import com.strickland.jeepdash.core.LayoutCodec;
 import com.strickland.jeepdash.core.LiveValues;
-import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.theme.JeepTheme;
+import com.strickland.jeepdash.theme.Theme;
+import com.strickland.jeepdash.theme.XpTheme;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 
-/** Temporary link check screen: lists every live value as text. The real dash replaces it in the next build. */
-public class DashActivity extends Activity implements LinkService.Listener, ServiceConnection {
+/** The dash screen: binds the link service, owns the look and its saved layout. */
+public class DashActivity extends Activity implements LinkService.Listener, ServiceConnection, DashView.Host {
 
-    private TextView text;
+    private SharedPreferences prefs;
+    private DashView view;
+    private XpTheme xp;
+    private JeepTheme jeep;
+    private String look;
     private LinkService service;
     private boolean bound;
-    private LinkService.Status status = LinkService.Status.SEARCHING;
-    private String detail = "";
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        prefs = getSharedPreferences("dash", MODE_PRIVATE);
+        look = "jeep".equals(prefs.getString("look", "xp")) ? "jeep" : "xp";
+        xp = new XpTheme(prefs.getString("xp_scheme", "Blue"));
+        jeep = new JeepTheme(prefs.getString("jeep_backlight", "White"));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        text = new TextView(this);
-        text.setTypeface(Typeface.MONOSPACE);
-        text.setTextSize(22);
-        text.setTextColor(Color.WHITE);
-        text.setBackgroundColor(Color.BLACK);
-        text.setPadding(40, 40, 40, 40);
-        setContentView(text);
+        view = new DashView(this, this);
+        view.setTheme(theme());
+        setContentView(view);
         askPermissions();
+    }
+
+    private Theme theme() { return "jeep".equals(look) ? jeep : xp; }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) hideSystemBars();
+    }
+
+    @SuppressWarnings("deprecation")
+    private void hideSystemBars() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            WindowInsetsController ic = getWindow().getInsetsController();
+            if (ic != null) {
+                ic.hide(WindowInsets.Type.systemBars());
+                ic.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
+    }
+
+    // ---------------- permissions and the link ----------------
+
+    private boolean hasBluetooth() {
+        return Build.VERSION.SDK_INT < 31
+                || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
     }
 
     private void askPermissions() {
         List<String> need = new ArrayList<>();
-        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)
-            need.add(Manifest.permission.BLUETOOTH_CONNECT);
+        if (!hasBluetooth()) need.add(Manifest.permission.BLUETOOTH_CONNECT);
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             need.add(Manifest.permission.POST_NOTIFICATIONS);
         if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), 1);
@@ -67,7 +103,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         try {
             startService(new Intent(this, LinkService.class));
         } catch (RuntimeException ignored) {
-            // not allowed while in the background; onStart will try again
+            // not allowed while in the background; onStart tries again
         }
     }
 
@@ -92,9 +128,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     @Override
     public void onServiceConnected(ComponentName name, IBinder binder) {
         service = ((LinkService.LocalBinder) binder).service();
-        Set<String> all = new LinkedHashSet<>();
-        for (Param p : Catalog.all()) all.add(p.id);
-        service.setActiveParams(all);
+        pushActiveParams();
         service.addListener(this);
     }
 
@@ -102,40 +136,102 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     public void onServiceDisconnected(ComponentName name) { service = null; }
 
     @Override
-    public void onStatus(LinkService.Status s, String d) {
-        status = s;
-        detail = d;
-        render(null);
+    public void onStatus(LinkService.Status s, String detail) {
+        view.chrome.status = s;
+        view.chrome.detail = detail;
+        view.invalidate();
     }
 
     @Override
-    public void onValues(LiveValues v) { render(v); }
-
-    private void render(LiveValues v) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("JEEP DASH  link check\n\n");
-        sb.append("Status: ").append(status);
-        if (!detail.isEmpty()) sb.append("\n").append(detail);
-        sb.append("\nReads per second: ").append(service == null ? 0 : service.readsPerSecond()).append("\n\n");
-        long now = LinkService.now();
-        for (Param p : Catalog.all()) {
-            Double d = v == null ? null : v.get(p.id, now);
-            sb.append(String.format(Locale.US, "%-16s %10s %-4s %s\n", p.name,
-                    d == null ? "—" : String.format(Locale.US, "%.1f", d), p.unit, p.slow() ? "(slow)" : ""));
-        }
-        sb.append("\nDrive logs saved: ").append(v == null ? "" : String.valueOf(logCount()));
-        text.setText(sb);
+    public void onValues(LiveValues v) {
+        if (service != null) view.chrome.readsPerSec = service.readsPerSecond();
+        view.setValues(v);
     }
 
-    private int logCount;
-    private long logCountAt;
+    private void pushActiveParams() {
+        Layout l = view.layout();
+        if (service != null && l != null) service.setActiveParams(l.activeParamIds());
+    }
 
-    private int logCount() {
-        long t = LinkService.now();
-        if (t - logCountAt > 5000) {
-            logCountAt = t;
-            logCount = DriveLogStore.list(this).size();
+    // ---------------- look and layout ----------------
+
+    @Override
+    public void onDashSize(float wDp, float hDp) { loadLayout(); }
+
+    private void loadLayout() {
+        if (view.widthDp() <= 0) return;
+        view.setLayout(LayoutCodec.decode(prefs.getString("layout_" + look, null), look, view.widthDp(), view.heightDp()));
+        pushActiveParams();
+    }
+
+    private void switchLook() {
+        look = "jeep".equals(look) ? "xp" : "jeep";
+        prefs.edit().putString("look", look).apply();
+        view.chrome.tab = "gauges";
+        view.setTheme(theme());
+        loadLayout();
+    }
+
+    @Override
+    public void onDashAction(String action) {
+        switch (action) {
+            case "switch": switchLook(); break;
+            case "tab:gauges": view.chrome.tab = "gauges"; view.invalidate(); break;
+            case "tab:viz": view.chrome.tab = "viz"; view.invalidate(); break;
+            case "logs": showMessage("Drive log", "Your drives are being saved to Downloads/JeepDash on this tablet. The list and Share button arrive in the next build."); break;
+            case "menu": showMenu(); break;
+            case "status": showStatus(); break;
+            default: break;
         }
-        return logCount;
+    }
+
+    private void showMessage(String title, String message) {
+        new AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("OK", null).show();
+    }
+
+    private void showStatus() {
+        if (view.chrome.status == LinkService.Status.NO_PERMISSION) {
+            if (!hasBluetooth() && shouldShowRequestPermissionRationale(Manifest.permission.BLUETOOTH_CONNECT)) {
+                askPermissions();
+            } else {
+                try {
+                    startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
+                } catch (RuntimeException ignored) { }
+            }
+            return;
+        }
+        String d = view.chrome.detail;
+        String line = LinkService.statusLine(view.chrome.status);
+        showMessage("Dongle link", d.isEmpty() ? line + ". About " + view.chrome.readsPerSec + " readings per second." : d);
+    }
+
+    private void showMenu() {
+        final boolean isXp = "xp".equals(look);
+        final String[] choices = isXp ? XpTheme.SCHEMES : JeepTheme.BACKLIGHTS;
+        String[] items = new String[choices.length];
+        for (int i = 0; i < choices.length; i++) items[i] = (isXp ? "Window colour: " : "Backlight: ") + choices[i];
+        new AlertDialog.Builder(this)
+                .setTitle("Jeep Dash  (build " + buildNumber() + ")")
+                .setItems(items, (dlg, which) -> {
+                    if (isXp) {
+                        prefs.edit().putString("xp_scheme", choices[which]).apply();
+                        xp.setScheme(choices[which]);
+                    } else {
+                        prefs.edit().putString("jeep_backlight", choices[which]).apply();
+                        jeep.setBacklight(choices[which]);
+                    }
+                    view.invalidate();
+                })
+                .show();
+    }
+
+    @SuppressWarnings("deprecation")
+    long buildNumber() {
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : pi.versionCode;
+        } catch (Exception e) {
+            return 0;
+        }
     }
 }

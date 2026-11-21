@@ -46,13 +46,14 @@ public final class LayoutCodec {
         float sx = w / 1280f, sy = h / 800f;
         Layout l = new Layout(w, h);
         if ("jeep".equals(look)) {
-            put(l, sx, sy, "g1", "speed", GaugeType.DIAL, 80, 80, 380, 380);
-            put(l, sx, sy, "g2", "rpm", GaugeType.DIAL, 820, 80, 380, 380);
-            put(l, sx, sy, "g3", "coolant", GaugeType.DIAL, 480, 105, 150, 150);
-            put(l, sx, sy, "g4", "iat", GaugeType.DIAL, 650, 105, 150, 150);
-            put(l, sx, sy, "g5", "spark", GaugeType.DIAL, 480, 285, 150, 150);
-            put(l, sx, sy, "g6", "map_v", GaugeType.DIAL, 650, 285, 150, 150);
-            put(l, sx, sy, "g7", "throttle", GaugeType.DIGITAL, 330, 620, 620, 78);
+            // cluster panel is 40..1240 x 40..600; big dials centred in it, four small ones between them
+            put(l, sx, sy, "g1", "speed", GaugeType.DIAL, 80, 130, 380, 380);
+            put(l, sx, sy, "g2", "rpm", GaugeType.DIAL, 820, 130, 380, 380);
+            put(l, sx, sy, "g3", "coolant", GaugeType.DIAL, 476, 111, 150, 200);
+            put(l, sx, sy, "g4", "iat", GaugeType.DIAL, 654, 111, 150, 200);
+            put(l, sx, sy, "g5", "spark", GaugeType.DIAL, 476, 329, 150, 200);
+            put(l, sx, sy, "g6", "map_v", GaugeType.DIAL, 654, 329, 150, 200);
+            put(l, sx, sy, "g7", "throttle", GaugeType.DIGITAL, 330, 628, 620, 78);
         } else {
             put(l, sx, sy, "g1", "rpm", GaugeType.DIAL, 16, 16, 744, 420);
             put(l, sx, sy, "g2", "speed", GaugeType.DIGITAL, 776, 16, 488, 420);
