@@ -2,10 +2,11 @@ package com.strickland.jeepdash.core;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Map;
 
 public class PollSchedulerTest {
     static PollScheduler sched(String... ids) {
-        PollScheduler s = new PollScheduler(60000);
+        PollScheduler s = new PollScheduler(60000, TwoLine::byId);
         s.setActive(Arrays.asList(ids));
         return s;
     }
@@ -110,5 +111,29 @@ public class PollSchedulerTest {
         s.resetBus();
         T.eq(null, s.currentBus(), "bus unknown after reset");
         T.eq(PollScheduler.Kind.SWITCH_TO_SCI, s.next(2).kind, "sets up SCI again");
+    }
+
+    public static void visitsToTheOtherLineAreNeverMoreOftenThanOncePerMinute() {
+        PollScheduler s = new PollScheduler(10000, TwoLine::byId);        // a caller asking for every 10 s
+        s.setActive(Arrays.asList("speed", "map_v"));
+        s.next(0); s.next(1); s.next(2);                   // first visit, then generic
+        T.eq("READ_GENERIC speed", show(s.next(30000)), "each visit costs about 9 s of dead gauges: not at 30 s");
+        T.eq("SWITCH_TO_SCI", show(s.next(60000)), "at one minute");
+        T.eq(60000L, s.otherEveryMs(), "reported interval is the real one");
+    }
+
+    public static void readGapsFollowTheWeights() {
+        Map<String, Integer> g = sched("rpm", "coolant").readGaps();   // cycle: rpm, coolant, rpm, rpm
+        T.eq(4, g.get("coolant"), "a weight-1 value comes round once per cycle");
+        T.eq(2, g.get("rpm"), "rpm's longest wait is two reads");
+    }
+
+    public static void engineAnsweringGivesGenericAFreshStart() {
+        PollScheduler s = sched("rpm", "speed");
+        for (int i = 0; i < 5; i++) s.genericFailed(0);
+        T.eq(Source.SCI, s.primary(), "key off long enough: working on the Jeep line");
+        s.engineAnswering();
+        T.eq(Source.GENERIC, s.primary(), "key on: generic is the working line again");
+        T.eq("SWITCH_TO_GENERIC", show(s.next(1000)), "and is tried at once");
     }
 }

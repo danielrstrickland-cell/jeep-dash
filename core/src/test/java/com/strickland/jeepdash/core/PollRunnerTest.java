@@ -31,7 +31,7 @@ public class PollRunnerTest {
                 else if (hex.contains("f1 01 00 c4")) reply(seq, "01 00 0a 48 6b d1 41 00 be 3e b8 14 8d");
                 else if (hex.contains("f1 01 0c")) reply(seq, "01 00 08 48 6b d1 41 0c 0b 40 1c");
                 else if (hex.contains("f1 01 0d")) reply(seq, "01 00 07 48 6b d1 41 0d 28 fa");
-                else reply(seq, "01 ff ff");
+                else reply(seq, String.format("01 00 07 48 6b d1 41 %02x 50 00", inner[8] & 0xff));
                 return;
             }
             if (!engineAnswers) { reply(seq, "01 ff ff"); return; }
@@ -39,6 +39,8 @@ public class PollRunnerTest {
                 reply(seq, String.format("01 00 03 %02x 0b %02x", rpmRaw >> 8, rpmRaw & 0xff));
             else if (hex.equals("61 04 00 02 f4 16 01")) reply(seq, "01 00 02 16 80");
             else if (hex.equals("61 04 00 02 f4 17 01")) reply(seq, "01 00 02 17 69");
+            else if (hex.startsWith("61 04 00 02 f4")) reply(seq, String.format("01 00 02 %02x 80", inner[5] & 0xff));
+            else if (hex.startsWith("61 04 00 03 f4")) reply(seq, String.format("01 00 03 10 %02x 00", inner[6] & 0xff));
             else reply(seq, "01 00 01 00");
         }
         void reply(int seq, String payload) {
@@ -50,12 +52,16 @@ public class PollRunnerTest {
 
     static final class Rig {
         final Car car = new Car();
-        final PollScheduler sched = new PollScheduler(60000);
+        final PollScheduler sched;
         final LiveValues values = new LiveValues();
         final long[] now = {0};
         final List<Long> sleeps = new ArrayList<>();
         final PollRunner runner;
-        Rig(String... active) {
+        Rig(String... active) { this(TwoLine::byId, active); }
+        /** With the real catalog (everything on the Jeep line). */
+        static Rig real(String... active) { return new Rig(Catalog::byId, active); }
+        Rig(java.util.function.Function<String, Param> lookup, String... active) {
+            sched = new PollScheduler(60000, lookup);
             car.session = new DongleSession(car);
             runner = new PollRunner(car.session, sched, values, () -> now[0]);
             runner.setSleeper(sleeps::add);
@@ -210,5 +216,101 @@ public class PollRunnerTest {
         r.car.sent.clear();
         T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "on to generic");
         T.eq(Protocols.SCI_SLOW, r.car.sent.get(0), "first the app's own 'back to 7812 baud' command, so the line is quiet for the wake-up");
+    }
+
+    static final String[] DASH = {"speed", "rpm", "coolant", "iat", "spark", "map_kpa", "throttle"};
+
+    public static void defaultGaugesNeverBlankOnTheJeepLineAtRealSpeed() throws Exception {
+        Rig r = Rig.real(DASH);
+        T.eq(PollScheduler.Kind.SWITCH_TO_SCI, r.runner.step(), "all seven live on the Jeep line");
+        for (int i = 0; i < 200; i++) {
+            r.now[0] += 260;
+            T.eq(PollScheduler.Kind.READ_SCI, r.runner.step(), "only Jeep-line reads");
+            if (i >= 15) for (String id : DASH) T.ok(r.values.get(id, r.now[0]) != null, id + " blank at read " + i);
+        }
+    }
+
+    public static void genericGaugesNeverBlankAtRealSpeed() throws Exception {
+        Rig r = new Rig(DASH);
+        T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "generic is the working line here");
+        for (int i = 0; i < 200; i++) {
+            r.now[0] += 330;
+            r.runner.step();
+            if (i >= 15) for (String id : DASH) T.ok(r.values.get(id, r.now[0]) != null, id + " blank at read " + i);
+        }
+    }
+
+    public static void valuesBlankAsSoonAsTheEngineStopsAnswering() throws Exception {
+        Rig r = new Rig("rpm", "coolant");
+        r.steps(4);
+        T.ok(r.values.get("coolant", 0) != null, "coolant was read");
+        r.car.engineAnswers = false;
+        r.steps(3);
+        T.ok(!r.runner.vehicleAnswering(), "three misses: not answering");
+        T.eq(null, r.values.get("coolant", 0), "no old reading stays up once the engine computer is silent");
+    }
+
+    public static void twoDeadWakeUpsWithNothingElseToReadMeansNotAnswering() throws Exception {
+        Rig r = new Rig("speed");
+        r.car.wakeAnswers = false;
+        r.runner.step();
+        T.ok(r.runner.vehicleAnswering(), "one failed wake-up is not yet 'key off' (the first try often fails)");
+        r.runner.step();
+        T.ok(!r.runner.vehicleAnswering(), "two in a row and nothing else to ask: say the key is off");
+        r.car.wakeAnswers = true;
+        r.now[0] = 31000;
+        r.runner.step();
+        T.ok(r.runner.vehicleAnswering(), "the wake-up answered: it is there");
+    }
+
+    public static void keyOnAfterALongKeyOffGetsTwoQuickGenericTries() throws Exception {
+        Rig r = new Rig("rpm", "speed");
+        r.car.wakeAnswers = false;
+        r.car.engineAnswers = false;
+        r.steps(2);
+        for (int i = 1; i <= 6; i++) { r.now[0] = 130000L * i; r.steps(8); }     // key stays off; retries pile up
+        T.ok(!r.runner.vehicleAnswering(), "key off");
+        r.car.engineAnswers = true;                    // key on, but the first wake-up after it fails
+        for (int i = 0; i < 20 && r.values.get("rpm", r.now[0]) == null; i++) r.runner.step();
+        T.ok(r.runner.vehicleAnswering(), "key on is noticed on the Jeep line");
+        T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "generic is tried right away");
+        r.car.wakeAnswers = true;
+        T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "and again, not after a two-minute back-off");
+        r.steps(3);
+        T.ok(r.values.get("speed", r.now[0]) != null, "speed is back");
+    }
+
+    public static void leavingStopsTheGenericKeepAlive() throws Exception {
+        Rig r = new Rig("speed");
+        r.steps(2);
+        r.car.sent.clear();
+        T.ok(r.runner.onGenericLine(), "on the generic line");
+        r.runner.leave();
+        T.ok(!r.runner.onGenericLine(), "and off it after leaving");
+        T.eq(Arrays.asList(Protocols.GENERIC_LEAVE), r.car.sent, "orderly stop: the GearWrench app's own leave sequence");
+        r.car.sent.clear();
+        r.runner.leave();
+        T.eq(new ArrayList<String>(), r.car.sent, "nothing left to stop");
+    }
+
+    public static void leavingTheJeepLineSendsNothing() throws Exception {
+        Rig r = new Rig("rpm");
+        r.steps(2);
+        r.car.sent.clear();
+        r.runner.leave();
+        T.eq(new ArrayList<String>(), r.car.sent, "the Jeep line has no keep-alive to stop");
+    }
+
+    public static void everythingSentIsOnTheReadOnlyList() throws Exception {
+        Rig two = new Rig("rpm", "speed", "map_v", "coolant");
+        for (int i = 0; i < 400; i++) { two.now[0] += 300; two.runner.step(); }
+        List<String> ids = new ArrayList<>();
+        for (Param p : Catalog.all()) ids.add(p.id);
+        Rig real = Rig.real(ids.toArray(new String[0]));
+        real.steps(100);
+        List<String> sent = new ArrayList<>(two.car.sent);
+        sent.addAll(real.car.sent);
+        T.ok(sent.size() > 400, "both rigs talked");
+        for (String s : sent) T.ok(Protocols.allowed(Hex.bytes(s)), "sent something off the read-only list: " + s);
     }
 }

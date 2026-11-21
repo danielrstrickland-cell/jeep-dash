@@ -2,6 +2,7 @@ package com.strickland.jeepdash.core;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Map;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 
@@ -19,6 +20,8 @@ public final class PollRunner {
     static final long MAX_BLOCK_MS = 20000;
     /** Visited values stay on screen for one visit interval plus this, so they survive until the next visit. */
     static final long SLOW_EXTRA_MS = 15000;
+    /** What one read costs on each line, measured on the tablet (a bit on the slow side). */
+    static final long SCI_READ_MS = 260, GENERIC_READ_MS = 330;
 
     private final DongleSession session;
     private final PollScheduler sched;
@@ -26,11 +29,12 @@ public final class PollRunner {
     private final LongSupplier clock;
     private int ackMs = 1500, readMs = 1000, setupMs = 4000, wakeMs = 6000;   // real replies take 0.2-0.5 s
     private Trace trace;
-    private Source onLine;                 // what the dongle is set up for right now
+    private volatile Source onLine;                 // what the dongle is set up for right now
     private LongConsumer sleeper = PollRunner::sleep;
     private int misses, unanswered;
     private volatile int goodReads;
     private volatile boolean answering = true;
+    private int deadWakes;
 
     public PollRunner(DongleSession session, PollScheduler sched, LiveValues values, LongSupplier clock) {
         this.session = session;
@@ -68,8 +72,30 @@ public final class PollRunner {
     /** Values on the visited line keep their last reading from one visit to the next. */
     private void applyStaleTimes() {
         values.clearStaleMs();
+        // A value read once per cycle of fifteen waits four seconds or more for its turn: give every value
+        // twice its own wait before it counts as missing, never less than the normal three seconds.
+        long per = sched.primary() == Source.GENERIC ? GENERIC_READ_MS : SCI_READ_MS;
+        for (Map.Entry<String, Integer> e : sched.readGaps().entrySet())
+            values.setStaleMs(e.getKey(), Math.max(LiveValues.STALE_MS, 2 * e.getValue() * per));
         for (String id : sched.slowIds()) values.setStaleMs(id, sched.otherEveryMs() + SLOW_EXTRA_MS);
     }
+
+    /**
+     * Orderly stop: turns the dongle's generic keep-alive off, the way the GearWrench app does when it
+     * leaves live data. Best effort; the Jeep line has nothing to stop.
+     */
+    public synchronized void leave() {
+        if (onLine != Source.GENERIC) return;
+        onLine = null;
+        try {
+            for (String c : Protocols.GENERIC_LEAVE) setup(c);
+        } catch (IOException ignored) {
+            // the link is going away anyway
+        }
+    }
+
+    /** True while the dongle is set up for the generic line (its keep-alive is running). */
+    public boolean onGenericLine() { return onLine == Source.GENERIC; }
 
     /** Total good readings so far (the caller turns this into reads per second). */
     public int goodReads() { return goodReads; }
@@ -102,10 +128,15 @@ public final class PollRunner {
                     for (String c : Protocols.GENERIC_SETUP_POST) setup(c);
                     onLine = Source.GENERIC;
                     sched.genericWorked();
+                    deadWakes = 0;
+                    answering = true;
                     values.endHold(clock.getAsLong());
                 } else {
                     sched.genericFailed(clock.getAsLong());
                     note("-- generic line did not wake up");
+                    // With nothing to ask on the Jeep line, two dead wake-ups in a row are the only sign
+                    // that the key is off.
+                    if (!sched.hasJeepLineValues() && ++deadWakes >= 2) keyOff();
                 }
                 applyStaleTimes();
                 break;
@@ -152,21 +183,29 @@ public final class PollRunner {
             misses = 0;
             if (!answering) {
                 answering = true;
-                sched.retryGenericSoon();      // key just came on: don't wait out the generic retry timer
+                sched.engineAnswering();       // key just came on: generic gets a fresh start
+                applyStaleTimes();
             }
             return;
         }
         // Only the working line says whether the engine computer is there; a miss on a visit is just a miss.
         if (src != sched.primary()) return;
         misses++;
-        if (misses >= 3) answering = false;
+        if (misses >= 3) keyOff();
         if (misses >= MISSES_BEFORE_RESETUP) {
             misses = 0;
             sched.resetBus();
         }
     }
 
+    /** The engine computer is silent: say so, and take every old reading off the screen. */
+    private void keyOff() {
+        answering = false;
+        values.clear();
+    }
+
     private DongleSession.Result exchange(byte[] inner, boolean wantReply, int timeoutMs) throws IOException {
+        if (!Protocols.allowed(inner)) throw new IllegalStateException("not on the read-only list: " + Hex.str(inner));
         long t0 = clock.getAsLong();
         DongleSession.Result r = session.send(inner, wantReply, timeoutMs);
         if (trace != null) {
