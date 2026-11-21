@@ -55,4 +55,15 @@ public class LayoutTest {
         T.eq(new LinkedHashSet<>(Arrays.asList("rpm", "speed", "coolant", "iat", "spark", "throttle", "map_kpa")),
                 xp.activeParamIds(), "default XP values");
     }
+
+    public static void snapOneLeavesTheOthersAlone() {
+        Layout l = new Layout(1280, 800);
+        l.add(new GaugeSpec("a", "rpm", GaugeType.DIAL, 13, 21, 203, 197));
+        l.add(new GaugeSpec("b", "speed", GaugeType.DIAL, 301, 303, 205, 207));
+        l.snapOne("a", 16);
+        T.near(16, l.find("a").x, 0.001, "dragged gauge snapped");
+        T.near(208, l.find("a").w, 0.001, "its size too");
+        T.near(301, l.find("b").x, 0.001, "untouched gauge keeps its exact place");
+        T.near(205, l.find("b").w, 0.001, "and size");
+    }
 }

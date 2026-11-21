@@ -11,22 +11,34 @@ public final class Param {
     public final int[] sciIds;         // SCI F4 ids (1 or 2), or null
     public final double min, max;
     public final int weight;           // relative poll frequency
+    public final boolean tablet;       // worked out from the tablet's own sensors; never asked of the Jeep
     private final Formula sciFormula, genericFormula;
 
     public Param(String id, String name, String unit, int[] sciIds, Formula sciFormula,
                  Integer pid, Formula genericFormula, double min, double max, int weight) {
+        this(id, name, unit, sciIds, sciFormula, pid, genericFormula, min, max, weight, false);
+    }
+
+    private Param(String id, String name, String unit, int[] sciIds, Formula sciFormula,
+                  Integer pid, Formula genericFormula, double min, double max, int weight, boolean tablet) {
         this.id = id; this.name = name; this.unit = unit;
         this.sciIds = sciIds; this.sciFormula = sciFormula;
         this.pid = pid; this.genericFormula = genericFormula;
         this.min = min; this.max = max; this.weight = weight;
+        this.tablet = tablet;
+    }
+
+    /** A value from the tablet's sensors (GPS, accelerometer): nothing to request and nothing to decode. */
+    public static Param tablet(String id, String name, String unit, double min, double max) {
+        return new Param(id, name, unit, null, null, null, null, min, max, 1, true);
     }
 
     /** True when the value can only be read over generic OBD2 (polled in occasional blocks). */
-    public boolean slow() { return sciIds == null; }
+    public boolean slow() { return sciIds == null && !tablet; }
 
     /** Decodes a reply's data bytes; null when the reply is not for this value or is too short. */
     public Double decode(Source s, byte[] reply) {
-        if (reply == null) return null;
+        if (reply == null || tablet) return null;
         if (s == Source.SCI) {
             if (sciIds == null) return null;
             if (sciIds.length == 1) {

@@ -19,6 +19,9 @@ public final class TestMain {
             DriveLogWriterTest.class,
             ReleaseTagTest.class,
             SpectrumTest.class,
+            VizTuneTest.class,
+            MotionTest.class,
+            KwpTest.class,
     };
 
     public static void main(String[] args) {
