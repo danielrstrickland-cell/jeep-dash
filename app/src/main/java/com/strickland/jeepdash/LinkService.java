@@ -331,6 +331,7 @@ public class LinkService extends Service {
                     continue;
                 }
                 if (failures == 0) setStatus(everLive ? Status.RECONNECTING : Status.CONNECTING, "");
+                if (!paired(dev)) pair(dev, gen);
                 AndroidByteLink link = connect(dev, prefs.getInt("mode", -1), failures, gen);
                 if (link == null) {
                     failures++;
@@ -461,6 +462,71 @@ public class LinkService extends Service {
         if (found[0] == null) why[0] = "No GWBT dongle found nearby. Is it plugged in with the key on?";
         else note("found the dongle by looking (not paired)");
         return found[0];
+    }
+
+    /** PINs dongles like this one usually ship with; one is tried per pairing attempt. */
+    private static final String[] PINS = {"1234", "0000", "1111", "8888"};
+    private int pinTry;
+
+    /**
+     * Pairs with a dongle found by looking. Some car radios have no screen for pairing anything but a
+     * phone, so the dongle's pairing request is answered here. Every step goes in the link log.
+     */
+    @SuppressLint("MissingPermission")
+    @SuppressWarnings("deprecation")
+    private void pair(final BluetoothDevice dev, int gen) {
+        final String pin = PINS[pinTry % PINS.length];
+        final boolean[] askedForPin = {false};
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                BluetoothDevice d = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                if (d == null || !d.getAddress().equals(dev.getAddress())) return;
+                if (BluetoothDevice.ACTION_BOND_STATE_CHANGED.equals(intent.getAction())) {
+                    note("pairing state " + intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, -1)
+                            + " (10 none, 11 pairing, 12 paired)");
+                    return;
+                }
+                int kind = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, -1);
+                note("pairing request, kind " + kind);
+                try {
+                    if (kind == BluetoothDevice.PAIRING_VARIANT_PIN) {
+                        askedForPin[0] = true;
+                        d.setPin(pin.getBytes());
+                        note("answered with PIN " + pin);
+                    } else {
+                        d.setPairingConfirmation(true);
+                        note("confirmed");
+                    }
+                    if (isOrderedBroadcast()) abortBroadcast();     // answered here; no dialog needed
+                } catch (RuntimeException e) {
+                    note("could not answer the pairing request: " + e);
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
+        filter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        filter.setPriority(IntentFilter.SYSTEM_HIGH_PRIORITY - 1);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+        else registerReceiver(receiver, filter);
+        try {
+            Thread.sleep(400);                  // let the search wind down before talking to the dongle
+            note("pairing started: " + dev.createBond());
+            for (int i = 0; i < 24 && alive(gen); i++) {
+                int state = dev.getBondState();
+                if (state == BluetoothDevice.BOND_BONDED || (i > 3 && state == BluetoothDevice.BOND_NONE)) break;
+                Thread.sleep(500);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (RuntimeException e) {
+            note("pairing could not start: " + e);
+        } finally {
+            unregisterReceiver(receiver);
+        }
+        boolean done = paired(dev);
+        if (!done && askedForPin[0]) pinTry++;      // next attempt tries the next PIN
+        note(done ? "paired with the dongle" : "not paired");
     }
 
     /** Tries the way that worked last time first; every fourth failed round tries all three ways. */
