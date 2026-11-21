@@ -85,7 +85,7 @@ public final class VizPainter {
         float u = h / 800f;
         pill(c, dashButton, 18 * u, 16 * u, "DASH", u);
         pill(c, colorButton, dashButton.right + 12 * u, 16 * u, "COLORS: " + COLORS[color].toUpperCase(), u);
-        pill(c, tuneButton, colorButton.right + 12 * u, 16 * u, tuneOpen ? "TUNE ▴" : "TUNE ▾", u);
+        pill(c, tuneButton, colorButton.right + 12 * u, 16 * u, tuneOpen ? "TUNE \u25B4" : "TUNE \u25BE", u);
         slider(c, w, u);
         text(c, LOOKS[look].toUpperCase(), w - 22 * u, 46 * u, 24 * u, 0x99FFFFFF, Paint.Align.RIGHT);
         if (rpm != null)
@@ -336,7 +336,7 @@ public final class VizPainter {
         }
         float by = panel.bottom - 58 * u;
         pill(c, resetButton, trackLeft, by, "RESET", u);
-        text(c, LOOKS[look].toUpperCase() + "  ·  tap outside to close", trackRight, by + 30 * u, 17 * u, 0x88FFFFFF, Paint.Align.RIGHT);
+        text(c, LOOKS[look].toUpperCase() + "  \u00B7  tap outside to close", trackRight, by + 30 * u, 17 * u, 0x88FFFFFF, Paint.Align.RIGHT);
     }
 
     /** Which row of the open panel is at this point, or -1. */
