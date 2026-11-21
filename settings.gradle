@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "jeep-dash"
-include ":app"
+include ":core", ":app"
