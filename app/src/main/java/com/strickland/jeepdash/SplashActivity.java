@@ -20,6 +20,7 @@ import android.view.WindowManager;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.theme.RetroBoot;
 import com.strickland.jeepdash.theme.GtBoot;
+import com.strickland.jeepdash.theme.NeonSign;
 import com.strickland.jeepdash.theme.BootArt;
 import com.strickland.jeepdash.core.Catalog;
 
@@ -305,7 +306,7 @@ public class SplashActivity extends Activity implements ServiceConnection, LinkS
         private final int[] state = new int[label.length];
         private final BootArt art;
         private int at;                         // the check being waited on
-        private float lineStart = 1.5f, engineAt, doneAt = -1;
+        private float lineStart = 1.2f, engineAt, doneAt = -1;
         private boolean linkGood, engineGood;
         private long start;
 
@@ -362,7 +363,12 @@ public class SplashActivity extends Activity implements ServiceConnection, LinkS
         @Override
         protected void onDraw(Canvas c) {
             if (start == 0) start = System.nanoTime();
-            float t = (System.nanoTime() - start) / 1e9f;
+            float t = (System.nanoTime() - start) / 1e9f - NeonSign.SECONDS;
+            if (t < 0) {                        // the sign first; the link is already being made behind it
+                NeonSign.draw(c, getWidth(), getHeight(), t + NeonSign.SECONDS);
+                postInvalidateOnAnimation();
+                return;
+            }
             while (at < label.length && t >= lineStart) {
                 if (state[at] == BootArt.NOT_YET) state[at] = BootArt.WAITING;
                 if (!settle(at, t, t - lineStart)) break;
