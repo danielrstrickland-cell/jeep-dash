@@ -443,12 +443,35 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             items.add("Music visualizer");
             actions.add(this::openVisualizer);
         }
+        items.add("Android Bluetooth settings (to pair the dongle)");
+        actions.add(this::openBluetoothSettings);
         items.add(porsche ? "Vehicle: switch to Jeep Grand Cherokee" : "Vehicle: switch to Porsche Cayenne");
         actions.add(this::confirmVehicle);
         new AlertDialog.Builder(this)
                 .setTitle((porsche ? "Cayenne Dash" : "Jeep Dash") + "  (build " + buildNumber() + ")")
                 .setItems(items.toArray(new String[0]), (dlg, which) -> actions.get(which).run())
                 .show();
+    }
+
+    /**
+     * Some car radios hide Android's own Bluetooth screen behind one that only pairs phones. This asks for
+     * the real one, where the dongle can be paired like on any tablet.
+     */
+    private void openBluetoothSettings() {
+        Intent[] ways = {
+                new Intent(Settings.ACTION_BLUETOOTH_SETTINGS),
+                new Intent().setClassName("com.android.settings", "com.android.settings.Settings$BluetoothSettingsActivity"),
+                new Intent().setClassName("com.android.settings", "com.android.settings.bluetooth.BluetoothSettings"),
+        };
+        for (Intent way : ways) {
+            try {
+                startActivity(way);
+                return;
+            } catch (RuntimeException ignored) {
+                // try the next way in
+            }
+        }
+        showMessage("Bluetooth settings", "This radio has no Android Bluetooth settings screen to open.");
     }
 
     /** The other car speaks a different language to the dongle, so the app starts again set up for it. */

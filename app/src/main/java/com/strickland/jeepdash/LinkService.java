@@ -17,6 +17,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbManager;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Handler;
@@ -139,7 +141,21 @@ public class LinkService extends Service {
     public String linkLog() {
         return "Jeep Dash link log\nAndroid " + Build.VERSION.RELEASE + " (SDK " + Build.VERSION.SDK_INT + "), "
                 + Build.MANUFACTURER + " " + Build.MODEL + "\nStatus now: " + status + " " + detail
-                + "\nReading: " + active + "\n\n" + trace.snapshot();
+                + "\nReading: " + active + "\nUSB: " + usbDevices() + "\n\n" + trace.snapshot();
+    }
+
+    /** What is plugged into the USB ports, as maker:product numbers (tells one cable's chip from another's). */
+    private String usbDevices() {
+        try {
+            UsbManager usb = getSystemService(UsbManager.class);
+            if (usb == null) return "not available";
+            StringBuilder sb = new StringBuilder();
+            for (UsbDevice d : usb.getDeviceList().values())
+                sb.append(String.format(java.util.Locale.US, "%04x:%04x %s; ", d.getVendorId(), d.getProductId(), d.getProductName()));
+            return sb.length() == 0 ? "nothing plugged in" : sb.toString();
+        } catch (RuntimeException e) {
+            return "could not list: " + e;
+        }
     }
 
     private void note(String line) {
@@ -158,6 +174,15 @@ public class LinkService extends Service {
             nm.createNotificationChannel(ch);
         }
         lastUsefulMs = now();
+        try {
+            IntentFilter pairing = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
+            pairing.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+            pairing.setPriority(IntentFilter.SYSTEM_HIGH_PRIORITY - 1);
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(pairingWatcher, pairing, Context.RECEIVER_EXPORTED);
+            else registerReceiver(pairingWatcher, pairing);
+        } catch (RuntimeException e) {
+            note("cannot watch for pairing requests: " + e);
+        }
         ticker = Executors.newSingleThreadScheduledExecutor();
         ticker.scheduleWithFixedDelay(this::safeTick, 100, 100, TimeUnit.MILLISECONDS);
     }
@@ -195,6 +220,11 @@ public class LinkService extends Service {
     @Override
     public void onDestroy() {
         stopWorker();
+        try {
+            unregisterReceiver(pairingWatcher);
+        } catch (RuntimeException ignored) {
+            // it was never registered
+        }
         if (ticker != null) {
             ticker.execute(this::closeLog);
             ticker.shutdown();
@@ -467,52 +497,94 @@ public class LinkService extends Service {
     /** PINs dongles like this one usually ship with; one is tried per pairing attempt. */
     private static final String[] PINS = {"1234", "0000", "1111", "8888"};
     private int pinTry;
+    private volatile String pairingAddress;         // the dongle being paired right now, if any
+    private volatile boolean askedForPin, askedForApproval;
+
+    /**
+     * Watches every pairing request for the dongle while the service runs, whoever started it. A PIN is
+     * answered here. A plain "approve this pairing" can only be approved by the system, so the request is
+     * kept away from other apps (one on some car radios cancels it at once) and the system's own pairing
+     * box is put on screen for the driver to tap. Every step goes in the link log.
+     */
+    private final BroadcastReceiver pairingWatcher = new BroadcastReceiver() {
+        @Override
+        @SuppressLint("MissingPermission")
+        @SuppressWarnings("deprecation")
+        public void onReceive(Context context, Intent intent) {
+            BluetoothDevice d = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+            if (d == null) return;
+            String name = null;
+            try {
+                name = d.getName();
+            } catch (RuntimeException ignored) {
+                // go by the address alone
+            }
+            if (!d.getAddress().equals(pairingAddress) && (name == null || !name.startsWith("GWBT-"))) return;
+            if (BluetoothDevice.ACTION_BOND_STATE_CHANGED.equals(intent.getAction())) {
+                note("pairing state " + intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, -1)
+                        + " (10 none, 11 pairing, 12 paired)");
+                return;
+            }
+            int kind = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, -1);
+            note("pairing request, kind " + kind);
+            try {
+                if (kind == BluetoothDevice.PAIRING_VARIANT_PIN) {
+                    askedForPin = true;
+                    String pin = PINS[pinTry % PINS.length];
+                    d.setPin(pin.getBytes());
+                    note("answered with PIN " + pin);
+                    if (isOrderedBroadcast()) abortBroadcast();
+                    return;
+                }
+                askedForApproval = true;
+                if (isOrderedBroadcast()) {
+                    abortBroadcast();
+                    note("kept the request from other apps");
+                }
+                note(openSystemPairingBox(d, kind, intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_KEY, BluetoothDevice.ERROR)));
+            } catch (RuntimeException e) {
+                note("could not handle the pairing request: " + e);
+            }
+        }
+    };
+
+    /** Asks the system's own settings app for its "Pair with this device?" box. Says how it went. */
+    private String openSystemPairingBox(BluetoothDevice d, int kind, int key) {
+        String[] classes = {"com.android.settings.bluetooth.BluetoothPairingDialog", null};
+        String last = "";
+        for (String cls : classes) {
+            Intent box = new Intent(BluetoothDevice.ACTION_PAIRING_REQUEST);
+            if (cls != null) box.setClassName("com.android.settings", cls);
+            else box.setPackage("com.android.settings");
+            box.putExtra(BluetoothDevice.EXTRA_DEVICE, d);
+            box.putExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, kind);
+            if (key != BluetoothDevice.ERROR) box.putExtra(BluetoothDevice.EXTRA_PAIRING_KEY, key);
+            box.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                startActivity(box);
+                setStatus(Status.CONNECTING, "Tap PAIR on the box that just opened");
+                return "opened the system pairing box" + (cls == null ? " (by package)" : "");
+            } catch (RuntimeException e) {
+                last = e.toString();
+            }
+        }
+        return "could not open the system pairing box: " + last;
+    }
 
     /**
      * Pairs with a dongle found by looking. Some car radios have no screen for pairing anything but a
-     * phone, so the dongle's pairing request is answered here. Every step goes in the link log.
+     * phone, so the pairing is started here and the watcher above deals with what the dongle asks for.
      */
     @SuppressLint("MissingPermission")
-    @SuppressWarnings("deprecation")
-    private void pair(final BluetoothDevice dev, int gen) {
-        final String pin = PINS[pinTry % PINS.length];
-        final boolean[] askedForPin = {false};
-        BroadcastReceiver receiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                BluetoothDevice d = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                if (d == null || !d.getAddress().equals(dev.getAddress())) return;
-                if (BluetoothDevice.ACTION_BOND_STATE_CHANGED.equals(intent.getAction())) {
-                    note("pairing state " + intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, -1)
-                            + " (10 none, 11 pairing, 12 paired)");
-                    return;
-                }
-                int kind = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, -1);
-                note("pairing request, kind " + kind);
-                try {
-                    if (kind == BluetoothDevice.PAIRING_VARIANT_PIN) {
-                        askedForPin[0] = true;
-                        d.setPin(pin.getBytes());
-                        note("answered with PIN " + pin);
-                    } else {
-                        d.setPairingConfirmation(true);
-                        note("confirmed");
-                    }
-                    if (isOrderedBroadcast()) abortBroadcast();     // answered here; no dialog needed
-                } catch (RuntimeException e) {
-                    note("could not answer the pairing request: " + e);
-                }
-            }
-        };
-        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
-        filter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
-        filter.setPriority(IntentFilter.SYSTEM_HIGH_PRIORITY - 1);
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
-        else registerReceiver(receiver, filter);
+    private void pair(BluetoothDevice dev, int gen) {
+        pairingAddress = dev.getAddress();
+        askedForPin = false;
+        askedForApproval = false;
         try {
             Thread.sleep(400);                  // let the search wind down before talking to the dongle
             note("pairing started: " + dev.createBond());
-            for (int i = 0; i < 24 && alive(gen); i++) {
+            // an approval box needs time for a finger to reach it
+            for (int i = 0; i < (askedForApproval ? 70 : 24) && alive(gen); i++) {
                 int state = dev.getBondState();
                 if (state == BluetoothDevice.BOND_BONDED || (i > 3 && state == BluetoothDevice.BOND_NONE)) break;
                 Thread.sleep(500);
@@ -521,11 +593,9 @@ public class LinkService extends Service {
             Thread.currentThread().interrupt();
         } catch (RuntimeException e) {
             note("pairing could not start: " + e);
-        } finally {
-            unregisterReceiver(receiver);
         }
         boolean done = paired(dev);
-        if (!done && askedForPin[0]) pinTry++;      // next attempt tries the next PIN
+        if (!done && askedForPin) pinTry++;         // next attempt tries the next PIN
         note(done ? "paired with the dongle" : "not paired");
     }
 
