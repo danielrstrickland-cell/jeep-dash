@@ -18,6 +18,7 @@ public interface Theme {
         public boolean canEdit;
         public boolean editing;
         public boolean snap = true;
+        public String nextLook;            // label of the "switch look" button, where the look shows one
     }
 
     /** "xp" or "jeep": also the key the layout is saved under. */

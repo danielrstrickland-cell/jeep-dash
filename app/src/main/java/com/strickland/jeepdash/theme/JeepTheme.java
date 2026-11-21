@@ -244,7 +244,7 @@ public final class JeepTheme implements Theme {
             x = pill(c, "snap", x, top, s.snap ? "SNAP ON" : "SNAP OFF", false, false) - 10;
             pill(c, "add", x, top, "+ GAUGE", false, false);
         } else {
-            x = pill(c, "switch", x, top, "XP STYLE", true, false) - 10;
+            x = pill(c, "switch", x, top, s.nextLook == null ? "XP STYLE" : s.nextLook, true, false) - 10;
             x = pill(c, "menu", x, top, "SETUP", false, false) - 10;
             x = pill(c, "logs", x, top, "LOGS", false, false) - 10;
             if (s.canEdit) pill(c, "edit", x, top, "EDIT", false, false);

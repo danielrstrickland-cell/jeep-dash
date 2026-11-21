@@ -104,3 +104,60 @@ The app also uses slow-speed requests (`14 46` throttle percent, `14 42`, `1a 03
 
 `Protocols.allowed()` is the complete list of what the dash may send: the set-up commands above, generic
 mode 01 reads and Jeep-line F4 reads. `PollRunner` refuses anything else.
+
+## Porsche Cayenne Turbo (2003): KWP2000 on the K-line
+
+From a capture of the GearWrench app on the car (engine off, then idling and revved). The app first tries
+CAN and gets no answer; the engine computer answers on the K-line. Read-only, like the Jeep: the dash
+replays the line setup and sends only "read measured values" requests.
+
+Setup, in order (dongle configuration unless noted):
+
+    60 06 00                               stop any keep-alive left running
+    60 05 01 01
+    60 01 09 c5 02
+    60 02 00 00 28 b0 00 08                10400 baud
+    60 03 00 64 01 f4 00 37 00 05
+    60 03 03 e8 03 e8 00 37 00 05
+    61 05 1e 01 02 02 00 41 00 00 00 05    5-baud wake-up of address 01 (engine); answers 01 00 02 ef 8f
+    60 04 00 05 81 10 f1 3e c0 01 f4 01    the dongle sends "tester present" every 500 ms from here on
+    60 06 ff                               keep-alive on
+    60 03 00 32 01 f4 00 37 00 05
+
+Read one group (service 21, local identifier = group number), about 185 ms per read, 3005 reads in the
+capture with one unanswered (the last, as the link dropped):
+
+    61 04 00 06 82 10 f1 21 <group> <sum> 01
+    -> 9a f1 10 61 <group> <8 x (kind a b)> <sum>
+
+Each value is three bytes. The kind byte says how a and b become a reading, so the computer states its own
+units. Kinds the dash uses, all but volts checked against the GearWrench app's screen at idle:
+
+| Kind | Reading |
+|------|---------|
+| 01 | engine speed, a x b x 0.2 rpm |
+| 05 | temperature, a x (b - 100) x 0.1 degC |
+| 07 | road speed, a x b x 0.01 km/h |
+| 12 | pressure, a x b x 0.04 mbar |
+| 15 | volts, a x b x 0.001 |
+| 1a | temperature, b - a degC |
+| 22 | angle, (b - 128) x 0.01 x a degrees |
+
+Where the dash's values sit (group, slot from 0):
+
+| Value | Group | Slot | Checked against the vendor app |
+|-------|-------|------|--------------------------------|
+| Engine speed | 0a | 0 | 920 rpm |
+| Battery volts | 0a | 1 | not shown there; 13.6 to 13.8 V running |
+| Road speed | 0a | 2 | 0 mph (stationary only) |
+| Coolant | 0b | 1 | 104.0 F |
+| Intake air | 0b | 2 | 75.2 F |
+| Camshaft right, left | 14 | 1, 2 | -6.00, -5.00 |
+| Manifold pressure | 16 | 3 | not shown; 1000 mbar engine off, 260 to 380 at idle |
+| Outside air pressure | 16 | 4 | not shown; steady 1000 mbar |
+| Oil temperature | 16 | 6 | 98.6 F |
+| Boost target ("Standard Boost Pressure") | 3b | 3 | 14.50 psi |
+| Boost sensor | 3b | 6 | not shown; 970 to 1010 mbar at idle |
+
+The dash's boost gauge is manifold pressure minus outside air pressure (both in group 16). It has not been
+seen under boost yet.

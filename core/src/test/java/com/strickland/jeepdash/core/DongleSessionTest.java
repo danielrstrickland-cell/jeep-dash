@@ -108,4 +108,12 @@ public class DongleSessionTest {
     }
 
     static int seqOf(byte[] f) { return ((f[2] & 0xff) << 8) | (f[3] & 0xff); }
+
+    public static void wakeUpReplyComesAsTypeTwo() throws Exception {
+        // captured from the dongle: the 5-baud wake-up answers with payload type 02 carrying the keywords
+        FakeLink l = link(seq -> new String[]{ACK, "02 00 02 08 08 00 01 cc"});
+        DongleSession.Result r = l.session.send(Hex.bytes(Protocols.GENERIC_INIT), true, 1000);
+        T.ok(!r.timedOut, "does not wait for a type-01 reply that never comes");
+        T.eq(Hex.bytes("08 08"), r.data, "keywords");
+    }
 }

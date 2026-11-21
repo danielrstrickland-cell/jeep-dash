@@ -20,7 +20,6 @@ import java.util.Random;
  */
 final class SwirlLook implements VizPainter.Extra {
     private static final int SHRINK = 3;                 // the trails are drawn at a third of the screen size
-    private static final float TRAIL_SECONDS = 0.55f;
     private static final int DROPS = 28;
 
     private Bitmap front, back;
@@ -86,10 +85,12 @@ final class SwirlLook implements VizPainter.Extra {
         body = 0.13f * (1 + 0.25f * p.bass + 0.15f * p.beat);
         boolean hit = p.beat > 0.9f && lastBeat <= 0.9f;
         lastBeat = p.beat;
+        boolean drops = p.tune.on(4, "drops");
+        if (!drops) java.util.Arrays.fill(dropLive, false);
         if (hit) {
             if (++beats % 4 == 0) direction = -direction;             // every fourth hit the spin turns round
             shock = body;
-            for (int n = 0, i = 0; i < DROPS && n < 7; i++) {
+            for (int n = 0, i = 0; drops && i < DROPS && n < 7; i++) {
                 if (dropLive[i]) continue;
                 double a = random.nextDouble() * 2 * Math.PI;
                 float speed = 0.55f + random.nextFloat() * 0.5f;
@@ -101,7 +102,7 @@ final class SwirlLook implements VizPainter.Extra {
                 n++;
             }
         }
-        angle += direction * (0.25f + 1.6f * p.vu + 1.2f * p.beat) * dt;
+        angle += direction * (0.25f + 1.6f * p.vu + 1.2f * p.beat) * p.tune.get(4, "spin") * dt;
         if (shock >= 0 && (shock += 0.9f * dt) > 0.9f) shock = -1;
         for (int i = 0; i < DROPS; i++) {
             if (!dropLive[i]) continue;
@@ -127,15 +128,15 @@ final class SwirlLook implements VizPainter.Extra {
         Canvas c = backCanvas;
 
         // 1. the last frame: a little larger, a little turned, a little dimmer
-        float keep = (float) Math.exp(-dt / TRAIL_SECONDS);
+        float keep = (float) Math.exp(-dt / p.tune.get(4, "trail"));
         for (int i = 0; i < 20; i++) fadeValues[i] = 0;
         fadeValues[0] = fadeValues[6] = fadeValues[12] = keep;
         fadeValues[4] = fadeValues[9] = fadeValues[14] = -2;          // so dim trails reach black
         fadeValues[18] = 1;
         fade.set(fadeValues);
         copy.setColorFilter(new ColorMatrixColorFilter(fade));
-        float zoom = 1 + (0.012f + 0.05f * p.bass + 0.06f * p.beat) * frames;
-        float turn = direction * (0.35f + 1.2f * p.vu + 2.5f * p.beat) * frames;
+        float zoom = 1 + (0.012f + 0.05f * p.bass + 0.06f * p.beat) * p.tune.get(4, "zoom") * frames;
+        float turn = direction * (0.35f + 1.2f * p.vu + 2.5f * p.beat) * p.tune.get(4, "spin") * frames;
         c.drawColor(0xFF000000);
         c.save();
         c.translate(cx, cy);

@@ -39,4 +39,11 @@ public class LiveValuesTest {
         v.put("rpm", 710, 30000);
         T.eq(null, v.get("rpm", 40000), "the old hold is gone too");
     }
+
+    public static void aReadingKnowsWhenItWasTaken() {
+        LiveValues v = new LiveValues();
+        T.ok(v.timeOf("speed") == null, "never read");
+        v.put("speed", 30, 1234);
+        T.eq(1234L, v.timeOf("speed"), "the time it was put");
+    }
 }

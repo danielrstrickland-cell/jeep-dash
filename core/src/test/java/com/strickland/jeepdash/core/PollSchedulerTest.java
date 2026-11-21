@@ -164,4 +164,20 @@ public class PollSchedulerTest {
         T.eq(3, g.get("coolant"), "coolant comes round every third read now");
         T.eq(2, g.get("map_v"), "map_v at most two reads apart");
     }
+
+    public static void tabletValuesNeverMoveTheDongle() {
+        PollScheduler s = new PollScheduler(60000);
+        s.setActive(java.util.Arrays.asList("rpm", "gps_mph", "g_force"));
+        long now = 0;
+        for (int i = 0; i < 400; i++, now += 250) {
+            PollScheduler.Step st = s.next(now);
+            T.ok(st.kind != PollScheduler.Kind.SWITCH_TO_GENERIC && st.kind != PollScheduler.Kind.READ_GENERIC,
+                    "stays on the Jeep line, step " + i);
+            if (st.param != null) T.eq("rpm", st.param.id, "only the engine value is requested");
+        }
+        T.ok(s.slowIds().isEmpty(), "nothing waits on the other line");
+        s.setActive(java.util.Arrays.asList("gps_mph"));
+        T.ok(!s.hasJeepLineValues(), "a tablet-only screen asks the Jeep for nothing");
+        T.ok(s.next(now).param == null, "no read");
+    }
 }

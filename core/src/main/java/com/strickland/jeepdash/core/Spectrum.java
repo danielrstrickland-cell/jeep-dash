@@ -13,6 +13,8 @@ public final class Spectrum {
     private final float[] re, im, window, rawDb, level, peak, peakAge;
     private final int[] edge;                       // band b is bins edge[b] .. edge[b+1]-1
     private final double binHz;
+    /** 1 = normal; 2 makes bars and caps drop twice as fast. Set by the screen, read while analysing. */
+    public volatile float fallSpeed = 1;
     private float ceilDb = FLOOR_DB, vuCeilDb = FLOOR_DB, vu, bass, bassAvg, beat;
 
     public Spectrum(int sampleRate, int fftSize, int bands) {
@@ -74,15 +76,16 @@ public final class Spectrum {
         ceilDb = Math.max(Math.max(frameMax, FLOOR_DB), ceilDb - CEIL_FALL_DB * dt);
 
         int lows = Math.max(1, bands / 6);
+        float fall = fallSpeed;
         float lowSum = 0;
         for (int b = 0; b < bands; b++) {
             float t = clamp((rawDb[b] - (ceilDb - RANGE_DB)) / RANGE_DB);
-            level[b] = Math.max(t, level[b] - BAR_FALL * dt);
+            level[b] = Math.max(t, level[b] - BAR_FALL * fall * dt);
             if (level[b] >= peak[b]) {
                 peak[b] = level[b];
                 peakAge[b] = 0;
             } else if ((peakAge[b] += dt) > PEAK_HOLD) {
-                peak[b] = Math.max(level[b], peak[b] - PEAK_FALL * dt);
+                peak[b] = Math.max(level[b], peak[b] - PEAK_FALL * fall * dt);
             }
             if (b < lows) lowSum += t;
         }

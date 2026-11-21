@@ -64,6 +64,23 @@ public class SpectrumTest {
         T.near(0, pk[b], 0.0001, "and the cap has come down");
     }
 
+    public static void fallSpeedSetsHowFastBarsDrop() {
+        int b = new Spectrum(RATE, N, BANDS).bandOf(1000);
+        float[] lv = new float[BANDS], pk = new float[BANDS];
+        Spectrum fast = new Spectrum(RATE, N, BANDS);
+        fast.fallSpeed = 2;
+        fast.feed(tone(1000, 8000), 0.023f);
+        fast.feed(new short[N], 0.1f);
+        fast.copy(lv, pk);
+        T.near(0.64, lv[b], 0.02, "twice as fast");
+        Spectrum slow = new Spectrum(RATE, N, BANDS);
+        slow.fallSpeed = 0.5f;
+        slow.feed(tone(1000, 8000), 0.023f);
+        slow.feed(new short[N], 0.1f);
+        slow.copy(lv, pk);
+        T.near(0.91, lv[b], 0.02, "half as fast");
+    }
+
     public static void aBassHitIsABeatAndASteadyNoteIsNot() {
         Spectrum s = new Spectrum(RATE, N, BANDS);
         for (int i = 0; i < 20; i++) s.feed(tone(2000, 6000), 0.023f);

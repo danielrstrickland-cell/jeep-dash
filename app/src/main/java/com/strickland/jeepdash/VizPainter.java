@@ -8,7 +8,12 @@ import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 
-/** Draws the music visualizer: five looks, seven colour profiles, 16 to 96 bars. Only graphics, no Android views. */
+import com.strickland.jeepdash.core.VizTune;
+
+/**
+ * Draws the music visualizer: five looks, seven colour profiles, 16 to 96 bars, and the drop-down TUNE panel
+ * that adjusts the look on screen. Only graphics, no Android views.
+ */
 public final class VizPainter {
     public static final int BANDS = 96;                              // how finely the sound is analysed
     public static final int[] COUNTS = {16, 24, 32, 48, 64, 96};    // how many bars are drawn
@@ -27,7 +32,7 @@ public final class VizPainter {
     private static final Typeface BOLD = Typeface.create(Typeface.DEFAULT, Typeface.BOLD);
     private static final String[] MARKS = {"-20", "-10", "-7", "-5", "-3", "0", "+3"};
     private static final float[] MARK_AT = {0f, 0.22f, 0.36f, 0.48f, 0.60f, 0.72f, 1f};
-    private static final int[] FACE = {0xFFFFF4CF, 0xFFE7BE5F};
+    private static final int[] GLASS = {0xFF1B1D22, 0xFF050506};
     private static final float[] FACE_STOPS = {0f, 1f};
     private static final float[] SWEEP_STOPS = {0f, 0.5f, 1f};
 
@@ -45,6 +50,11 @@ public final class VizPainter {
     public int look, color, shown = 32;
     public String message;               // shown at the bottom (microphone not allowed yet)
     public final RectF dashButton = new RectF(), colorButton = new RectF(), slider = new RectF();
+    public VizTune tune = new VizTune(); // per-look settings from the TUNE panel
+    public boolean tuneOpen;
+    public final RectF tuneButton = new RectF(), panel = new RectF(), resetButton = new RectF();
+    private final RectF[] rows = new RectF[8];
+    private float trackLeft, trackRight;
 
     private final Paint paint = new Paint();
     private final RectF rect = new RectF();
@@ -53,29 +63,35 @@ public final class VizPainter {
     private float needleL, needleR, hue = 200;
 
     public void draw(Canvas c, int w, int h, float dt, float seconds) {
+        float gain = tune.get(look, "gain");
+        vu = clamp(vu * gain);
+        bass = clamp(bass * gain);
         palette(dt, seconds);
         fill(0xFF000000);
         c.drawRect(0, 0, w, h, paint);
         // the room lights up with the bass
         paint.setShader(new RadialGradient(w / 2f, h, h * 0.95f, pal[0], pal[0] & 0x00FFFFFF, Shader.TileMode.CLAMP));
-        paint.setAlpha(Math.min(255, (int) (40 + 110 * bass + 90 * beat)));
+        paint.setAlpha(Math.min(255, (int) ((40 + 110 * bass + 90 * beat) * tune.get(look, "glow"))));
         c.drawRect(0, 0, w, h, paint);
 
-        group(dt);
+        group(dt, gain);
+        boolean caps = tune.on(look, "caps");
         if (look == 4 && swirl != null) swirl.draw(c, w, h, dt, seconds, this);
         else if (look == 2) meters(c, w, h, dt);
-        else if (look == 3) ring(c, w, h);
-        else if (look == 1) smooth(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f);
-        else bars(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, 30);
+        else if (look == 3) ring(c, w, h, caps);
+        else if (look == 1) smooth(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, tune.get(1, "width"), caps);
+        else bars(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, 30, tune.get(0, "width"), caps);
 
         float u = h / 800f;
         pill(c, dashButton, 18 * u, 16 * u, "DASH", u);
         pill(c, colorButton, dashButton.right + 12 * u, 16 * u, "COLORS: " + COLORS[color].toUpperCase(), u);
+        pill(c, tuneButton, colorButton.right + 12 * u, 16 * u, tuneOpen ? "TUNE \u25B4" : "TUNE \u25BE", u);
         slider(c, w, u);
         text(c, LOOKS[look].toUpperCase(), w - 22 * u, 46 * u, 24 * u, 0x99FFFFFF, Paint.Align.RIGHT);
         if (rpm != null)
             text(c, Math.round(rpm) + " rpm", w - 22 * u, 78 * u, 22 * u, pal[2], Paint.Align.RIGHT);
         if (message != null) text(c, message, w / 2f, h - 30 * u, 26 * u, 0xFFFFFFFF, Paint.Align.CENTER);
+        if (tuneOpen) tunePanel(c, w, u);
     }
 
     private void palette(float dt, float seconds) {
@@ -94,7 +110,7 @@ public final class VizPainter {
     }
 
     /** Folds the analysed bands into the bars on screen and glides them between sound frames. */
-    private void group(float dt) {
+    private void group(float dt, float gain) {
         float k = 1 - (float) Math.exp(-dt * 28);
         for (int j = 0; j < shown; j++) {
             int from = j * BANDS / shown, to = Math.max(from + 1, (j + 1) * BANDS / shown);
@@ -103,15 +119,15 @@ public final class VizPainter {
                 lv = Math.max(lv, levels[b]);
                 pk = Math.max(pk, peaks[b]);
             }
-            disp[j] += (lv - disp[j]) * k;
-            dpeak[j] += (pk - dpeak[j]) * k;
+            disp[j] += (clamp(lv * gain) - disp[j]) * k;
+            dpeak[j] += (clamp(pk * gain) - dpeak[j]) * k;
         }
     }
 
     // ---- look 1: retro LED blocks with falling peak caps ----
 
-    private void bars(Canvas c, float left, float right, float top, float base, int segs) {
-        float slot = (right - left) / shown, bw = slot * 0.78f, sh = (base - top) / segs;
+    private void bars(Canvas c, float left, float right, float top, float base, int segs, float width, boolean caps) {
+        float slot = (right - left) / shown, bw = slot * width, sh = (base - top) / segs;
         float gap = Math.max(1.5f, sh * 0.22f);
         fill(0);
         for (int b = 0; b < shown; b++) {
@@ -122,7 +138,7 @@ public final class VizPainter {
                 paint.setColor(s < lit ? mix((float) s / (segs - 1)) : 0xFF151515);
                 c.drawRect(x, y + gap, x + bw, y + sh, paint);
             }
-            if (dpeak[b] > 0.03f) {
+            if (caps && dpeak[b] > 0.03f) {
                 float y = base - Math.min(segs, Math.round(dpeak[b] * segs) + 1) * sh;
                 paint.setColor(pal[3]);
                 c.drawRect(x, y + gap, x + bw, y + gap + Math.max(3, sh * 0.3f), paint);
@@ -132,8 +148,8 @@ public final class VizPainter {
 
     // ---- look 2: smooth bars, one continuous colour sweep, redrawn at the screen's full refresh rate ----
 
-    private void smooth(Canvas c, float left, float right, float top, float base) {
-        float slot = (right - left) / shown, bw = slot * 0.72f, full = base - top;
+    private void smooth(Canvas c, float left, float right, float top, float base, float width, boolean caps) {
+        float slot = (right - left) / shown, bw = slot * width, full = base - top;
         float round = Math.min(bw / 2, full * 0.012f);
         System.arraycopy(pal, 0, sweep, 0, 3);
         Shader colors = new LinearGradient(0, base, 0, top, sweep, SWEEP_STOPS, Shader.TileMode.CLAMP);
@@ -145,7 +161,7 @@ public final class VizPainter {
             c.drawRoundRect(set(x - bw * 0.14f, base - tall - bw * 0.14f, x + bw * 1.14f, base), round * 1.6f, round * 1.6f, paint);
             paint.setAlpha(255);
             c.drawRoundRect(set(x, base - tall, x + bw, base), round, round, paint);
-            if (dpeak[b] > 0.03f) {
+            if (caps && dpeak[b] > 0.03f) {
                 float y = base - dpeak[b] * full - round * 1.5f;
                 fill(pal[3]);
                 c.drawRoundRect(set(x, y - round * 0.5f, x + bw, y + round * 0.5f), round * 0.5f, round * 0.5f, paint);
@@ -153,66 +169,79 @@ public final class VizPainter {
         }
     }
 
-    // ---- look 3: two needle meters, bass on the left, overall level on the right ----
+    // ---- look 3: two dark glass needle meters, bass on the left, overall level on the right ----
 
     private void meters(Canvas c, int w, int h, float dt) {
-        needleL += (bass - needleL) * Math.min(1, dt * 10);
-        needleR += (vu - needleR) * Math.min(1, dt * 10);
-        float mw = w * 0.40f, mh = h * 0.56f, y = h * 0.15f;
+        float speed = Math.min(1, dt * 10 * tune.get(2, "needle"));
+        needleL += (bass - needleL) * speed;
+        needleR += (vu - needleR) * speed;
+        boolean mini = tune.on(2, "mini");
+        float mw = w * 0.40f, mh = h * 0.56f, y = h * (mini ? 0.15f : 0.22f);
         meter(c, w * 0.07f, y, mw, mh, needleL, "BASS");
         meter(c, w * 0.53f, y, mw, mh, needleR, "LEVEL");
-        bars(c, w * 0.07f, w * 0.93f, h * 0.80f, h * 0.95f, 7);
+        if (mini) bars(c, w * 0.07f, w * 0.93f, h * 0.80f, h * 0.95f, 7, 0.78f, true);
     }
 
     private void meter(Canvas c, float x, float y, float mw, float mh, float v, String name) {
-        float pad = mh * 0.035f;
-        fill(0xFF262626);
-        c.drawRoundRect(set(x - pad, y - pad, x + mw + pad, y + mh + pad), pad * 2.4f, pad * 2.4f, paint);
-        paint.setShader(new LinearGradient(0, y, 0, y + mh, FACE, FACE_STOPS, Shader.TileMode.CLAMP));
-        c.drawRoundRect(set(x, y, x + mw, y + mh), pad * 1.6f, pad * 1.6f, paint);
+        float corner = mh * 0.06f, edge = mh * 0.075f;
+        v = clamp(v);
+        fill(0);
+        paint.setShader(new LinearGradient(0, y, 0, y + mh, GLASS, FACE_STOPS, Shader.TileMode.CLAMP));
+        c.drawRoundRect(set(x, y, x + mw, y + mh), corner, corner, paint);
+        stroke(0x30FFFFFF, Math.max(1.5f, mh * 0.004f));
+        c.drawRoundRect(set(x, y, x + mw, y + mh), corner, corner, paint);
 
+        // the scale: a faint track with a red end, lit up to the needle in the profile's colours
         float cx = x + mw / 2, cy = y + mh * 1.08f, r = mh * 0.74f, sweep = 76, from = 270 - sweep / 2;
-        stroke(0xFF1B1B1B, mh * 0.012f);
-        c.drawArc(set(cx - r, cy - r, cx + r, cy + r), from, sweep * 0.72f, false, paint);
-        stroke(0xFFC4161C, mh * 0.03f);
-        c.drawArc(set(cx - r, cy - r, cx + r, cy + r), from + sweep * 0.72f, sweep * 0.28f, false, paint);
+        RectF arc = set(cx - r, cy - r, cx + r, cy + r);
+        stroke(0x24FFFFFF, mh * 0.024f);
+        c.drawArc(arc, from, sweep * 0.72f, false, paint);
+        stroke(0x99FF3B30, mh * 0.024f);
+        c.drawArc(arc, from + sweep * 0.72f, sweep * 0.28f, false, paint);
+        int steps = 30;
+        for (int i = 0; i < steps && (float) i / steps < v; i++) {
+            float t0 = (float) i / steps, t1 = Math.min(v, (float) (i + 1) / steps);
+            stroke(t0 > 0.72f ? 0xFFFF3B30 : mix(t0 / 0.72f), mh * 0.024f);
+            c.drawArc(arc, from + sweep * t0, sweep * (t1 - t0) + 0.3f, false, paint);
+        }
         for (int i = 0; i < MARKS.length; i++) {
             double a = Math.toRadians(-sweep / 2 + sweep * MARK_AT[i]);
             float sx = (float) Math.sin(a), sy = (float) -Math.cos(a);
-            int ink = MARK_AT[i] > 0.72f ? 0xFFC4161C : 0xFF1B1B1B;
-            stroke(ink, mh * 0.012f);
-            c.drawLine(cx + sx * r, cy + sy * r, cx + sx * r * 1.06f, cy + sy * r * 1.06f, paint);
-            text(c, MARKS[i], cx + sx * r * 1.13f, cy + sy * r * 1.13f + mh * 0.02f, mh * 0.058f, ink, Paint.Align.CENTER);
+            int ink = MARK_AT[i] > 0.72f ? 0xFFFF5A50 : 0xAAFFFFFF;
+            stroke(ink, mh * 0.008f);
+            c.drawLine(cx + sx * r * 1.035f, cy + sy * r * 1.035f, cx + sx * r * 1.07f, cy + sy * r * 1.07f, paint);
+            text(c, MARKS[i], cx + sx * r * 1.14f, cy + sy * r * 1.14f + mh * 0.02f, mh * 0.05f, ink, Paint.Align.CENTER);
         }
-        text(c, "VU", cx, y + mh * 0.68f, mh * 0.12f, 0xFF1B1B1B, Paint.Align.CENTER);
-        text(c, name, cx, y + mh * 0.80f, mh * 0.065f, 0xFF5A4A22, Paint.Align.CENTER);
+        text(c, name, x + edge, y + mh * 0.14f, mh * 0.062f, 0xAAFFFFFF, Paint.Align.LEFT);
+        text(c, String.valueOf(Math.round(v * 100)), x + edge, y + mh * 0.92f, mh * 0.13f, 0xFFFFFFFF, Paint.Align.LEFT);
 
         boolean hot = v > 0.9f;
-        float lx = x + mw - mh * 0.11f, ly = y + mh * 0.12f;
+        float lx = x + mw - edge - mh * 0.02f, ly = y + mh * 0.115f;
         if (hot) {
             fill(0);
-            paint.setShader(new RadialGradient(lx, ly, mh * 0.11f, 0xAAFF2A1A, 0x00FF2A1A, Shader.TileMode.CLAMP));
+            paint.setShader(new RadialGradient(lx, ly, mh * 0.11f, 0xAAFF3B30, 0x00FF3B30, Shader.TileMode.CLAMP));
             c.drawCircle(lx, ly, mh * 0.11f, paint);
         }
-        fill(hot ? 0xFFFF2A1A : 0xFF6B1A14);
-        c.drawCircle(lx, ly, mh * 0.035f, paint);
+        fill(hot ? 0xFFFF3B30 : 0xFF3A1512);
+        c.drawCircle(lx, ly, mh * 0.026f, paint);
 
-        double a = Math.toRadians(-sweep / 2 + sweep * clamp(v));
+        // the needle rises out of the bottom edge: a soft glow in the profile's colour under a thin white line
+        double a = Math.toRadians(-sweep / 2 + sweep * v);
         float sx = (float) Math.sin(a), sy = (float) -Math.cos(a);
-        float r0 = (cy - (y + mh * 0.95f)) / -sy;                  // start under the cover strip
-        stroke(0xFF151515, mh * 0.014f);
-        c.drawLine(cx + sx * r0, cy + sy * r0, cx + sx * r * 1.03f, cy + sy * r * 1.03f, paint);
-        fill(0xFF262626);
-        c.drawRoundRect(set(x, y + mh * 0.88f, x + mw, y + mh), pad * 1.6f, pad * 1.6f, paint);
-        fill(pal[1]);
-        c.drawRect(x + mw * 0.3f, y + mh * 0.93f, x + mw * 0.3f + mw * 0.4f * clamp(v), y + mh * 0.95f, paint);
+        float r0 = (cy - (y + mh)) / -sy;
+        stroke(mix(v) & 0x66FFFFFF, mh * 0.04f);
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        c.drawLine(cx + sx * (r0 + mh * 0.03f), cy + sy * (r0 + mh * 0.03f), cx + sx * r * 0.97f, cy + sy * r * 0.97f, paint);
+        stroke(0xFFFFFFFF, mh * 0.010f);
+        c.drawLine(cx + sx * r0, cy + sy * r0, cx + sx * r * 0.985f, cy + sy * r * 0.985f, paint);
     }
 
     // ---- look 4: the spectrum wrapped round a circle that swells with the bass ----
 
-    private void ring(Canvas c, int w, int h) {
+    private void ring(Canvas c, int w, int h, boolean caps) {
         float m = Math.min(w, h), cx = w / 2f, cy = h * 0.53f;
-        float r = m * 0.18f * (1 + 0.12f * bass + 0.07f * beat), maxLen = m * 0.20f;
+        float r = m * 0.18f * tune.get(3, "size") * (1 + (0.12f * bass + 0.07f * beat) * tune.get(3, "pulse"));
+        float maxLen = Math.max(m * 0.04f, Math.min(m * 0.20f, m * 0.46f - r - m * 0.048f));   // keep it on the screen
         int n = shown * 2;
         fill(0);
         paint.setShader(new RadialGradient(cx, cy, r, mix(0.5f), pal[0] & 0x00FFFFFF, Shader.TileMode.CLAMP));
@@ -229,7 +258,7 @@ public final class VizPainter {
             stroke(mix(disp[b] * 0.65f + (float) b / shown * 0.35f), thick);
             paint.setStrokeCap(Paint.Cap.ROUND);
             c.drawLine(cx + dx * r1, cy + dy * r1, cx + dx * r2, cy + dy * r2, paint);
-            if (dpeak[b] > 0.03f) {
+            if (caps && dpeak[b] > 0.03f) {
                 float rp = r1 + m * 0.02f + dpeak[b] * maxLen;
                 fill(pal[3]);
                 c.drawCircle(cx + dx * rp, cy + dy * rp, thick * 0.3f, paint);
@@ -244,7 +273,7 @@ public final class VizPainter {
     // ---- small helpers ----
 
     private void slider(Canvas c, int w, float u) {
-        float x0 = w * 0.40f, x1 = w * 0.60f, y = 39 * u;
+        float x1 = w * 0.60f, x0 = Math.min(x1 - 120 * u, Math.max(w * 0.40f, tuneButton.right + 44 * u)), y = 39 * u;
         slider.set(x0 - 30 * u, y - 30 * u, x1 + 30 * u, y + 30 * u);
         int at = 0;
         for (int i = 0; i < COUNTS.length; i++) if (COUNTS[i] == shown) at = i;
@@ -264,6 +293,69 @@ public final class VizPainter {
     public void slide(float x) {
         float t = clamp((x - (slider.left + slider.height() / 2)) / (slider.width() - slider.height()));
         shown = COUNTS[Math.round(t * (COUNTS.length - 1))];
+    }
+
+    // ---- the TUNE panel: one row per setting of the look on screen ----
+
+    private void tunePanel(Canvas c, int w, float u) {
+        VizTune.Knob[] knobs = VizTune.knobs(look);
+        float rowH = 62 * u, pw = Math.min(w * 0.5f, 560 * u), x = dashButton.left, y = tuneButton.bottom + 12 * u;
+        panel.set(x, y, x + pw, y + rowH * knobs.length + 78 * u);
+        fill(0xE6101114);
+        c.drawRoundRect(panel, 20 * u, 20 * u, paint);
+        stroke(0x33FFFFFF, 1.5f * u);
+        c.drawRoundRect(panel, 20 * u, 20 * u, paint);
+        trackLeft = x + 26 * u;
+        trackRight = x + pw - 26 * u;
+        for (int i = 0; i < knobs.length && i < rows.length; i++) {
+            VizTune.Knob k = knobs[i];
+            float top = y + 12 * u + i * rowH;
+            if (rows[i] == null) rows[i] = new RectF();
+            rows[i].set(x, top, x + pw, top + rowH);
+            text(c, k.label, trackLeft, top + 26 * u, 19 * u, 0xDDFFFFFF, Paint.Align.LEFT);
+            if (k.toggle) {
+                boolean on = tune.on(look, k.id);
+                float sw = 62 * u, sh = 30 * u, sx = trackRight - sw, sy = top + 16 * u;
+                fill(on ? pal[1] : 0x44FFFFFF);
+                c.drawRoundRect(set(sx, sy, sx + sw, sy + sh), sh / 2, sh / 2, paint);
+                fill(0xFFFFFFFF);
+                c.drawCircle(on ? sx + sw - sh / 2 : sx + sh / 2, sy + sh / 2, sh * 0.38f, paint);
+                continue;
+            }
+            float v = tune.get(look, k.id), ty = top + 46 * u, knob = trackLeft + (trackRight - trackLeft) * tune.at(look, k.id);
+            String shows = k.id.equals("trail") ? Math.round(v * 100) / 100f + " s" : Math.round(v * 100) + "%";
+            text(c, shows, trackRight, top + 26 * u, 19 * u, 0x99FFFFFF, Paint.Align.RIGHT);
+            stroke(0x44FFFFFF, 5 * u);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            c.drawLine(trackLeft, ty, trackRight, ty, paint);
+            stroke(pal[1], 5 * u);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            c.drawLine(trackLeft, ty, knob, ty, paint);
+            fill(0xFFFFFFFF);
+            c.drawCircle(knob, ty, 11 * u, paint);
+        }
+        float by = panel.bottom - 58 * u;
+        pill(c, resetButton, trackLeft, by, "RESET", u);
+        text(c, LOOKS[look].toUpperCase() + "  \u00B7  tap outside to close", trackRight, by + 30 * u, 17 * u, 0x88FFFFFF, Paint.Align.RIGHT);
+    }
+
+    /** Which row of the open panel is at this point, or -1. */
+    public int rowAt(float x, float y) {
+        int n = Math.min(VizTune.knobs(look).length, rows.length);
+        for (int i = 0; i < n; i++) if (rows[i] != null && rows[i].contains(x, y)) return i;
+        return -1;
+    }
+
+    public boolean rowIsSwitch(int row) { return VizTune.knobs(look)[row].toggle; }
+
+    /** A finger at x on a slider row moves its knob there. */
+    public void dragRow(int row, float x) {
+        tune.setAt(look, VizTune.knobs(look)[row].id, (x - trackLeft) / (trackRight - trackLeft));
+    }
+
+    public void flipRow(int row) {
+        String id = VizTune.knobs(look)[row].id;
+        tune.set(look, id, tune.on(look, id) ? 0 : 1);
     }
 
     private void pill(Canvas c, RectF where, float x, float y, String label, float u) {

@@ -317,7 +317,7 @@ public final class XpTheme implements Theme {
         p.setColor(0xff154f12);
         c.drawRoundRect(Art.rect(swX, by, swX + swW, by + bh), 3, 3, p);
         Art.swapIcon(c, swX + 12, by + 8, 16, 0xffffffff);
-        Art.text(c, "Jeep style", swX + 36, Art.centre(by + bh / 2, 14, Art.BOLD), 14, 0xffffffff, Art.BOLD, Paint.Align.LEFT);
+        Art.text(c, s.nextLook == null ? "Jeep style" : s.nextLook, swX + 36, Art.centre(by + bh / 2, 14, Art.BOLD), 14, 0xffffffff, Art.BOLD, Paint.Align.LEFT);
         buttons.put("switch", new RectF(swX, top, swX + swW, h));
 
         // task buttons between the Dash button and the switch

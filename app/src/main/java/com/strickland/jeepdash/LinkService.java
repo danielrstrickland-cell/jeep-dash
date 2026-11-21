@@ -26,7 +26,9 @@ import com.strickland.jeepdash.core.DongleSession;
 import com.strickland.jeepdash.core.DriveLogWriter;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.core.KwpRunner;
 import com.strickland.jeepdash.core.PollRunner;
+import com.strickland.jeepdash.core.Poller;
 import com.strickland.jeepdash.core.PollScheduler;
 import com.strickland.jeepdash.core.Trace;
 
@@ -90,13 +92,13 @@ public class LinkService extends Service {
     private volatile boolean anyBound;
     private volatile boolean foreground;
     private volatile DongleSession session;
-    private volatile PollRunner runner;
+    private volatile Poller runner;
     private volatile int readsPerSec;
     private Thread worker;
     private ScheduledExecutorService ticker;
 
     // ticker-thread state
-    private PollRunner countedRunner;
+    private Poller countedRunner;
     private int countedReads;
     private long lastUsefulMs;
     private DriveLogWriter log;
@@ -285,8 +287,8 @@ public class LinkService extends Service {
         generation++;
         final DongleSession s = session;
         final Thread w = worker;
-        PollRunner r = runner;
-        if (s != null && r != null && r.onGenericLine()) {
+        Poller r = runner;
+        if (s != null && r != null && r.keepAliveRunning()) {
             // Give the worker a moment to finish its read and turn the dongle's keep-alive off (leave()).
             main.postDelayed(() -> {
                 s.close();
@@ -410,7 +412,9 @@ public class LinkService extends Service {
         reader.setDaemon(true);
         reader.start();
 
-        PollRunner r = new PollRunner(s, new PollScheduler(OTHER_LINE_EVERY_MS), values, LinkService::now);
+        // the Porsche speaks a different language on a different line; which car this is was chosen in SETUP
+        Poller r = Catalog.porsche() ? new KwpRunner(s, values, LinkService::now)
+                : new PollRunner(s, new PollScheduler(OTHER_LINE_EVERY_MS), values, LinkService::now);
         r.setTrace(trace);
         activeDirty = false;
         r.setActive(active);
@@ -423,10 +427,10 @@ public class LinkService extends Service {
                     activeDirty = false;
                     r.setActive(active);
                 }
-                PollScheduler.Kind k = r.step();
+                boolean busy = r.poll();
                 live = true;
                 setStatus(Status.LIVE, r.vehicleAnswering() ? "" : KEY_OFF_DETAIL);
-                if (k == PollScheduler.Kind.IDLE) pause(200);
+                if (!busy) pause(200);
             }
             r.leave();
         } catch (IOException e) {
@@ -462,7 +466,7 @@ public class LinkService extends Service {
 
         // once a second
         long t = now();
-        PollRunner r = runner;
+        Poller r = runner;
         if (r != countedRunner) {
             countedRunner = r;
             countedReads = 0;
