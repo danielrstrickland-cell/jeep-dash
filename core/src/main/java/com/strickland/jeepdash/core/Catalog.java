@@ -6,7 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Every value the dash knows how to read. Adding a newly mapped Jeep value is one row here. */
+/** Every value the dash can show. Adding a newly mapped Jeep value is one row here. */
 public final class Catalog {
     private Catalog() { }
 
@@ -71,9 +71,27 @@ public final class Catalog {
                 null, null, 0, 5, 1));
         add(new Param("knock_v", "Knock sensor", "V", new int[]{0x1f}, (a, b) -> a * VOLT,
                 null, null, 0, 5, 2));
+
+        // From the tablet's GPS and accelerometer (see Motion); the dongle is never asked for these.
+        add(Param.tablet("gps_mph", "GPS speed", "mph", 0, 110));
+        add(Param.tablet("g_force", "G-force", "g", 0, 1.2));
+        add(Param.tablet("g_accel", "Pull / braking", "g", -1, 1));
+        add(Param.tablet("zero_sixty", "0-60 time", "s", 0, 20));
+        add(Param.tablet("speedo_err", "Speedo vs GPS", "%", -15, 15));
     }
 
-    public static List<Param> all() { return Collections.unmodifiableList(new ArrayList<>(BY_ID.values())); }
+    // Which car the app is set up for. Chosen once in SETUP and applied when the app starts, so every screen
+    // and the link service agree; the Jeep is the default.
+    private static volatile boolean porsche;
 
-    public static Param byId(String id) { return BY_ID.get(id); }
+    public static void useVehicle(String id) { porsche = "porsche".equals(id); }
+
+    public static boolean porsche() { return porsche; }
+
+    public static List<Param> all() {
+        if (porsche) return PorscheCatalog.all();
+        return Collections.unmodifiableList(new ArrayList<>(BY_ID.values()));
+    }
+
+    public static Param byId(String id) { return porsche ? PorscheCatalog.byId(id) : BY_ID.get(id); }
 }
