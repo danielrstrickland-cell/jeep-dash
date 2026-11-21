@@ -14,6 +14,12 @@ public final class LiveValues {
 
     public void put(String id, double value, long nowMs) { latest.put(id, new double[]{value, nowMs}); }
 
+    /** When the latest reading of this value was put, or null if there is none. */
+    public Long timeOf(String id) {
+        double[] e = latest.get(id);
+        return e == null ? null : (long) e[1];
+    }
+
     /** Gives one value its own stale time (slow values read only every few seconds). */
     public void setStaleMs(String id, long ms) { staleMs.put(id, ms); }
 
