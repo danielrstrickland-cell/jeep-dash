@@ -13,6 +13,7 @@ public final class TestMain {
             CatalogTest.class,
             LiveValuesTest.class,
             PollSchedulerTest.class,
+            PollRunnerTest.class,
             LayoutTest.class,
             LayoutCodecTest.class,
             DriveLogWriterTest.class,

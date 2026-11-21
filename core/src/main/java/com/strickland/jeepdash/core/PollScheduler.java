@@ -86,6 +86,14 @@ public final class PollScheduler {
         return new Step(Kind.READ_SCI, sciCycle.get(sciIdx++ % sciCycle.size()));
     }
 
+    /** Forgets which line the dongle is on, so the next step sets the line up again. */
+    public synchronized void resetBus() {
+        bus = null;
+        queue.clear();
+    }
+
+    public long genericEveryMs() { return genericEveryMs; }
+
     /** The line the dongle is on after the last step handed out (null before the first switch). */
     public synchronized Source currentBus() { return bus; }
 }

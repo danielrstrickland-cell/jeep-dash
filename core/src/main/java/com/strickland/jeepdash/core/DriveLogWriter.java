@@ -18,10 +18,13 @@ public final class DriveLogWriter {
         out.write(sb.append('\n').toString());
     }
 
-    public void row(long timeMs, LiveValues v) throws IOException {
+    public void row(long timeMs, LiveValues v) throws IOException { row(timeMs, timeMs, v); }
+
+    /** timeMs goes in the first column; nowMs is the clock the readings were stamped with. */
+    public void row(long timeMs, long nowMs, LiveValues v) throws IOException {
         StringBuilder sb = new StringBuilder().append(timeMs);
         for (String id : ids) {
-            Double d = v.get(id, timeMs);
+            Double d = v.get(id, nowMs);
             sb.append(',');
             if (d != null) sb.append(d);
         }

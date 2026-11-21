@@ -52,4 +52,14 @@ public class PollSchedulerTest {
     public static void emptyIsIdle() {
         T.eq("IDLE", show(sched().next(0)), "nothing active");
     }
+
+    public static void resetBusForcesSetupAgain() {
+        PollScheduler s = new PollScheduler(10000);
+        s.setActive(java.util.Arrays.asList("rpm"));
+        s.next(0);
+        T.eq(PollScheduler.Kind.READ_SCI, s.next(1).kind, "reading");
+        s.resetBus();
+        T.eq(null, s.currentBus(), "bus unknown after reset");
+        T.eq(PollScheduler.Kind.SWITCH_TO_SCI, s.next(2).kind, "sets up SCI again");
+    }
 }
