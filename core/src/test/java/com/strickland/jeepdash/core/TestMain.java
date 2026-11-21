@@ -18,6 +18,7 @@ public final class TestMain {
             LayoutCodecTest.class,
             DriveLogWriterTest.class,
             ReleaseTagTest.class,
+            SpectrumTest.class,
     };
 
     public static void main(String[] args) {
