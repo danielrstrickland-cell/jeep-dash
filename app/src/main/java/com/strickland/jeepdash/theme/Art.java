@@ -130,7 +130,7 @@ final class Art {
         Scale s = new Scale();
         switch (p.id) {
             case "rpm": s.major = 1000; s.minor = 250; s.labelEvery = 1000; s.labelDiv = 1000; s.redFrom = 5000.0; break;
-            case "speed": s.major = 10; s.minor = 5; s.labelEvery = 20; break;
+            case "speed": case "gps_mph": s.major = 10; s.minor = 5; s.labelEvery = 20; break;
             case "coolant": s.major = 40; s.minor = 20; s.labelEvery = 80; s.redFrom = 230.0; break;
             case "iat": s.major = 50; s.minor = 25; s.labelEvery = 100; break;
             case "spark": s.major = 10; s.minor = 5; s.labelEvery = 25; break;
