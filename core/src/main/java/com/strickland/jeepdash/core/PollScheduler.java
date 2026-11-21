@@ -98,7 +98,7 @@ public final class PollScheduler {
         boolean needs = false;
         for (String id : new LinkedHashSet<>(paramIds)) {
             Param p = lookup.apply(id);
-            if (p == null) continue;
+            if (p == null || p.tablet) continue;       // tablet values are not the dongle's business
             if (p.sciIds != null) sci.add(p);
             if (p.pid != null) gen.add(p);
             if (p.pid == null) only.add(p);

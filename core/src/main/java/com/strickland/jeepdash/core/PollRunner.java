@@ -11,7 +11,7 @@ import java.util.function.LongSupplier;
  * per step, decoded readings into {@link LiveValues}. Read-only: it sends only what {@link Protocols} lists.
  * Throws IOException when the link is gone so the caller can reconnect.
  */
-public final class PollRunner {
+public final class PollRunner implements Poller {
     /** Consecutive unanswered reads before the line is set up again (key was cycled, engine restarted). */
     static final int MISSES_BEFORE_RESETUP = 6;
     /** Consecutive frames the dongle itself ignores before the link counts as lost. */
@@ -96,6 +96,12 @@ public final class PollRunner {
 
     /** True while the dongle is set up for the generic line (its keep-alive is running). */
     public boolean onGenericLine() { return onLine == Source.GENERIC; }
+
+    @Override
+    public boolean keepAliveRunning() { return onGenericLine(); }
+
+    @Override
+    public boolean poll() throws IOException { return step() != PollScheduler.Kind.IDLE; }
 
     /** Total good readings so far (the caller turns this into reads per second). */
     public int goodReads() { return goodReads; }
