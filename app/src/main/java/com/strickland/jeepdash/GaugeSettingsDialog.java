@@ -43,7 +43,8 @@ final class GaugeSettingsDialog {
         int current = 0;
         for (int i = 0; i < params.size(); i++) {
             Param p = params.get(i);
-            String line = p.pid == null ? "  ·  Jeep line only" : p.sciIds == null ? "  ·  generic line" : "";
+            String line = Catalog.porsche() ? "" : p.tablet ? "  ·  from the tablet"
+                    : p.pid == null ? "  ·  Jeep line only" : p.sciIds == null ? "  ·  generic line" : "";
             names[i] = p.name + " (" + p.unit + ")" + line;
             if (p.id.equals(g.paramId)) current = i;
         }

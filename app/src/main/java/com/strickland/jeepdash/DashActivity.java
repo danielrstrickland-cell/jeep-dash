@@ -26,13 +26,18 @@ import com.strickland.jeepdash.core.GaugeType;
 import com.strickland.jeepdash.core.Layout;
 import com.strickland.jeepdash.core.LayoutCodec;
 import com.strickland.jeepdash.core.LiveValues;
+import com.strickland.jeepdash.core.Motion;
 import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.theme.GtTheme;
 import com.strickland.jeepdash.theme.JeepTheme;
+import com.strickland.jeepdash.theme.RetroTheme;
 import com.strickland.jeepdash.theme.Theme;
 import com.strickland.jeepdash.theme.XpTheme;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 /** The dash screen: binds the link service, owns the look and its saved layout. */
 public class DashActivity extends Activity implements LinkService.Listener, ServiceConnection, DashView.Host {
@@ -42,31 +47,65 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private XpTheme xp;
     private JeepTheme jeep;
     private String look;
+    private String[] looks;                            // the looks this car has, in the order SWITCH steps through
     private LinkService service;
     private boolean bound;
     private boolean sweepPending;                      // start-up needle sweep, once, after the intro
     private long sweepStart;
     private final LiveValues sweepValues = new LiveValues();
+    private final TabletSensors tablet = new TabletSensors(this::onTabletValues);
+    private boolean asking;                            // Android drops a permission request made during another
+    private boolean askedLocation;                     // asked once; a refusal is not argued with
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         prefs = getSharedPreferences("dash", MODE_PRIVATE);
-        look = "jeep".equals(prefs.getString("look", "xp")) ? "jeep" : "xp";
+        looks = Catalog.porsche() ? new String[]{"p_retro", "p_gt"} : new String[]{"xp", "jeep", "retro"};
+        look = prefs.getString(lookKey(), looks[0]);
+        if (!Arrays.asList(looks).contains(look)) look = looks[0];
         xp = new XpTheme(prefs.getString("xp_scheme", "Blue"));
         jeep = new JeepTheme(prefs.getString("jeep_backlight", "White"));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         view = new DashView(this, this);
         view.chrome.canEdit = true;
         view.chrome.snap = prefs.getBoolean("snap", true);
-        view.setTheme(theme());
+        applyLook();
         setContentView(view);
         askPermissions();
         sweepPending = b == null && getIntent().getBooleanExtra("sweep", false);
         if (b == null) UpdateChecker.check(this, buildNumber(), false);
     }
 
-    private Theme theme() { return "jeep".equals(look) ? jeep : xp; }
+    /** Each car remembers its own look. */
+    private static String lookKey() { return Catalog.porsche() ? "look_p" : "look"; }
+
+    private Theme theme() {
+        switch (look) {
+            case "jeep": return jeep;
+            case "retro": case "p_retro": return new RetroTheme(look);
+            case "p_gt": return new GtTheme();
+            default: return xp;
+        }
+    }
+
+    private static String lookName(String id) {
+        switch (id) {
+            case "jeep": return "JEEP STYLE";
+            case "retro": case "p_retro": return "80s DIGITAL";
+            case "p_gt": return "GT STYLE";
+            default: return "XP STYLE";
+        }
+    }
+
+    private String nextLook() { return looks[(Arrays.asList(looks).indexOf(look) + 1) % looks.length]; }
+
+    /** Puts the current look on screen and names the next one on its switch button. */
+    private void applyLook() {
+        String next = lookName(nextLook());
+        view.chrome.nextLook = "xp".equals(look) ? next.charAt(0) + next.substring(1).toLowerCase(java.util.Locale.US) : next;
+        view.setTheme(theme());
+    }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
@@ -102,13 +141,17 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         if (!hasBluetooth()) need.add(Manifest.permission.BLUETOOTH_CONNECT);
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             need.add(Manifest.permission.POST_NOTIFICATIONS);
-        if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), 1);
+        if (need.isEmpty()) return;
+        asking = true;
+        requestPermissions(need.toArray(new String[0]), 1);
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        asking = false;
         startLink();
+        syncTabletSensors();       // location may just have been allowed, or it is now its turn to be asked
     }
 
     private void startLink() {
@@ -128,6 +171,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
 
     @Override
     protected void onStop() {
+        tablet.stop();
         if (service != null) service.removeListener(this);
         service = null;
         if (bound) {
@@ -162,7 +206,50 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
 
     private void pushActiveParams() {
         Layout l = view.layout();
-        if (service != null && l != null) service.setActiveParams(l.activeParamIds());
+        if (service != null && l != null) {
+            Set<String> ids = l.activeParamIds();
+            // Pull, 0-60 and the speedo check are worked out from the Jeep's speed, speed gauge or not.
+            if (Motion.needsJeepSpeed(ids)) ids.add("speed");
+            service.setActiveParams(ids);
+        }
+        syncTabletSensors();
+    }
+
+    // ---------------- the tablet's own sensors ----------------
+
+    /**
+     * The sensors run only while the dash is on screen and shows a value that needs them. Location is asked
+     * for only when a GPS gauge is there, and only once.
+     */
+    private void syncTabletSensors() {
+        Layout l = view.layout();
+        if (service == null || l == null) return;
+        Set<String> ids = l.activeParamIds();
+        boolean any = false;
+        for (String id : ids) {
+            Param p = Catalog.byId(id);
+            if (p != null && p.tablet) any = true;
+        }
+        if (!any) {
+            tablet.stop();
+            return;
+        }
+        boolean gps = Motion.needsGps(ids);
+        if (gps && !asking && !askedLocation
+                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            askedLocation = true;
+            asking = true;
+            // Android 12 and later only offer precise location when approximate is asked for with it.
+            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION}, 2);
+        }
+        tablet.setValues(service.values());
+        tablet.start(this, gps);
+    }
+
+    /** Tablet values do not wait for the dongle: they go to the screen as they are worked out. */
+    private void onTabletValues() {
+        if (service != null && sweepStart == 0) view.setValues(service.values());
     }
 
     // ---------------- look and layout ----------------
@@ -207,10 +294,10 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
 
     private void switchLook() {
         view.chrome.editing = false;
-        look = "jeep".equals(look) ? "xp" : "jeep";
-        prefs.edit().putString("look", look).apply();
+        look = nextLook();
+        prefs.edit().putString(lookKey(), look).apply();
         view.chrome.tab = "gauges";
-        view.setTheme(theme());
+        applyLook();
         loadLayout();
     }
 
@@ -316,50 +403,61 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     }
 
     private void showMenu() {
-        final boolean isXp = "xp".equals(look);
-        final String[] choices = isXp ? XpTheme.SCHEMES : JeepTheme.BACKLIGHTS;
-        final int n = choices.length;
-        String[] items = new String[n + 4];
-        for (int i = 0; i < n; i++) items[i] = (isXp ? "Window colour: " : "Backlight: ") + choices[i];
-        items[n] = "Check for update";
-        items[n + 1] = "Put this look's gauges back to the original layout";
-        items[n + 2] = "Share link log (for troubleshooting)";
-        items[n + 3] = "Music visualizer";
-        new AlertDialog.Builder(this)
-                .setTitle("Jeep Dash  (build " + buildNumber() + ")")
-                .setItems(items, (dlg, which) -> {
-                    if (which == n) {
-                        UpdateChecker.check(this, buildNumber(), true);
-                        return;
-                    }
-                    if (which == n + 1) {
-                        confirmReset();
-                        return;
-                    }
-                    if (which == n + 2) {
-                        shareLinkLog();
-                        return;
-                    }
-                    if (which == n + 3) {
-                        openVisualizer();
-                        return;
-                    }
-                    if (isXp) {
-                        prefs.edit().putString("xp_scheme", choices[which]).apply();
-                        xp.setScheme(choices[which]);
-                    } else {
-                        prefs.edit().putString("jeep_backlight", choices[which]).apply();
-                        jeep.setBacklight(choices[which]);
-                    }
+        final boolean porsche = Catalog.porsche();
+        final List<String> items = new ArrayList<>();
+        final List<Runnable> actions = new ArrayList<>();
+        if ("xp".equals(look)) {
+            for (String scheme : XpTheme.SCHEMES) {
+                items.add("Window colour: " + scheme);
+                actions.add(() -> {
+                    prefs.edit().putString("xp_scheme", scheme).apply();
+                    xp.setScheme(scheme);
                     view.invalidate();
-                })
+                });
+            }
+        } else if ("jeep".equals(look)) {
+            for (String light : JeepTheme.BACKLIGHTS) {
+                items.add("Backlight: " + light);
+                actions.add(() -> {
+                    prefs.edit().putString("jeep_backlight", light).apply();
+                    jeep.setBacklight(light);
+                    view.invalidate();
+                });
+            }
+        }
+        items.add("Check for update");
+        actions.add(() -> UpdateChecker.check(this, buildNumber(), true));
+        items.add("Put this look's gauges back to the original layout");
+        actions.add(this::confirmReset);
+        items.add("Share link log (for troubleshooting)");
+        actions.add(this::shareLinkLog);
+        if (!porsche) {
+            items.add("Music visualizer");
+            actions.add(this::openVisualizer);
+        }
+        items.add(porsche ? "Vehicle: switch to Jeep Grand Cherokee" : "Vehicle: switch to Porsche Cayenne");
+        actions.add(this::confirmVehicle);
+        new AlertDialog.Builder(this)
+                .setTitle((porsche ? "Cayenne Dash" : "Jeep Dash") + "  (build " + buildNumber() + ")")
+                .setItems(items.toArray(new String[0]), (dlg, which) -> actions.get(which).run())
+                .show();
+    }
+
+    /** The other car speaks a different language to the dongle, so the app starts again set up for it. */
+    private void confirmVehicle() {
+        final boolean toPorsche = !Catalog.porsche();
+        new AlertDialog.Builder(this)
+                .setTitle(toPorsche ? "Switch to the Porsche Cayenne?" : "Switch to the Jeep Grand Cherokee?")
+                .setMessage("The app restarts set up for that vehicle. Each vehicle keeps its own looks and gauge layouts.")
+                .setPositiveButton("Switch", (d, w) -> DashApp.switchVehicle(this, toPorsche ? DashApp.PORSCHE : DashApp.JEEP))
+                .setNegativeButton("Cancel", null)
                 .show();
     }
 
     private void confirmReset() {
         new AlertDialog.Builder(this)
                 .setTitle("Original layout")
-                .setMessage("Put the " + ("xp".equals(look) ? "XP" : "Jeep") + " look's gauges back where they started? Your own arrangement for this look is replaced.")
+                .setMessage("Put this look's gauges back where they started? Your own arrangement for this look is replaced.")
                 .setPositiveButton("Reset", (d, w) -> {
                     prefs.edit().remove("layout_" + look).apply();
                     view.chrome.editing = false;
