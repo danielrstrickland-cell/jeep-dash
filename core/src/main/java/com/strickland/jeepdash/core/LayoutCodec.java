@@ -45,7 +45,35 @@ public final class LayoutCodec {
     public static Layout defaultFor(String look, float w, float h) {
         float sx = w / 1280f, sy = h / 800f;
         Layout l = new Layout(w, h);
-        if ("jeep".equals(look)) {
+        if ("retro".equals(look)) {
+            // the Jeep in 1980s digital: tachometer band across the top, big speed in the middle, bars either side
+            put(l, sx, sy, "g1", "rpm", GaugeType.DIAL, 40, 20, 1200, 296);
+            put(l, sx, sy, "g2", "speed", GaugeType.DIGITAL, 430, 330, 420, 270);
+            put(l, sx, sy, "g3", "coolant", GaugeType.BAR, 40, 330, 370, 186);
+            put(l, sx, sy, "g4", "iat", GaugeType.BAR, 40, 530, 370, 186);
+            put(l, sx, sy, "g5", "map_kpa", GaugeType.BAR, 870, 330, 370, 186);
+            put(l, sx, sy, "g6", "throttle", GaugeType.BAR, 870, 530, 370, 186);
+            put(l, sx, sy, "g7", "spark", GaugeType.DIGITAL, 430, 614, 420, 102);
+        } else if ("p_retro".equals(look)) {
+            // the Cayenne in 1980s digital: the same plan with its own nine values
+            put(l, sx, sy, "g1", "rpm", GaugeType.DIAL, 40, 20, 1200, 296);
+            put(l, sx, sy, "g2", "speed", GaugeType.DIGITAL, 430, 330, 420, 232);
+            put(l, sx, sy, "g3", "boost", GaugeType.BAR, 430, 574, 420, 142);
+            String[] left = {"coolant", "oil_temp", "iat"}, right = {"boost_set", "cam_r", "cam_l"};
+            for (int i = 0; i < 3; i++) {
+                put(l, sx, sy, "g" + (4 + i), left[i], GaugeType.BAR, 40, 330 + i * 132, 370, 122);
+                put(l, sx, sy, "g" + (7 + i), right[i], GaugeType.BAR, 870, 330 + i * 132, 370, 122);
+            }
+        } else if ("p_gt".equals(look)) {
+            // three dials across the top (boost, engine speed, road speed), six readouts underneath
+            put(l, sx, sy, "g1", "boost", GaugeType.DIAL, 24, 54, 380, 380);
+            put(l, sx, sy, "g2", "rpm", GaugeType.DIAL, 420, 20, 440, 448);
+            put(l, sx, sy, "g3", "speed", GaugeType.DIAL, 876, 54, 380, 380);
+            String[] row = {"coolant", "oil_temp", "iat", "cam_r", "cam_l", "boost_set"};
+            float colW = (1280 - 2 * 24 - 5 * 12) / 6f;
+            for (int i = 0; i < row.length; i++)
+                put(l, sx, sy, "g" + (4 + i), row[i], GaugeType.DIGITAL, 24 + i * (colW + 12), 484, colW, 236);
+        } else if ("jeep".equals(look)) {
             // cluster panel is 40..1240 x 40..600; big dials centred in it, four small ones between them
             put(l, sx, sy, "g1", "speed", GaugeType.DIAL, 80, 130, 380, 380);
             put(l, sx, sy, "g2", "rpm", GaugeType.DIAL, 820, 130, 380, 380);
