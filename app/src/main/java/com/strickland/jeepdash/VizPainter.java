@@ -53,7 +53,7 @@ public final class VizPainter {
 
         if (look == 1) meters(c, w, h, dt);
         else if (look == 2) ring(c, w, h);
-        else bars(c, w * 0.04f, w * 0.96f, h * 0.13f, h * 0.80f, 26, true);
+        else bars(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, 30);
 
         float u = h / 800f;
         pill(c, dashButton, 18 * u, 16 * u, "DASH", u);
@@ -79,9 +79,9 @@ public final class VizPainter {
         pal[3] = 0xFFFFFFFF;
     }
 
-    // ---- look 1: LED bars with falling peak caps and a floor reflection ----
+    // ---- look 1: clean LED bars with falling peak caps ----
 
-    private void bars(Canvas c, float left, float right, float top, float base, int segs, boolean mirror) {
+    private void bars(Canvas c, float left, float right, float top, float base, int segs) {
         float slot = (right - left) / BANDS, bw = slot * 0.78f, sh = (base - top) / segs;
         float gap = Math.max(1.5f, sh * 0.22f);
         fill(0);
@@ -90,13 +90,8 @@ public final class VizPainter {
             int lit = Math.round(levels[b] * segs);
             for (int s = 0; s < segs; s++) {
                 float y = base - (s + 1) * sh;
-                boolean on = s < lit;
-                paint.setColor(on ? mix((float) s / (segs - 1)) : 0xFF151515);
+                paint.setColor(s < lit ? mix((float) s / (segs - 1)) : 0xFF151515);
                 c.drawRect(x, y + gap, x + bw, y + sh, paint);
-                if (mirror && on && s < 9) {
-                    paint.setAlpha((int) (80 * (1 - s / 9f)));
-                    c.drawRect(x, base + s * sh * 0.6f + gap, x + bw, base + (s + 1) * sh * 0.6f, paint);
-                }
             }
             if (peaks[b] > 0.03f) {
                 float y = base - Math.min(segs, Math.round(peaks[b] * segs) + 1) * sh;
@@ -114,7 +109,7 @@ public final class VizPainter {
         float mw = w * 0.40f, mh = h * 0.56f, y = h * 0.15f;
         meter(c, w * 0.07f, y, mw, mh, needleL, "BASS");
         meter(c, w * 0.53f, y, mw, mh, needleR, "LEVEL");
-        bars(c, w * 0.07f, w * 0.93f, h * 0.80f, h * 0.95f, 7, false);
+        bars(c, w * 0.07f, w * 0.93f, h * 0.80f, h * 0.95f, 7);
     }
 
     private void meter(Canvas c, float x, float y, float mw, float mh, float v, String name) {
