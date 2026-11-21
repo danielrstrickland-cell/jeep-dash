@@ -1,6 +1,6 @@
 # Jeep Dash — design
 
-Date: 2026-11-20 · Owner: Daniel Strickland · Status: draft for approval
+Date: 2026-11-20 · Owner: Daniel Strickland · Status: approved by Daniel 2026-11-20
 
 ## Intent
 
@@ -98,8 +98,8 @@ One Android app, Java, no third-party libraries (same toolchain as the working t
   and a connection light + clock. Color schemes Blue / Olive / Silver.
 - Classic Jeep: black cluster, white/green/amber backlight choice, orange needles, green readout strip.
 - Status always visible: connected / reconnecting / no data, and the live reads-per-second.
-- Per-gauge warning limit (Claude's call, suggested earlier, not yet confirmed by Daniel): the gauge flashes
-  past a limit Daniel sets; off by default.
+- **Per-gauge warning flash** (confirmed by Daniel): a setting on each gauge, on/off plus a limit he sets;
+  the gauge flashes past it. Off by default.
 
 ### Drive logging
 Starts with the connection, one CSV per drive (timestamp + every polled value), stored on the tablet,
