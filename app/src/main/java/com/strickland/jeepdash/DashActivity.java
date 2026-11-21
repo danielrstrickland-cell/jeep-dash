@@ -44,6 +44,9 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private String look;
     private LinkService service;
     private boolean bound;
+    private boolean sweepPending;                      // start-up needle sweep, once, after the intro
+    private long sweepStart;
+    private final LiveValues sweepValues = new LiveValues();
 
     @Override
     protected void onCreate(Bundle b) {
@@ -59,6 +62,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         view.setTheme(theme());
         setContentView(view);
         askPermissions();
+        sweepPending = b == null && getIntent().getBooleanExtra("sweep", false);
         if (b == null) UpdateChecker.check(this, buildNumber(), false);
     }
 
@@ -153,7 +157,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     @Override
     public void onValues(LiveValues v) {
         if (service != null) view.chrome.readsPerSec = service.readsPerSecond();
-        view.setValues(v);
+        if (sweepStart == 0) view.setValues(v);
     }
 
     private void pushActiveParams() {
@@ -164,7 +168,28 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     // ---------------- look and layout ----------------
 
     @Override
-    public void onDashSize(float wDp, float hDp) { loadLayout(); }
+    public void onDashSize(float wDp, float hDp) {
+        loadLayout();
+        if (sweepPending) {
+            sweepPending = false;
+            sweepStart = LinkService.now();
+            view.postOnAnimation(this::sweepFrame);
+        }
+    }
+
+    /** Start-up self-test: every gauge runs to the top of its scale and back, then real readings take over. */
+    private void sweepFrame() {
+        long now = LinkService.now();
+        float t = (now - sweepStart) / 1600f;
+        if (t >= 1) {
+            sweepStart = 0;
+            return;
+        }
+        double up = Math.sin(Math.PI * t);
+        for (Param p : Catalog.all()) sweepValues.put(p.id, p.min + (p.max - p.min) * up, now);
+        view.setValues(sweepValues);
+        view.postOnAnimation(this::sweepFrame);
+    }
 
     private void loadLayout() {
         if (view.widthDp() <= 0) return;
