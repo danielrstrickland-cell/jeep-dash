@@ -55,6 +55,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private final LiveValues sweepValues = new LiveValues();
     private final TabletSensors tablet = new TabletSensors(this::onTabletValues);
     private boolean asking;                            // Android drops a permission request made during another
+    private boolean askedToLook;                       // asked once for leave to search for an unpaired dongle
     private boolean askedLocation;                     // asked once; a refusal is not argued with
 
     @Override
@@ -196,6 +197,13 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         view.chrome.status = s;
         view.chrome.detail = detail;
         view.invalidate();
+        // The dongle is not paired and the app may not search for it yet: ask, once.
+        if (LinkService.NEED_SCAN_DETAIL.equals(detail) && !askedToLook && !asking) {
+            askedToLook = true;
+            asking = true;
+            requestPermissions(Build.VERSION.SDK_INT >= 31 ? new String[]{Manifest.permission.BLUETOOTH_SCAN}
+                    : new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, 3);
+        }
     }
 
     @Override

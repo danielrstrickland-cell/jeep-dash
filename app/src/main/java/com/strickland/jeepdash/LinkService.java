@@ -10,6 +10,9 @@ import android.app.Service;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -39,6 +42,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -70,6 +74,9 @@ public class LinkService extends Service {
     private static final int NOTIFICATION_ID = 1;
     private static final long OTHER_LINE_EVERY_MS = 60000;
     private static final long RETRY_MS = 3000;
+    /** Shown when the dongle is not paired and the app may not look for it yet; the dash asks when it sees this. */
+    static final String NEED_SCAN_DETAIL = "Allow the permission so the app can find the dongle";
+    private static final int SCAN_SECONDS = 13;
     private static final long IDLE_STOP_MS = 120000;       // dash closed and no data from the Jeep: let go of the dongle
     private static final long DATA_GAP_MS = 30000;         // rows keep going through short gaps (generic blocks, stalls)
     private static final long LOG_CLOSE_MS = 300000;       // 5 minutes without data ends the drive's log
@@ -316,6 +323,8 @@ public class LinkService extends Service {
                 }
                 String[] why = {""};
                 BluetoothDevice dev = findDongle(prefs.getString("address", null), why);
+                // Not paired: some car radios can only pair phones, so look for the dongle ourselves.
+                if (dev == null && UNPAIRED.equals(why[0])) dev = lookForDongle(why, gen);
                 if (dev == null) {
                     setStatus(Status.SEARCHING, why[0]);
                     pause(RETRY_MS);
@@ -325,6 +334,8 @@ public class LinkService extends Service {
                 AndroidByteLink link = connect(dev, prefs.getInt("mode", -1), failures, gen);
                 if (link == null) {
                     failures++;
+                    // An address remembered from an unpaired dongle may be a dongle that is gone: look again.
+                    if (failures >= 3 && !paired(dev)) prefs.edit().remove("address").apply();
                     setStatus(everLive ? Status.RECONNECTING : Status.BUSY, BUSY_DETAIL);
                     pause(RETRY_MS);
                     continue;
@@ -368,8 +379,88 @@ public class LinkService extends Service {
                 if (d.getAddress().equals(rememberedAddress)) remembered = d;
             }
         }
-        if (remembered == null) why[0] = "Pair the GWBT dongle in Bluetooth settings";
-        return remembered;
+        if (remembered != null) return remembered;
+        // found by looking last time and never paired: go straight back to it
+        if (rememberedAddress != null && BluetoothAdapter.checkBluetoothAddress(rememberedAddress))
+            return adapter.getRemoteDevice(rememberedAddress);
+        why[0] = UNPAIRED;
+        return null;
+    }
+
+    private static final String UNPAIRED = "Pair the GWBT dongle in Bluetooth settings";
+
+    @SuppressLint("MissingPermission")
+    private static boolean paired(BluetoothDevice d) {
+        try {
+            return d.getBondState() == BluetoothDevice.BOND_BONDED;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private boolean mayLook() {
+        if (Build.VERSION.SDK_INT >= 31)
+            return checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
+        // before Android 12, seeing nearby Bluetooth devices needs the location permission
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                || (Build.VERSION.SDK_INT < 29
+                && checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED);
+    }
+
+    /**
+     * Searches nearby Bluetooth devices for the dongle by its name, for a few seconds. It is connected to
+     * directly afterwards; the serial link does not need the device to be on the paired list first.
+     */
+    @SuppressLint("MissingPermission")
+    @SuppressWarnings("deprecation")
+    private BluetoothDevice lookForDongle(String[] why, int gen) {
+        if (!mayLook()) {
+            why[0] = NEED_SCAN_DETAIL;
+            return null;
+        }
+        BluetoothManager bm = getSystemService(BluetoothManager.class);
+        BluetoothAdapter adapter = bm == null ? null : bm.getAdapter();
+        if (adapter == null) return null;
+        setStatus(Status.SEARCHING, "Looking for the GWBT dongle nearby");
+        final BluetoothDevice[] found = {null};
+        final CountDownLatch seen = new CountDownLatch(1);
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                BluetoothDevice d = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                String name = intent.getStringExtra(BluetoothDevice.EXTRA_NAME);
+                try {
+                    if (name == null && d != null) name = d.getName();
+                } catch (RuntimeException ignored) {
+                    // no name to go by
+                }
+                if (d != null && name != null && name.startsWith("GWBT-")) {
+                    found[0] = d;
+                    seen.countDown();
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
+        filter.addAction(BluetoothDevice.ACTION_NAME_CHANGED);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+        else registerReceiver(receiver, filter);
+        try {
+            adapter.startDiscovery();
+            for (int i = 0; i < SCAN_SECONDS * 2 && alive(gen); i++)
+                if (seen.await(500, TimeUnit.MILLISECONDS)) break;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            try {
+                adapter.cancelDiscovery();      // a search still running would slow the connection down
+            } catch (RuntimeException ignored) {
+                // nothing to cancel
+            }
+            unregisterReceiver(receiver);
+        }
+        if (found[0] == null) why[0] = "No GWBT dongle found nearby. Is it plugged in with the key on?";
+        else note("found the dongle by looking (not paired)");
+        return found[0];
     }
 
     /** Tries the way that worked last time first; every fourth failed round tries all three ways. */
