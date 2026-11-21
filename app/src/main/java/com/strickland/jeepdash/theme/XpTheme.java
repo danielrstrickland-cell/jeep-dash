@@ -144,7 +144,7 @@ public final class XpTheme implements Theme {
                 Paint pt = Art.paint();
                 pt.setColor(0xffb9b4a0);
                 c.drawRect(left, base + 14, left + room, base + 16, pt);
-                String from = p.slow() ? "Generic reading: updates every 10 seconds" : "From the Jeep engine computer";
+                String from = "From the Jeep engine computer";
                 Art.text(c, from, left, base + 40, Art.fit(from, 15, room, Art.SANS), SOFT, Art.SANS, Paint.Align.LEFT);
             }
         } else {
@@ -250,7 +250,7 @@ public final class XpTheme implements Theme {
 
     static String statusText(Chrome s) {
         switch (s.status) {
-            case LIVE: return s.detail.isEmpty() ? "Dongle connected" : "Key off?";
+            case LIVE: return s.detail.isEmpty() ? "Dongle connected" : "Waiting for engine";
             case CONNECTING: return "Connecting";
             case SETTING_UP: return "Setting up";
             case RECONNECTING: return "Reconnecting";

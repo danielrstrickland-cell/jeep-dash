@@ -66,7 +66,7 @@ public class LinkService extends Service {
 
     private static final String CHANNEL = "link";
     private static final int NOTIFICATION_ID = 1;
-    private static final long GENERIC_EVERY_MS = 10000;
+    private static final long OTHER_LINE_EVERY_MS = 60000;
     private static final long RETRY_MS = 3000;
     private static final long IDLE_STOP_MS = 120000;       // dash closed and no data from the Jeep: let go of the dongle
     private static final long DATA_GAP_MS = 30000;         // rows keep going through short gaps (generic blocks, stalls)
@@ -283,9 +283,19 @@ public class LinkService extends Service {
     private synchronized void stopWorker() {
         running = false;
         generation++;
-        DongleSession s = session;
-        if (s != null) s.close();
-        if (worker != null) worker.interrupt();
+        final DongleSession s = session;
+        final Thread w = worker;
+        PollRunner r = runner;
+        if (s != null && r != null && r.onGenericLine()) {
+            // Give the worker a moment to finish its read and turn the dongle's keep-alive off (leave()).
+            main.postDelayed(() -> {
+                s.close();
+                if (w != null) w.interrupt();
+            }, 1500);
+        } else {
+            if (s != null) s.close();
+            if (w != null) w.interrupt();
+        }
         worker = null;
     }
 
@@ -400,7 +410,7 @@ public class LinkService extends Service {
         reader.setDaemon(true);
         reader.start();
 
-        PollRunner r = new PollRunner(s, new PollScheduler(GENERIC_EVERY_MS), values, LinkService::now);
+        PollRunner r = new PollRunner(s, new PollScheduler(OTHER_LINE_EVERY_MS), values, LinkService::now);
         r.setTrace(trace);
         activeDirty = false;
         r.setActive(active);
@@ -418,12 +428,14 @@ public class LinkService extends Service {
                 setStatus(Status.LIVE, r.vehicleAnswering() ? "" : KEY_OFF_DETAIL);
                 if (k == PollScheduler.Kind.IDLE) pause(200);
             }
+            r.leave();
         } catch (IOException e) {
             note("link lost: " + e.getMessage());
         } finally {
             if (runner == r) runner = null;
             if (session == s) session = null;
             s.close();
+            values.clear();       // nothing on screen may outlive the link it came over
         }
         return live;
     }

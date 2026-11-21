@@ -224,7 +224,7 @@ public final class JeepTheme implements Theme {
 
     static String linkText(Chrome s) {
         switch (s.status) {
-            case LIVE: return s.detail.isEmpty() ? "LINK ● " + s.readsPerSec + "/s" : "KEY OFF?";
+            case LIVE: return s.detail.isEmpty() ? "LINK ● " + s.readsPerSec + "/s" : "KEY OFF";
             case CONNECTING: return "CONNECTING";
             case SETTING_UP: return "SETTING UP";
             case RECONNECTING: return "RECONNECTING";
