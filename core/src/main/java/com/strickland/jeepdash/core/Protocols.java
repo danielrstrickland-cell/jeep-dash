@@ -43,17 +43,31 @@ public final class Protocols {
      */
     public static final String SCI_SLOW = "60 02 00 00 1e 84 00 08 ff";
 
+    /**
+     * Porsche Cayenne (KWP2000 on the K-line, 10400 baud), as captured from the GearWrench app: line setup,
+     * the 5-baud wake-up of the engine computer (address 01, answers with keywords ef 8f), then the dongle's
+     * own "still here" message every 500 ms so the computer keeps the session open.
+     */
+    public static final String[] KWP_SETUP_PRE = {
+            "60 05 01 01", "60 01 09 c5 02", "60 02 00 00 28 b0 00 08", "60 03 00 64 01 f4 00 37 00 05",
+            "60 03 03 e8 03 e8 00 37 00 05"};
+    public static final String KWP_INIT = "61 05 1e 01 02 02 00 41 00 00 00 05";
+    public static final String[] KWP_SETUP_POST = {
+            "60 04 00 05 81 10 f1 3e c0 01 f4 01", "60 06 ff", "60 03 00 32 01 f4 00 37 00 05"};
+
     private static final java.util.Set<String> FIXED = new java.util.HashSet<>();
     static {
         String[][] groups = {GENERIC_SETUP_PRE, {GENERIC_INIT, GENERIC_FIRST_QUERY}, GENERIC_SETUP_POST,
-                {STOP_KEEPALIVE, SCI_FAST, SCI_SLOW}, GENERIC_LEAVE, SCI_SETUP};
+                {STOP_KEEPALIVE, SCI_FAST, SCI_SLOW}, GENERIC_LEAVE, SCI_SETUP,
+                KWP_SETUP_PRE, {KWP_INIT}, KWP_SETUP_POST};
         for (String[] g : groups) for (String c : g) FIXED.add(c);
     }
 
     /**
      * The read-only list. True only for the captured line-setup commands above, a generic "show current
-     * data" request (mode 01) and a Jeep-line read of the F4 live-data table. Nothing that clears codes,
-     * runs a test or writes anything can pass, whatever the rest of the app asks for.
+     * data" request (mode 01), a Jeep-line read of the F4 live-data table and a Porsche "read measured
+     * values" request (service 21) to the engine computer. Nothing that clears codes, runs a test or writes
+     * anything can pass, whatever the rest of the app asks for.
      */
     public static boolean allowed(byte[] inner) {
         if (inner == null || inner.length < 2) return false;
@@ -61,6 +75,10 @@ public final class Protocols {
         if ((inner[0] & 0xff) != 0x61 || (inner[1] & 0xff) != 0x04 || inner.length < 7) return false;
         int n = ((inner[2] & 0xff) << 8) | (inner[3] & 0xff);
         if (inner.length != 4 + n + 1 || inner[inner.length - 1] != 0x01) return false;
+        if (n == 6 && (inner[4] & 0xff) == 0x82) {      // 82 10 f1 21 <group> <sum>
+            return (inner[5] & 0xff) == 0x10 && (inner[6] & 0xff) == 0xf1 && (inner[7] & 0xff) == 0x21
+                    && (inner[9] & 0xff) == ((0x82 + 0x10 + 0xf1 + 0x21 + (inner[8] & 0xff)) & 0xff);
+        }
         if (n == 6) {                                   // 68 6a f1 01 <pid> <sum>
             return (inner[4] & 0xff) == 0x68 && (inner[5] & 0xff) == 0x6a && (inner[6] & 0xff) == 0xf1
                     && (inner[7] & 0xff) == 0x01
