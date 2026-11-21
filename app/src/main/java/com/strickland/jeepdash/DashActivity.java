@@ -18,10 +18,15 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.Toast;
 
+import com.strickland.jeepdash.core.Catalog;
+import com.strickland.jeepdash.core.GaugeSpec;
+import com.strickland.jeepdash.core.GaugeType;
 import com.strickland.jeepdash.core.Layout;
 import com.strickland.jeepdash.core.LayoutCodec;
 import com.strickland.jeepdash.core.LiveValues;
+import com.strickland.jeepdash.core.Param;
 import com.strickland.jeepdash.theme.JeepTheme;
 import com.strickland.jeepdash.theme.Theme;
 import com.strickland.jeepdash.theme.XpTheme;
@@ -49,9 +54,12 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         jeep = new JeepTheme(prefs.getString("jeep_backlight", "White"));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         view = new DashView(this, this);
+        view.chrome.canEdit = true;
+        view.chrome.snap = prefs.getBoolean("snap", true);
         view.setTheme(theme());
         setContentView(view);
         askPermissions();
+        if (b == null) UpdateChecker.check(this, buildNumber(), false);
     }
 
     private Theme theme() { return "jeep".equals(look) ? jeep : xp; }
@@ -164,7 +172,16 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         pushActiveParams();
     }
 
+    private void saveLayout() {
+        Layout l = view.layout();
+        if (l == null) return;
+        prefs.edit().putString("layout_" + look, LayoutCodec.encode(l)).apply();
+        pushActiveParams();
+        view.invalidate();
+    }
+
     private void switchLook() {
+        view.chrome.editing = false;
         look = "jeep".equals(look) ? "xp" : "jeep";
         prefs.edit().putString("look", look).apply();
         view.chrome.tab = "gauges";
@@ -178,11 +195,74 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case "switch": switchLook(); break;
             case "tab:gauges": view.chrome.tab = "gauges"; view.invalidate(); break;
             case "tab:viz": view.chrome.tab = "viz"; view.invalidate(); break;
-            case "logs": showMessage("Drive log", "Your drives are being saved to Downloads/JeepDash on this tablet. The list and Share button arrive in the next build."); break;
+            case "logs": showLogs(); break;
+            case "edit":
+                view.chrome.tab = "gauges";
+                view.chrome.editing = true;
+                view.invalidate();
+                Toast.makeText(this, "Drag a gauge to move it. Drag its corner to resize. Tap it for settings.", Toast.LENGTH_LONG).show();
+                break;
+            case "done":
+                view.chrome.editing = false;
+                saveLayout();
+                break;
+            case "snap":
+                view.chrome.snap = !view.chrome.snap;
+                prefs.edit().putBoolean("snap", view.chrome.snap).apply();
+                view.invalidate();
+                break;
+            case "add": addGauge(); break;
             case "menu": showMenu(); break;
             case "status": showStatus(); break;
             default: break;
         }
+    }
+
+    @Override
+    public void onGaugeTap(String key) {
+        Layout l = view.layout();
+        GaugeSpec g = l == null ? null : l.find(key);
+        if (g != null) GaugeSettingsDialog.show(this, l, g, this::saveLayout);
+    }
+
+    @Override
+    public void onLayoutEdited() { saveLayout(); }
+
+    private void addGauge() {
+        Layout l = view.layout();
+        if (l == null) return;
+        int n = 1;
+        while (l.find("g" + n) != null) n++;
+        String param = "rpm";
+        for (Param p : Catalog.all()) {
+            if (!l.activeParamIds().contains(p.id)) { param = p.id; break; }
+        }
+        GaugeSpec g = new GaugeSpec("g" + n, param, GaugeType.DIAL,
+                view.widthDp() / 2 - 130, view.heightDp() / 2 - 130, 260, 260);
+        l.add(g);
+        saveLayout();
+        GaugeSettingsDialog.show(this, l, g, this::saveLayout);
+    }
+
+    private void showLogs() {
+        final List<Uri> logs = DriveLogStore.list(this);
+        if (logs.isEmpty()) {
+            showMessage("Drive logs", "No drives saved yet. A log starts by itself when the engine computer answers, and is kept in Downloads/JeepDash on this tablet.");
+            return;
+        }
+        String[] names = new String[logs.size()];
+        for (int i = 0; i < names.length; i++) names[i] = DriveLogStore.label(this, logs.get(i));
+        new AlertDialog.Builder(this)
+                .setTitle("Drive logs: tap one to share")
+                .setItems(names, (dlg, which) -> {
+                    try {
+                        DriveLogStore.share(this, logs.get(which));
+                    } catch (RuntimeException e) {
+                        showMessage("Drive logs", "Could not open the share sheet. The file is in Downloads/JeepDash.");
+                    }
+                })
+                .setNegativeButton("Close", null)
+                .show();
     }
 
     private void showMessage(String title, String message) {
@@ -208,13 +288,24 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private void showMenu() {
         final boolean isXp = "xp".equals(look);
         final String[] choices = isXp ? XpTheme.SCHEMES : JeepTheme.BACKLIGHTS;
-        String[] items = new String[choices.length + 1];
-        for (int i = 0; i < choices.length; i++) items[i] = (isXp ? "Window colour: " : "Backlight: ") + choices[i];
-        items[choices.length] = "Share link log (for troubleshooting)";
+        final int n = choices.length;
+        String[] items = new String[n + 3];
+        for (int i = 0; i < n; i++) items[i] = (isXp ? "Window colour: " : "Backlight: ") + choices[i];
+        items[n] = "Check for update";
+        items[n + 1] = "Put this look's gauges back to the original layout";
+        items[n + 2] = "Share link log (for troubleshooting)";
         new AlertDialog.Builder(this)
                 .setTitle("Jeep Dash  (build " + buildNumber() + ")")
                 .setItems(items, (dlg, which) -> {
-                    if (which == choices.length) {
+                    if (which == n) {
+                        UpdateChecker.check(this, buildNumber(), true);
+                        return;
+                    }
+                    if (which == n + 1) {
+                        confirmReset();
+                        return;
+                    }
+                    if (which == n + 2) {
                         shareLinkLog();
                         return;
                     }
@@ -227,6 +318,19 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                     }
                     view.invalidate();
                 })
+                .show();
+    }
+
+    private void confirmReset() {
+        new AlertDialog.Builder(this)
+                .setTitle("Original layout")
+                .setMessage("Put the " + ("xp".equals(look) ? "XP" : "Jeep") + " look's gauges back where they started? Your own arrangement for this look is replaced.")
+                .setPositiveButton("Reset", (d, w) -> {
+                    prefs.edit().remove("layout_" + look).apply();
+                    view.chrome.editing = false;
+                    loadLayout();
+                })
+                .setNegativeButton("Cancel", null)
                 .show();
     }
 

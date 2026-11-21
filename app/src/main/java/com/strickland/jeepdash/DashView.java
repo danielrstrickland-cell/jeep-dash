@@ -2,6 +2,8 @@ package com.strickland.jeepdash;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.DashPathEffect;
+import android.graphics.Paint;
 import android.view.MotionEvent;
 import android.view.View;
 
@@ -23,7 +25,15 @@ public class DashView extends View {
         void onDashSize(float wDp, float hDp);
         /** A button of the look was tapped (see Theme.hit). */
         void onDashAction(String action);
+        /** Edit mode: a gauge was tapped (not dragged). */
+        void onGaugeTap(String key);
+        /** Edit mode: a gauge was moved or resized. */
+        void onLayoutEdited();
     }
+
+    private static final float HANDLE = 48;           // dp: the resize corner
+    private static final float SLOP = 10;             // dp: movement below this is a tap
+    private static final float GRID = 16;
 
     private static final double NEEDLE_MS = 160;      // needle catch-up time constant
 
@@ -37,6 +47,11 @@ public class DashView extends View {
     private long lastFrameMs;
     private float wDp, hDp;
     private String downAction;
+    private String dragKey;
+    private boolean resizing, moved;
+    private float downX, downY, lastX, lastY;
+    private final Paint editPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final DashPathEffect dashes = new DashPathEffect(new float[]{10, 6}, 0);
 
     public DashView(Context c, Host host) {
         super(c);
@@ -98,16 +113,98 @@ public class DashView extends View {
                 theme.drawGauge(c, g, p, v, s, warn && blink, chrome.editing);
             }
         }
+        if (chrome.editing && layout != null && "gauges".equals(chrome.tab)) drawEditMarks(c);
         theme.drawChrome(c, wDp, hDp, chrome);
         c.restore();
         if (moving) postInvalidateOnAnimation();
         else if (flashing) postInvalidateDelayed(100);
     }
 
+    /** Dashed outline and a corner handle on every gauge while editing. */
+    private void drawEditMarks(Canvas c) {
+        for (GaugeSpec g : layout.gauges) {
+            boolean active = g.key.equals(dragKey);
+            editPaint.setStyle(Paint.Style.STROKE);
+            editPaint.setPathEffect(null);
+            editPaint.setStrokeWidth(4);
+            editPaint.setColor(0x99000000);
+            c.drawRect(g.x, g.y, g.x + g.w, g.y + g.h, editPaint);
+            editPaint.setStrokeWidth(2);
+            editPaint.setPathEffect(dashes);
+            editPaint.setColor(active ? 0xffffffff : 0xffffd400);
+            c.drawRect(g.x, g.y, g.x + g.w, g.y + g.h, editPaint);
+            editPaint.setPathEffect(null);
+            editPaint.setStyle(Paint.Style.FILL);
+            float hx = g.x + g.w, hy = g.y + g.h;
+            editPaint.setColor(0xcc000000);
+            c.drawRect(hx - 26, hy - 26, hx, hy, editPaint);
+            editPaint.setColor(active ? 0xffffffff : 0xffffd400);
+            c.drawRect(hx - 22, hy - 22, hx - 4, hy - 4, editPaint);
+        }
+    }
+
+    private GaugeSpec gaugeAt(float x, float y) {
+        for (int i = layout.gauges.size() - 1; i >= 0; i--) {
+            GaugeSpec g = layout.gauges.get(i);
+            if (x >= g.x && x <= g.x + g.w && y >= g.y && y <= g.y + g.h) return g;
+        }
+        return null;
+    }
+
+    private boolean editTouch(MotionEvent e, float x, float y) {
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN: {
+                GaugeSpec g = gaugeAt(x, y);
+                if (g == null) return false;
+                dragKey = g.key;
+                resizing = x > g.x + g.w - HANDLE && y > g.y + g.h - HANDLE;
+                moved = false;
+                downX = lastX = x;
+                downY = lastY = y;
+                invalidate();
+                return true;
+            }
+            case MotionEvent.ACTION_MOVE:
+                if (dragKey == null) return false;
+                if (!moved && Math.hypot(x - downX, y - downY) < SLOP) return true;
+                moved = true;
+                if (resizing) layout.resize(dragKey, x - lastX, y - lastY);
+                else layout.move(dragKey, x - lastX, y - lastY);
+                lastX = x;
+                lastY = y;
+                invalidate();
+                return true;
+            case MotionEvent.ACTION_UP: {
+                if (dragKey == null) return false;
+                String key = dragKey;
+                dragKey = null;
+                if (moved) {
+                    if (chrome.snap) layout.snapOne(key, GRID);
+                    host.onLayoutEdited();
+                } else {
+                    performClick();
+                    host.onGaugeTap(key);
+                }
+                invalidate();
+                return true;
+            }
+            case MotionEvent.ACTION_CANCEL:
+                if (dragKey == null) return false;
+                dragKey = null;
+                host.onLayoutEdited();
+                invalidate();
+                return true;
+            default:
+                return dragKey != null;
+        }
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent e) {
         if (theme == null) return false;
         float x = e.getX() / density, y = e.getY() / density;
+        boolean editingGauges = chrome.editing && layout != null && "gauges".equals(chrome.tab);
+        if (editingGauges && (dragKey != null || theme.hit(x, y) == null) && editTouch(e, x, y)) return true;
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 downAction = theme.hit(x, y);

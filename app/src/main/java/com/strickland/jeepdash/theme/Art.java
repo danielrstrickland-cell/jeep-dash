@@ -136,6 +136,7 @@ final class Art {
             case "spark": s.major = 10; s.minor = 5; s.labelEvery = 25; break;
             case "map_v": s.major = 1; s.minor = 0.5; s.labelEvery = 2.5; break;
             case "throttle": s.major = 25; s.minor = 12.5; s.labelEvery = 50; break;
+            case "map_kpa": s.major = 20; s.minor = 10; s.labelEvery = 40; break;
             default:
                 s.major = nice((p.max - p.min) / 5);
                 s.minor = s.major / 2;
@@ -182,7 +183,7 @@ final class Art {
             c.drawArc(rect(cx - rr, cy - rr, cx + rr, cy + rr), a0, 405 - a0, false, pt);
         }
 
-        int steps = (int) Math.round((p.max - p.min) / sc.minor);
+        int steps = (int) Math.floor((p.max - p.min) / sc.minor + 0.001);
         for (int i = 0; i <= steps; i++) {
             double v = p.min + i * sc.minor;
             boolean major = whole(v - p.min, sc.major);
