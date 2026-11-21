@@ -28,6 +28,7 @@ import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Param;
 import com.strickland.jeepdash.core.PollRunner;
 import com.strickland.jeepdash.core.PollScheduler;
+import com.strickland.jeepdash.core.Trace;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -61,7 +62,7 @@ public class LinkService extends Service {
     static final String ACTION_STOP = "com.strickland.jeepdash.STOP";
     static final String BUSY_DETAIL =
             "Can't reach the dongle. Check it's plugged in, then close the GearWrench app and turn off your iPhone's Bluetooth.";
-    static final String KEY_OFF_DETAIL = "No answer from the engine computer. Is the key on?";
+    static final String KEY_OFF_DETAIL = "Waiting for the engine computer. Turn the key on.";
 
     private static final String CHANNEL = "link";
     private static final int NOTIFICATION_ID = 1;
@@ -78,6 +79,7 @@ public class LinkService extends Service {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
     private final LiveValues values = new LiveValues();
+    private final Trace trace = new Trace(2000);
 
     private volatile Set<String> active = new LinkedHashSet<>();
     private volatile boolean activeDirty;
@@ -123,6 +125,17 @@ public class LinkService extends Service {
     public Status status() { return status; }
 
     public String statusDetail() { return detail; }
+
+    /** Everything said to the dongle lately and what came back, for sharing when something misbehaves. */
+    public String linkLog() {
+        return "Jeep Dash link log\nAndroid " + Build.VERSION.RELEASE + " (SDK " + Build.VERSION.SDK_INT + "), "
+                + Build.MANUFACTURER + " " + Build.MODEL + "\nStatus now: " + status + " " + detail
+                + "\nReading: " + active + "\n\n" + trace.snapshot();
+    }
+
+    private void note(String line) {
+        trace.add(String.format(java.util.Locale.US, "%8.2f  %s", now() / 1000.0, line));
+    }
 
     // ---------------- service plumbing ----------------
 
@@ -244,6 +257,7 @@ public class LinkService extends Service {
         if (s == old && dd.equals(detail)) return;
         status = s;
         detail = dd;
+        note("== " + s + (dd.isEmpty() ? "" : ": " + dd));
         main.post(() -> {
             for (Listener l : listeners) l.onStatus(s, dd);
             if (foreground && s != old) {
@@ -352,9 +366,11 @@ public class LinkService extends Service {
         for (int i = 0; i < AndroidByteLink.MODES && alive(gen); i++) {
             int mode = tryAll ? i : lastGoodMode;
             try {
-                return AndroidByteLink.connect(dev, mode);
+                AndroidByteLink link = AndroidByteLink.connect(dev, mode);
+                note("connected (way " + mode + ")");
+                return link;
             } catch (IOException e) {
-                // try the next way
+                note("connect (way " + mode + ") failed: " + e.getMessage());
             }
             if (!tryAll) break;
         }
@@ -385,6 +401,7 @@ public class LinkService extends Service {
         reader.start();
 
         PollRunner r = new PollRunner(s, new PollScheduler(GENERIC_EVERY_MS), values, LinkService::now);
+        r.setTrace(trace);
         activeDirty = false;
         r.setActive(active);
         runner = r;
@@ -402,7 +419,7 @@ public class LinkService extends Service {
                 if (k == PollScheduler.Kind.IDLE) pause(200);
             }
         } catch (IOException e) {
-            // link lost: fall through and reconnect
+            note("link lost: " + e.getMessage());
         } finally {
             if (runner == r) runner = null;
             if (session == s) session = null;

@@ -22,6 +22,8 @@ public final class PollScheduler {
         Step(Kind kind, Param param) { this.kind = kind; this.param = param; }
     }
 
+    static final long MAX_GENERIC_INTERVAL_MS = 120000;
+
     private final long genericEveryMs;
     private List<Param> sciCycle = new ArrayList<>();
     private List<Param> genericOnly = new ArrayList<>();
@@ -30,6 +32,7 @@ public final class PollScheduler {
     private Source bus;
     private long lastBlockMs = -1;
     private int sciIdx, genIdx;
+    private int genericFails;
 
     public PollScheduler(long genericEveryMs) { this.genericEveryMs = genericEveryMs; }
 
@@ -76,7 +79,7 @@ public final class PollScheduler {
             bus = Source.SCI;
             return new Step(Kind.SWITCH_TO_SCI, null);
         }
-        if (!genericOnly.isEmpty() && nowMs - lastBlockMs >= genericEveryMs) {
+        if (!genericOnly.isEmpty() && nowMs - lastBlockMs >= genericIntervalMs()) {
             lastBlockMs = nowMs;
             for (Param p : genericOnly) queue.add(new Step(Kind.READ_GENERIC, p));
             queue.add(new Step(Kind.SWITCH_TO_SCI, null));
@@ -93,6 +96,22 @@ public final class PollScheduler {
     }
 
     public long genericEveryMs() { return genericEveryMs; }
+
+    /** Doubles after every failed wake-up (up to 2 minutes) so a dead generic line can't stall the fast one. */
+    public synchronized long genericIntervalMs() {
+        return Math.min(MAX_GENERIC_INTERVAL_MS, genericEveryMs << Math.min(genericFails, 8));
+    }
+
+    /** The generic wake-up got no answer: drop the rest of the block and wait longer before the next try. */
+    public synchronized void genericFailed(long nowMs) {
+        genericFails++;
+        lastBlockMs = nowMs;
+        bus = null;
+        queue.clear();
+    }
+
+    /** A generic reading came back: normal interval again. */
+    public synchronized void genericWorked() { genericFails = 0; }
 
     /** The line the dongle is on after the last step handed out (null before the first switch). */
     public synchronized Source currentBus() { return bus; }

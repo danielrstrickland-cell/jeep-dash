@@ -208,11 +208,16 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private void showMenu() {
         final boolean isXp = "xp".equals(look);
         final String[] choices = isXp ? XpTheme.SCHEMES : JeepTheme.BACKLIGHTS;
-        String[] items = new String[choices.length];
+        String[] items = new String[choices.length + 1];
         for (int i = 0; i < choices.length; i++) items[i] = (isXp ? "Window colour: " : "Backlight: ") + choices[i];
+        items[choices.length] = "Share link log (for troubleshooting)";
         new AlertDialog.Builder(this)
                 .setTitle("Jeep Dash  (build " + buildNumber() + ")")
                 .setItems(items, (dlg, which) -> {
+                    if (which == choices.length) {
+                        shareLinkLog();
+                        return;
+                    }
                     if (isXp) {
                         prefs.edit().putString("xp_scheme", choices[which]).apply();
                         xp.setScheme(choices[which]);
@@ -223,6 +228,25 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                     view.invalidate();
                 })
                 .show();
+    }
+
+    private void shareLinkLog() {
+        if (service == null) return;
+        String text = "Build " + buildNumber() + "\n" + service.linkLog();
+        String name = "link-log-" + new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(new java.util.Date()) + ".txt";
+        Uri uri = DriveLogStore.saveText(this, name, text);
+        try {
+            if (uri != null) {
+                DriveLogStore.shareText(this, uri, "Jeep Dash link log");
+            } else {
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType("text/plain");
+                i.putExtra(Intent.EXTRA_TEXT, text.length() > 100000 ? text.substring(text.length() - 100000) : text);
+                startActivity(Intent.createChooser(i, "Jeep Dash link log"));
+            }
+        } catch (RuntimeException e) {
+            showMessage("Link log", "Could not open the share sheet. The log is saved in Downloads/JeepDash as " + name + ".");
+        }
     }
 
     @SuppressWarnings("deprecation")

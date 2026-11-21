@@ -24,7 +24,8 @@ public final class PollRunner {
     private final LiveValues values;
     private final LongSupplier clock;
     private int ackMs = 1500, readMs = 2000, setupMs = 4000, wakeMs = 6000;
-    private boolean mixed;
+    private boolean mixed, anyFast;
+    private Trace trace;
     private int misses, unanswered;
     private volatile int goodReads;
     private volatile boolean answering = true;
@@ -41,10 +42,19 @@ public final class PollRunner {
         this.ackMs = ackMs; this.readMs = readMs; this.setupMs = slowMs; this.wakeMs = slowMs;
     }
 
+    /** Records every exchange (optional). */
+    public void setTrace(Trace t) { trace = t; }
+
+    private void note(String line) {
+        Trace t = trace;
+        if (t != null) t.add(String.format(java.util.Locale.US, "%8.2f  %s", clock.getAsLong() / 1000.0, line));
+    }
+
     /** Chooses which values are read. Slow (generic-only) values keep their last reading between blocks. */
     public synchronized void setActive(Collection<String> paramIds) {
         sched.setActive(paramIds);
-        boolean anyFast = false, anySlow = false;
+        boolean anySlow = false;
+        anyFast = false;
         for (String id : paramIds) {
             Param p = Catalog.byId(id);
             if (p == null) continue;
@@ -71,13 +81,20 @@ public final class PollRunner {
         PollScheduler.Step s = sched.next(clock.getAsLong());
         switch (s.kind) {
             case SWITCH_TO_SCI:
+                note("-- set up the Jeep line (SCI)");
                 for (String c : Protocols.SCI_SETUP) setup(c);
                 values.endHold(clock.getAsLong());
                 break;
             case SWITCH_TO_GENERIC:
                 if (mixed) { long t = clock.getAsLong(); values.hold(t, t + MAX_BLOCK_MS); }
+                note("-- set up the generic line (ISO 9141-2)");
                 for (String c : Protocols.GENERIC_SETUP_PRE) setup(c);
-                exchange(Hex.bytes(Protocols.GENERIC_INIT), true, wakeMs);
+                DongleSession.Result wake = exchange(Hex.bytes(Protocols.GENERIC_INIT), true, wakeMs);
+                if (wake.data == null) {
+                    sched.genericFailed(clock.getAsLong());
+                    note("-- generic wake-up got no answer; next try in " + sched.genericIntervalMs() / 1000 + " s");
+                    break;
+                }
                 for (String c : Protocols.GENERIC_SETUP_POST) setup(c);
                 break;
             case READ_SCI:
@@ -107,8 +124,11 @@ public final class PollRunner {
             goodReads++;
             misses = 0;
             answering = true;
+            if (src == Source.GENERIC) sched.genericWorked();
             return;
         }
+        // The Jeep's own line is the judge of "is the engine computer there"; a generic miss is just a miss.
+        if (src == Source.GENERIC && anyFast) return;
         misses++;
         if (misses >= 3) answering = false;
         if (misses >= MISSES_BEFORE_RESETUP) {
@@ -118,7 +138,14 @@ public final class PollRunner {
     }
 
     private DongleSession.Result exchange(byte[] inner, boolean wantReply, int timeoutMs) throws IOException {
+        long t0 = clock.getAsLong();
         DongleSession.Result r = session.send(inner, wantReply, timeoutMs);
+        if (trace != null) {
+            String out = r.closed ? "LINK CLOSED" : r.data != null ? "-> " + Hex.str(r.data)
+                    : r.noResponse ? "-> (vehicle did not answer)" : r.timedOut ? (r.acked ? "-> acked, no reply" : "-> NO ANSWER FROM DONGLE")
+                    : "-> ok";
+            note(Hex.str(inner) + "  " + out + "  (" + (clock.getAsLong() - t0) + " ms)");
+        }
         if (r.closed) throw new IOException("link closed");
         if (r.acked) {
             unanswered = 0;

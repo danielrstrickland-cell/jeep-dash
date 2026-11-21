@@ -81,6 +81,36 @@ final class DriveLogStore {
         return "drive log";
     }
 
+    /** Saves a text file next to the drive logs; null on Android 9 and older or on failure. */
+    static Uri saveText(Context c, String name, String text) {
+        if (Build.VERSION.SDK_INT < 29) return null;
+        try {
+            ContentValues cv = new ContentValues();
+            cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+            cv.put(MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+            cv.put(MediaStore.MediaColumns.RELATIVE_PATH, FOLDER);
+            ContentResolver r = c.getContentResolver();
+            Uri uri = r.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+            if (uri == null) return null;
+            try (OutputStream os = r.openOutputStream(uri, "w")) {
+                if (os == null) return null;
+                os.write(text.getBytes(StandardCharsets.UTF_8));
+            }
+            return uri;
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    static void shareText(Activity a, Uri uri, String title) {
+        Intent i = new Intent(Intent.ACTION_SEND);
+        i.setType("text/plain");
+        i.putExtra(Intent.EXTRA_STREAM, uri);
+        i.putExtra(Intent.EXTRA_SUBJECT, title);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        a.startActivity(Intent.createChooser(i, title));
+    }
+
     static void share(Activity a, Uri uri) {
         Intent i = new Intent(Intent.ACTION_SEND);
         i.setType("text/csv");
