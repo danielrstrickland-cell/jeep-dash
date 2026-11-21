@@ -8,11 +8,11 @@ import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 
-/** Draws the music visualizer: four looks, seven colour profiles, 16 to 96 bars. Only graphics, no Android views. */
+/** Draws the music visualizer: five looks, seven colour profiles, 16 to 96 bars. Only graphics, no Android views. */
 public final class VizPainter {
     public static final int BANDS = 96;                              // how finely the sound is analysed
     public static final int[] COUNTS = {16, 24, 32, 48, 64, 96};    // how many bars are drawn
-    public static final String[] LOOKS = {"Blocks", "Smooth", "Boom meters", "Bass ring"};
+    public static final String[] LOOKS = {"Blocks", "Smooth", "Boom meters", "Bass ring", "Swirl"};
     public static final String[] COLORS = {"RPM", "Vice", "Factory", "XP", "Fire", "Ice", "Classic"};
     /** low, middle, high, accent. The first profile follows the engine instead. */
     private static final int[][] PROFILES = {
@@ -30,6 +30,13 @@ public final class VizPainter {
     private static final int[] FACE = {0xFFFFF4CF, 0xFFE7BE5F};
     private static final float[] FACE_STOPS = {0f, 1f};
     private static final float[] SWEEP_STOPS = {0f, 0.5f, 1f};
+
+    /** A look drawn by another class (the swirl needs off-screen pictures this class does not use). */
+    public interface Extra {
+        void draw(Canvas c, int w, int h, float dt, float seconds, VizPainter p);
+    }
+
+    public Extra swirl;
 
     // What to draw; the view fills these in before every frame.
     public final float[] levels = new float[BANDS], peaks = new float[BANDS];
@@ -55,7 +62,8 @@ public final class VizPainter {
         c.drawRect(0, 0, w, h, paint);
 
         group(dt);
-        if (look == 2) meters(c, w, h, dt);
+        if (look == 4 && swirl != null) swirl.draw(c, w, h, dt, seconds, this);
+        else if (look == 2) meters(c, w, h, dt);
         else if (look == 3) ring(c, w, h);
         else if (look == 1) smooth(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f);
         else bars(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, 30);
@@ -298,6 +306,13 @@ public final class VizPainter {
         rect.set(l, t, r, b);
         return rect;
     }
+
+    /** Height of bar j on screen, 0..1 (for looks drawn elsewhere). */
+    public float bar(int j) { return disp[j]; }
+
+    public int color(float t) { return mix(t); }
+
+    public int accent() { return pal[3]; }
 
     /** The profile's colour at t: 0 = low, 0.5 = middle, 1 = high. */
     private int mix(float t) {

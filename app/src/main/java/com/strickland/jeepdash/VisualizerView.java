@@ -27,6 +27,7 @@ public class VisualizerView extends View {
         super(context);
         this.host = host;
         prefs = context.getSharedPreferences("viz", Context.MODE_PRIVATE);
+        painter.swirl = new SwirlLook();
         painter.look = Math.floorMod(prefs.getInt("look2", 0), VizPainter.LOOKS.length);
         painter.color = Math.floorMod(prefs.getInt("color", 1), VizPainter.COLORS.length);
         int bars = prefs.getInt("bars", 32);
