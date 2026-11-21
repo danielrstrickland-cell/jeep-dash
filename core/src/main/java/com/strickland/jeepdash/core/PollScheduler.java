@@ -31,6 +31,7 @@ public final class PollScheduler {
 
     static final int FAILS_BEFORE_FALLBACK = 2;
     static final long FIRST_RETRY_MS = 30000, MAX_RETRY_MS = 120000;
+    static final long MIN_OTHER_EVERY_MS = 60000;
 
     private final long otherEveryMs;
     private List<Param> sciCycle = new ArrayList<>();      // everything the Jeep line can read
@@ -45,7 +46,8 @@ public final class PollScheduler {
     private int sciIdx, genIdx;
     private int genericFails;
 
-    public PollScheduler(long otherEveryMs) { this.otherEveryMs = otherEveryMs; }
+    /** A visit to the other line costs about 9 s of frozen gauges, so never more often than once a minute. */
+    public PollScheduler(long otherEveryMs) { this.otherEveryMs = Math.max(MIN_OTHER_EVERY_MS, otherEveryMs); }
 
     public synchronized void setActive(Collection<String> paramIds) {
         List<Param> sci = new ArrayList<>(), gen = new ArrayList<>(), only = new ArrayList<>();

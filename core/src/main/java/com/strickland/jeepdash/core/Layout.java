@@ -46,6 +46,15 @@ public final class Layout {
         }
     }
 
+    /** Snaps one gauge (the one just dragged) and leaves the rest exactly where they are. */
+    public void snapOne(String key, float grid) {
+        GaugeSpec g = find(key);
+        if (g == null) return;
+        g.x = Math.round(g.x / grid) * grid; g.y = Math.round(g.y / grid) * grid;
+        g.w = Math.round(g.w / grid) * grid; g.h = Math.round(g.h / grid) * grid;
+        clamp(g);
+    }
+
     public void clampAll() { for (GaugeSpec g : gauges) clamp(g); }
 
     private void clamp(GaugeSpec g) {

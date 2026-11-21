@@ -37,6 +37,12 @@ public final class Protocols {
     /** Sent before every SCI read: switches the dongle to 62500 baud. */
     public static final String SCI_FAST = "60 02 00 00 f4 24 00 08 ff";
 
+    /**
+     * Back to 7812.5 baud. The GearWrench app sends this between fast reads and slow-speed requests; the
+     * trailing ff makes the dongle take the engine computer out of its fast mode too.
+     */
+    public static final String SCI_SLOW = "60 02 00 00 1e 84 00 08 ff";
+
     public static byte[] genericRequest(int pid) {
         int sum = (0x68 + 0x6a + 0xf1 + 0x01 + pid) & 0xff;
         return new byte[]{0x61, 0x04, 0x00, 0x06, 0x68, 0x6a, (byte) 0xf1, 0x01, (byte) pid, (byte) sum, 0x01};

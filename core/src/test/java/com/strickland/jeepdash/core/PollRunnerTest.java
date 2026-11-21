@@ -87,11 +87,11 @@ public class PollRunnerTest {
     public static void genericSetupFollowsTheCapturedSequence() throws Exception {
         Rig r = new Rig("rpm", "speed");
         T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "a generic-only value: everything on generic");
-        List<String> want = new ArrayList<>(Arrays.asList(Protocols.GENERIC_SETUP_PRE));
+        List<String> want = plus(Protocols.STOP_KEEPALIVE, Protocols.GENERIC_SETUP_PRE);
         want.add(Protocols.GENERIC_INIT);
         want.add(Protocols.GENERIC_FIRST_QUERY);
         want.addAll(Arrays.asList(Protocols.GENERIC_SETUP_POST));
-        T.eq(want, r.car.sent, "setup, wake-up, first query, keep-alive on, reply filter");
+        T.eq(want, r.car.sent, "stop a leftover keep-alive, setup, wake-up, first query, keep-alive on, reply filter");
         T.eq(Arrays.asList(Protocols.GENERIC_PRE_WAIT_MS), r.sleeps, "waits 5 s before the wake-up, as the GearWrench app does");
         r.steps(2);
         T.near(720, r.values.get("rpm", 0), 0.001, "rpm read over generic (raw/4)");
@@ -202,5 +202,13 @@ public class PollRunnerTest {
         Trace t = new Trace(3);
         for (int i = 1; i <= 5; i++) t.add("line " + i);
         T.eq("line 3\nline 4\nline 5\n", t.snapshot(), "oldest lines dropped");
+    }
+
+    public static void leavingTheJeepLineDropsItBackToSlowSpeedFirst() throws Exception {
+        Rig r = new Rig("speed", "map_v");
+        r.steps(2);                                        // SCI setup, map_v read (engine computer now in fast mode)
+        r.car.sent.clear();
+        T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "on to generic");
+        T.eq(Protocols.SCI_SLOW, r.car.sent.get(0), "first the app's own 'back to 7812 baud' command, so the line is quiet for the wake-up");
     }
 }

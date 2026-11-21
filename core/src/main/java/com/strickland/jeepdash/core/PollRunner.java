@@ -24,7 +24,7 @@ public final class PollRunner {
     private final PollScheduler sched;
     private final LiveValues values;
     private final LongSupplier clock;
-    private int ackMs = 1500, readMs = 2000, setupMs = 4000, wakeMs = 6000;
+    private int ackMs = 1500, readMs = 1000, setupMs = 4000, wakeMs = 6000;   // real replies take 0.2-0.5 s
     private Trace trace;
     private Source onLine;                 // what the dongle is set up for right now
     private LongConsumer sleeper = PollRunner::sleep;
@@ -95,7 +95,8 @@ public final class PollRunner {
             case SWITCH_TO_GENERIC:
                 if (sched.primary() != Source.GENERIC) holdWorkingLine();
                 note("-- set up the generic line (ISO 9141-2)");
-                if (onLine == Source.GENERIC) setup(Protocols.STOP_KEEPALIVE);
+                if (onLine == Source.SCI) setup(Protocols.SCI_SLOW);   // leave the Jeep line's fast mode cleanly
+                setup(Protocols.STOP_KEEPALIVE);       // a keep-alive left running would talk over the wake-up
                 onLine = null;
                 if (wakeGeneric()) {
                     for (String c : Protocols.GENERIC_SETUP_POST) setup(c);
