@@ -11,9 +11,10 @@ public class PollRunnerTest {
     static final class Car implements ByteLink {
         DongleSession session;
         final List<String> sent = new ArrayList<>();
-        boolean engineAnswers = true;
+        boolean engineAnswers = true;     // the Jeep line (SCI)
         boolean dongleAnswers = true;
-        int rpmRaw = 0x1680;          // 720 rpm over SCI (raw/8)
+        boolean wakeAnswers = true;       // generic 5-baud wake-up
+        int rpmRaw = 0x1680;              // 720 rpm over SCI (raw/8)
 
         @Override public void write(byte[] f) {
             int seq = ((f[2] & 0xff) << 8) | (f[3] & 0xff);
@@ -24,12 +25,20 @@ public class PollRunnerTest {
             if (!dongleAnswers) return;
             reply(seq, "00 00 02 00 00");
             if (!Protocols.wantsReply(inner)) return;
+            if (hex.startsWith("61 05")) { reply(seq, wakeAnswers ? "02 00 02 08 08 00 01 cc" : "01 ff ff"); return; }
+            if (hex.startsWith("61 04 00 06 68")) {              // generic request
+                if (!wakeAnswers) reply(seq, "01 ff ff");
+                else if (hex.contains("f1 01 00 c4")) reply(seq, "01 00 0a 48 6b d1 41 00 be 3e b8 14 8d");
+                else if (hex.contains("f1 01 0c")) reply(seq, "01 00 08 48 6b d1 41 0c 0b 40 1c");
+                else if (hex.contains("f1 01 0d")) reply(seq, "01 00 07 48 6b d1 41 0d 28 fa");
+                else reply(seq, "01 ff ff");
+                return;
+            }
             if (!engineAnswers) { reply(seq, "01 ff ff"); return; }
-            if (hex.startsWith("61 05")) reply(seq, "01 00 02 08 08");
-            else if (hex.equals("61 04 00 03 f4 0a 0b 01"))
+            if (hex.equals("61 04 00 03 f4 0a 0b 01"))
                 reply(seq, String.format("01 00 03 %02x 0b %02x", rpmRaw >> 8, rpmRaw & 0xff));
             else if (hex.equals("61 04 00 02 f4 16 01")) reply(seq, "01 00 02 16 80");
-            else if (hex.startsWith("61 04 00 06 68 6a f1 01 0d")) reply(seq, "01 00 07 48 6b 10 41 0d 28 39");
+            else if (hex.equals("61 04 00 02 f4 17 01")) reply(seq, "01 00 02 17 69");
             else reply(seq, "01 00 01 00");
         }
         void reply(int seq, String payload) {
@@ -41,22 +50,32 @@ public class PollRunnerTest {
 
     static final class Rig {
         final Car car = new Car();
-        final PollScheduler sched = new PollScheduler(10000);
+        final PollScheduler sched = new PollScheduler(60000);
         final LiveValues values = new LiveValues();
         final long[] now = {0};
+        final List<Long> sleeps = new ArrayList<>();
         final PollRunner runner;
         Rig(String... active) {
             car.session = new DongleSession(car);
             runner = new PollRunner(car.session, sched, values, () -> now[0]);
+            runner.setSleeper(sleeps::add);
             runner.setActive(Arrays.asList(active));
             runner.setTimeouts(30, 30, 30);
         }
+        void steps(int n) throws IOException { for (int i = 0; i < n; i++) runner.step(); }
     }
 
-    public static void sciSwitchSendsSetupThenReadsRpm() throws Exception {
+    static List<String> plus(String first, String[] rest) {
+        List<String> l = new ArrayList<>();
+        l.add(first);
+        l.addAll(Arrays.asList(rest));
+        return l;
+    }
+
+    public static void sciSetupStopsAnyKeepAliveThenReadsRpm() throws Exception {
         Rig r = new Rig("rpm");
         T.eq(PollScheduler.Kind.SWITCH_TO_SCI, r.runner.step(), "first step switches to SCI");
-        T.eq(Arrays.asList(Protocols.SCI_SETUP), r.car.sent, "SCI setup sequence, in order");
+        T.eq(plus(Protocols.STOP_KEEPALIVE, Protocols.SCI_SETUP), r.car.sent, "stop a leftover keep-alive, then SCI setup in order");
         r.car.sent.clear();
         T.eq(PollScheduler.Kind.READ_SCI, r.runner.step(), "then reads");
         T.eq(Arrays.asList(Protocols.SCI_FAST, "61 04 00 03 f4 0a 0b 01"), r.car.sent, "fast-baud command before every SCI read");
@@ -65,15 +84,45 @@ public class PollRunnerTest {
         T.ok(r.runner.vehicleAnswering(), "vehicle answering");
     }
 
-    public static void genericSwitchSendsWakeUpAndReadsSpeed() throws Exception {
-        Rig r = new Rig("speed");
-        T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "generic-only: switches to generic");
+    public static void genericSetupFollowsTheCapturedSequence() throws Exception {
+        Rig r = new Rig("rpm", "speed");
+        T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "a generic-only value: everything on generic");
         List<String> want = new ArrayList<>(Arrays.asList(Protocols.GENERIC_SETUP_PRE));
         want.add(Protocols.GENERIC_INIT);
+        want.add(Protocols.GENERIC_FIRST_QUERY);
         want.addAll(Arrays.asList(Protocols.GENERIC_SETUP_POST));
-        T.eq(want, r.car.sent, "generic setup, wake-up, post-setup in order");
-        r.runner.step();
+        T.eq(want, r.car.sent, "setup, wake-up, first query, keep-alive on, reply filter");
+        T.eq(Arrays.asList(Protocols.GENERIC_PRE_WAIT_MS), r.sleeps, "waits 5 s before the wake-up, as the GearWrench app does");
+        r.steps(2);
+        T.near(720, r.values.get("rpm", 0), 0.001, "rpm read over generic (raw/4)");
         T.near(40 * 0.621371, r.values.get("speed", 0), 0.001, "speed decoded");
+    }
+
+    public static void leavingGenericStopsTheKeepAliveBeforeSciSetup() throws Exception {
+        Rig r = new Rig("speed", "map_v");
+        r.steps(4);                                        // SCI visit (map_v), then generic, one read
+        r.now[0] = 60000;
+        r.car.sent.clear();
+        T.eq(PollScheduler.Kind.SWITCH_TO_SCI, r.runner.step(), "minute visit to the Jeep line");
+        List<String> want = new ArrayList<>(Arrays.asList(Protocols.GENERIC_LEAVE));
+        want.addAll(Arrays.asList(Protocols.SCI_SETUP));
+        T.eq(want, r.car.sent, "keep-alive off (as the GearWrench app does) before SCI setup");
+    }
+
+    public static void valuesSurviveTheVisitToTheOtherLine() throws Exception {
+        Rig r = new Rig("speed", "map_v");
+        r.steps(3);                                        // t=0: SCI setup, map_v, generic setup
+        r.now[0] = 59000;
+        r.runner.step();                                   // speed at 59 s
+        T.near(2.06, r.values.get("map_v", 59000), 0.01, "the Jeep-only reading is kept between its visits");
+        r.now[0] = 60000;
+        r.runner.step();                                   // switch to SCI
+        r.now[0] = 61000;
+        r.runner.step();                                   // map_v
+        r.now[0] = 69000;                                  // generic wake-up took 8 s
+        T.near(24.85, r.values.get("speed", 69000), 0.01, "speed held, not blanked, during the visit");
+        r.runner.step();                                   // back on generic
+        T.eq(null, r.values.get("speed", 73000), "but it blanks 3 s after the visit if generic stops answering");
     }
 
     public static void silentEngineReadsNothingAndReSetsUpAfterSixMisses() throws Exception {
@@ -107,25 +156,51 @@ public class PollRunnerTest {
         T.ok(threw, "closed link throws so the service reconnects");
     }
 
-    public static void fastValuesHeldThroughGenericBlockAndSlowOnesBetweenBlocks() throws Exception {
+    public static void deadGenericLineFallsBackToTheJeepLineAndComesBack() throws Exception {
         Rig r = new Rig("rpm", "speed");
-        r.runner.step();                                   // switch to SCI at t=0
-        r.now[0] = 9000;
-        r.runner.step();                                   // rpm read at t=9 s
-        r.now[0] = 10000;
-        T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "generic block starts");
-        r.now[0] = 14000;                                  // wake-up took 4 s
-        T.near(720, r.values.get("rpm", 14000), 0.001, "rpm held (not blanked) during the generic block");
-        T.eq(PollScheduler.Kind.READ_GENERIC, r.runner.step(), "speed read");
-        T.eq(PollScheduler.Kind.SWITCH_TO_SCI, r.runner.step(), "back to SCI");
-        T.near(24.85, r.values.get("speed", 23000), 0.01, "speed still shown 9 s later, before the next block");
-        T.eq(null, r.values.get("rpm", 18000), "rpm goes stale 3 s after the block if SCI stops answering");
-        T.eq(null, r.values.get("speed", 14000 + 18001), "speed goes stale if a whole block is missed");
+        r.car.wakeAnswers = false;
+        T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "first try");
+        T.ok(!r.car.sent.contains(Protocols.GENERIC_SETUP_POST[1]), "keep-alive is never started after a failed wake-up");
+        T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "second try");
+        T.eq(PollScheduler.Kind.SWITCH_TO_SCI, r.runner.step(), "then the Jeep line");
+        T.eq(PollScheduler.Kind.READ_SCI, r.runner.step(), "rpm from the Jeep line");
+        T.near(720, r.values.get("rpm", 0), 0.001, "rpm shows even though generic is dead");
+        T.ok(r.runner.vehicleAnswering(), "a dead generic line is not 'key off'");
+        r.car.wakeAnswers = true;
+        r.now[0] = 31000;
+        T.eq(PollScheduler.Kind.SWITCH_TO_GENERIC, r.runner.step(), "retry after 30 s");
+        r.steps(2);
+        T.near(40 * 0.621371, r.values.get("speed", 31000), 0.001, "generic is back: speed shows");
+    }
+
+    public static void missesOnTheVisitedLineAreNotKeyOff() throws Exception {
+        Rig r = new Rig("speed", "map_v");
+        r.car.engineAnswers = false;                       // Jeep line silent, generic fine
+        r.steps(4);
+        for (int v = 1; v <= 4; v++) { r.now[0] = 60000L * v; r.steps(4); }
+        T.ok(r.runner.vehicleAnswering(), "the working line answers; a silent visited line is just a missing value");
     }
 
     public static void idleWhenNothingActive() throws Exception {
         Rig r = new Rig();
         T.eq(PollScheduler.Kind.IDLE, r.runner.step(), "idle");
         T.eq(0, r.car.sent.size(), "nothing sent");
+    }
+
+    public static void exchangesAreTraced() throws Exception {
+        Rig r = new Rig("rpm");
+        Trace t = new Trace(100);
+        r.runner.setTrace(t);
+        r.runner.step();
+        r.runner.step();
+        String log = t.snapshot();
+        T.ok(log.contains("60 05 19 01"), "setup commands are in the trace");
+        T.ok(log.contains("f4 0a 0b") && log.contains("16 0b 80"), "reads are in the trace with their replies");
+    }
+
+    public static void traceKeepsOnlyTheLastLines() {
+        Trace t = new Trace(3);
+        for (int i = 1; i <= 5; i++) t.add("line " + i);
+        T.eq("line 3\nline 4\nline 5\n", t.snapshot(), "oldest lines dropped");
     }
 }

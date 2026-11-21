@@ -72,7 +72,8 @@ public final class DongleSession implements XtoolFrame.Listener {
             if (!p.wantReply) complete(s, p);
             return;
         }
-        if (payload.length >= 3 && payload[0] == 1) {
+        // 01 = reply to a vehicle request; 02 = reply to the 5-baud wake-up (keywords)
+        if (payload.length >= 3 && (payload[0] == 1 || payload[0] == 2)) {
             boolean none = (payload[1] & 0xff) == 0xff && (payload[2] & 0xff) == 0xff;
             p.result.acked = true;
             p.result.noResponse = none;

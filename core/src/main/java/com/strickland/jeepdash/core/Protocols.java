@@ -10,13 +10,26 @@ public final class Protocols {
     /** Generic OBD2 (ISO 9141-2): line setup before the 5-baud wake-up. */
     public static final String[] GENERIC_SETUP_PRE = {
             "60 05 02 01", "60 01 09 c5 92", "60 03 00 50 03 e8 00 37 00 05", "61 06 01"};
-    /** 5-baud wake-up to address 0x33; the engine computer answers with keywords 08 08. */
+
+    /** The GearWrench app waits this long between the line setup and the wake-up. */
+    public static final long GENERIC_PRE_WAIT_MS = 5000;
+
+    /** 5-baud wake-up to address 0x33; the dongle answers with a type-02 reply carrying keywords 08 08. */
     public static final String GENERIC_INIT = "61 05 1e 33 02 02 01 e0 00 00 00 05";
-    /** After the wake-up: first query, keep-alive, 10400 baud, timing. */
+
+    /** First request after the wake-up (supported PIDs); an answer here means the generic line is up. */
+    public static final String GENERIC_FIRST_QUERY = "61 04 00 06 68 6a f1 01 00 c4 ff";
+
+    /** Then: keep-alive message every 600 ms, keep-alive on, reply filter for the engine computer (48 6b d1). */
     public static final String[] GENERIC_SETUP_POST = {
-            "61 04 00 06 68 6a f1 01 00 c4 ff", "60 04 00 06 68 6a f1 01 00 c4 02 58 01", "60 06 ff",
-            "60 05 01 01", "60 01 09 c5 92", "60 02 00 00 28 a0 00 08", "60 03 00 c8 0b b8 00 37 00 05",
-            "61 06 01", "60 c3"};
+            "60 04 00 06 68 6a f1 01 00 c4 02 58 01", "60 06 ff", "61 06 02 00 03 48 6b d1 00 00"};
+
+    /** Turns the dongle's generic keep-alive off. Left on, it talks over the Jeep's own line. */
+    public static final String STOP_KEEPALIVE = "60 06 00";
+
+    /** What the GearWrench app sends when it leaves generic live data. */
+    public static final String[] GENERIC_LEAVE = {"60 06 00", "60 0c 13 88 ff ff ff ff", "60 06 00"};
+
     /** Chrysler SCI (7812.5 baud) setup. */
     public static final String[] SCI_SETUP = {
             "60 05 19 01", "60 01 49 c4 21", "60 02 00 00 1e 84 00 08", "60 03 00 78 07 d0 00 14 00 05",

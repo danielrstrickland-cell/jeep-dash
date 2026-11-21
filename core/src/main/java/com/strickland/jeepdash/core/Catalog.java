@@ -31,7 +31,7 @@ public final class Catalog {
                 0x0f, (a, b) -> cToF(a - 40), 0, 200, 1));
         add(new Param("throttle", "Throttle", "%", null, null,
                 0x11, (a, b) -> a * 100 / 255.0, 0, 100, 3));
-        add(new Param("map_kpa", "MAP (generic)", "kPa", null, null,
+        add(new Param("map_kpa", "Manifold", "kPa", null, null,
                 0x0b, (a, b) -> a, 0, 105, 2));
     }
 

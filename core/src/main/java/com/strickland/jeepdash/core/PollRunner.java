@@ -2,6 +2,7 @@ package com.strickland.jeepdash.core;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 
 /**
@@ -14,18 +15,19 @@ public final class PollRunner {
     static final int MISSES_BEFORE_RESETUP = 6;
     /** Consecutive frames the dongle itself ignores before the link counts as lost. */
     static final int UNANSWERED_BEFORE_LOST = 3;
-    /** Longest a generic block may keep the fast values on screen without a fresh reading. */
+    /** Longest a visit to the other line may keep the working line's values on screen. */
     static final long MAX_BLOCK_MS = 20000;
-    /** Slow values stay on screen for one block interval plus this, so they survive until the next block. */
-    static final long SLOW_EXTRA_MS = 8000;
+    /** Visited values stay on screen for one visit interval plus this, so they survive until the next visit. */
+    static final long SLOW_EXTRA_MS = 15000;
 
     private final DongleSession session;
     private final PollScheduler sched;
     private final LiveValues values;
     private final LongSupplier clock;
     private int ackMs = 1500, readMs = 2000, setupMs = 4000, wakeMs = 6000;
-    private boolean mixed, anyFast;
     private Trace trace;
+    private Source onLine;                 // what the dongle is set up for right now
+    private LongConsumer sleeper = PollRunner::sleep;
     private int misses, unanswered;
     private volatile int goodReads;
     private volatile boolean answering = true;
@@ -42,6 +44,13 @@ public final class PollRunner {
         this.ackMs = ackMs; this.readMs = readMs; this.setupMs = slowMs; this.wakeMs = slowMs;
     }
 
+    /** Test hook: no real waiting. */
+    void setSleeper(LongConsumer s) { sleeper = s; }
+
+    private static void sleep(long ms) {
+        try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+    }
+
     /** Records every exchange (optional). */
     public void setTrace(Trace t) { trace = t; }
 
@@ -50,24 +59,16 @@ public final class PollRunner {
         if (t != null) t.add(String.format(java.util.Locale.US, "%8.2f  %s", clock.getAsLong() / 1000.0, line));
     }
 
-    /** Chooses which values are read. Slow (generic-only) values keep their last reading between blocks. */
+    /** Chooses which values are read. */
     public synchronized void setActive(Collection<String> paramIds) {
         sched.setActive(paramIds);
-        boolean anySlow = false;
-        anyFast = false;
-        for (String id : paramIds) {
-            Param p = Catalog.byId(id);
-            if (p == null) continue;
-            if (p.slow()) anySlow = true; else anyFast = true;
-        }
-        mixed = anyFast && anySlow;
+        applyStaleTimes();
+    }
+
+    /** Values on the visited line keep their last reading from one visit to the next. */
+    private void applyStaleTimes() {
         values.clearStaleMs();
-        if (mixed) {
-            for (String id : paramIds) {
-                Param p = Catalog.byId(id);
-                if (p != null && p.slow()) values.setStaleMs(id, sched.genericEveryMs() + SLOW_EXTRA_MS);
-            }
-        }
+        for (String id : sched.slowIds()) values.setStaleMs(id, sched.otherEveryMs() + SLOW_EXTRA_MS);
     }
 
     /** Total good readings so far (the caller turns this into reads per second). */
@@ -81,21 +82,31 @@ public final class PollRunner {
         PollScheduler.Step s = sched.next(clock.getAsLong());
         switch (s.kind) {
             case SWITCH_TO_SCI:
+                if (sched.primary() != Source.SCI) holdWorkingLine();
                 note("-- set up the Jeep line (SCI)");
+                if (onLine == Source.GENERIC) for (String c : Protocols.GENERIC_LEAVE) setup(c);
+                else setup(Protocols.STOP_KEEPALIVE);
+                onLine = null;
                 for (String c : Protocols.SCI_SETUP) setup(c);
-                values.endHold(clock.getAsLong());
+                onLine = Source.SCI;
+                if (sched.primary() == Source.SCI) values.endHold(clock.getAsLong());
+                applyStaleTimes();
                 break;
             case SWITCH_TO_GENERIC:
-                if (mixed) { long t = clock.getAsLong(); values.hold(t, t + MAX_BLOCK_MS); }
+                if (sched.primary() != Source.GENERIC) holdWorkingLine();
                 note("-- set up the generic line (ISO 9141-2)");
-                for (String c : Protocols.GENERIC_SETUP_PRE) setup(c);
-                DongleSession.Result wake = exchange(Hex.bytes(Protocols.GENERIC_INIT), true, wakeMs);
-                if (wake.data == null) {
+                if (onLine == Source.GENERIC) setup(Protocols.STOP_KEEPALIVE);
+                onLine = null;
+                if (wakeGeneric()) {
+                    for (String c : Protocols.GENERIC_SETUP_POST) setup(c);
+                    onLine = Source.GENERIC;
+                    sched.genericWorked();
+                    values.endHold(clock.getAsLong());
+                } else {
                     sched.genericFailed(clock.getAsLong());
-                    note("-- generic wake-up got no answer; next try in " + sched.genericIntervalMs() / 1000 + " s");
-                    break;
+                    note("-- generic line did not wake up");
                 }
-                for (String c : Protocols.GENERIC_SETUP_POST) setup(c);
+                applyStaleTimes();
                 break;
             case READ_SCI:
                 exchange(Hex.bytes(Protocols.SCI_FAST), false, ackMs);
@@ -108,6 +119,21 @@ public final class PollRunner {
                 break;
         }
         return s.kind;
+    }
+
+    private void holdWorkingLine() {
+        long t = clock.getAsLong();
+        values.hold(t, t + MAX_BLOCK_MS);
+    }
+
+    /** Line setup, the 5-second wait, the 5-baud wake-up, then the first request. True when the car answered. */
+    private boolean wakeGeneric() throws IOException {
+        for (String c : Protocols.GENERIC_SETUP_PRE) setup(c);
+        sleeper.accept(Protocols.GENERIC_PRE_WAIT_MS);
+        DongleSession.Result wake = exchange(Hex.bytes(Protocols.GENERIC_INIT), true, wakeMs);
+        if (wake.data == null) return false;
+        DongleSession.Result first = exchange(Hex.bytes(Protocols.GENERIC_FIRST_QUERY), true, setupMs);
+        return first.data != null;
     }
 
     private void setup(String hex) throws IOException {
@@ -123,12 +149,14 @@ public final class PollRunner {
             values.put(p.id, v, clock.getAsLong());
             goodReads++;
             misses = 0;
-            answering = true;
-            if (src == Source.GENERIC) sched.genericWorked();
+            if (!answering) {
+                answering = true;
+                sched.retryGenericSoon();      // key just came on: don't wait out the generic retry timer
+            }
             return;
         }
-        // The Jeep's own line is the judge of "is the engine computer there"; a generic miss is just a miss.
-        if (src == Source.GENERIC && anyFast) return;
+        // Only the working line says whether the engine computer is there; a miss on a visit is just a miss.
+        if (src != sched.primary()) return;
         misses++;
         if (misses >= 3) answering = false;
         if (misses >= MISSES_BEFORE_RESETUP) {

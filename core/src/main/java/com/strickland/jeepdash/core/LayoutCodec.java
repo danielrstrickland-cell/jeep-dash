@@ -52,12 +52,12 @@ public final class LayoutCodec {
             put(l, sx, sy, "g3", "coolant", GaugeType.DIAL, 476, 111, 150, 200);
             put(l, sx, sy, "g4", "iat", GaugeType.DIAL, 654, 111, 150, 200);
             put(l, sx, sy, "g5", "spark", GaugeType.DIAL, 476, 329, 150, 200);
-            put(l, sx, sy, "g6", "map_v", GaugeType.DIAL, 654, 329, 150, 200);
+            put(l, sx, sy, "g6", "map_kpa", GaugeType.DIAL, 654, 329, 150, 200);
             put(l, sx, sy, "g7", "throttle", GaugeType.DIGITAL, 330, 628, 620, 78);
         } else {
             put(l, sx, sy, "g1", "rpm", GaugeType.DIAL, 16, 16, 744, 420);
             put(l, sx, sy, "g2", "speed", GaugeType.DIGITAL, 776, 16, 488, 420);
-            String[] bottom = {"coolant", "iat", "spark", "throttle", "map_v"};
+            String[] bottom = {"coolant", "iat", "spark", "throttle", "map_kpa"};
             float colW = (1280 - 2 * 16 - 4 * 16) / 5f;
             for (int i = 0; i < bottom.length; i++)
                 put(l, sx, sy, "g" + (3 + i), bottom[i], GaugeType.BAR, 16 + i * (colW + 16), 452, colW, 290);

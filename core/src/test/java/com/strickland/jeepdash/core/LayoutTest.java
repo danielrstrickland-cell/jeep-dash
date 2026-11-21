@@ -52,7 +52,7 @@ public class LayoutTest {
 
     public static void activeParamIds() {
         Layout xp = LayoutCodec.defaultFor("xp", 1280, 800);
-        T.eq(new LinkedHashSet<>(Arrays.asList("rpm", "speed", "coolant", "iat", "spark", "throttle", "map_v")),
+        T.eq(new LinkedHashSet<>(Arrays.asList("rpm", "speed", "coolant", "iat", "spark", "throttle", "map_kpa")),
                 xp.activeParamIds(), "default XP values");
     }
 }

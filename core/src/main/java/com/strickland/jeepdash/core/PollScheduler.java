@@ -6,11 +6,18 @@ import java.util.Collection;
 import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
- * Decides what to ask the dongle next. SCI (the 5.9's own data) is the primary line: every active value
- * with an SCI id is read there in a weighted round-robin. Generic-only values are read in a short block
- * on generic OBD2 every {@code genericEveryMs}. If no active value has an SCI id, it stays on generic.
+ * Decides what to ask the dongle next. Changing between the Jeep's own line (SCI) and generic OBD2 costs
+ * about 8 seconds (the generic wake-up), so the dash works on ONE line at a time:
+ * <ul>
+ * <li>every active value has an SCI id: the Jeep line only;</li>
+ * <li>some active value is generic-only: everything that can be read on generic is read there; values only
+ *     the Jeep line has are visited once at the start and then once every {@code otherEveryMs};</li>
+ * <li>the generic wake-up failed twice: fall back to the Jeep line for what it has, and retry generic after
+ *     30 s, 60 s, then every 2 minutes.</li>
+ * </ul>
  */
 public final class PollScheduler {
 
@@ -22,32 +29,43 @@ public final class PollScheduler {
         Step(Kind kind, Param param) { this.kind = kind; this.param = param; }
     }
 
-    static final long MAX_GENERIC_INTERVAL_MS = 120000;
+    static final int FAILS_BEFORE_FALLBACK = 2;
+    static final long FIRST_RETRY_MS = 30000, MAX_RETRY_MS = 120000;
 
-    private final long genericEveryMs;
-    private List<Param> sciCycle = new ArrayList<>();
-    private List<Param> genericOnly = new ArrayList<>();
-    private List<Param> genericCycle = new ArrayList<>();
+    private final long otherEveryMs;
+    private List<Param> sciCycle = new ArrayList<>();      // everything the Jeep line can read
+    private List<Param> genCycle = new ArrayList<>();      // everything generic can read
+    private List<Param> sciOnly = new ArrayList<>();       // only on the Jeep line
+    private boolean needsGeneric, any;
     private final Deque<Step> queue = new ArrayDeque<>();
     private Source bus;
-    private long lastBlockMs = -1;
+    private boolean visitedOthers;
+    private long lastBlockMs;
+    private long lastGenericTryMs;
     private int sciIdx, genIdx;
     private int genericFails;
 
-    public PollScheduler(long genericEveryMs) { this.genericEveryMs = genericEveryMs; }
+    public PollScheduler(long otherEveryMs) { this.otherEveryMs = otherEveryMs; }
 
     public synchronized void setActive(Collection<String> paramIds) {
-        List<Param> sci = new ArrayList<>(), gen = new ArrayList<>();
+        List<Param> sci = new ArrayList<>(), gen = new ArrayList<>(), only = new ArrayList<>();
+        boolean needs = false;
         for (String id : new LinkedHashSet<>(paramIds)) {
             Param p = Catalog.byId(id);
             if (p == null) continue;
-            if (p.slow()) gen.add(p); else sci.add(p);
+            if (p.sciIds != null) sci.add(p);
+            if (p.pid != null) gen.add(p);
+            if (p.pid == null) only.add(p);
+            if (p.sciIds == null) needs = true;
         }
         sciCycle = weighted(sci);
-        genericOnly = gen;
-        genericCycle = weighted(gen);
+        genCycle = weighted(gen);
+        sciOnly = only;
+        needsGeneric = needs;
+        any = !sci.isEmpty() || !gen.isEmpty();
         sciIdx = 0;
         genIdx = 0;
+        visitedOthers = false;
         queue.clear();
     }
 
@@ -61,32 +79,50 @@ public final class PollScheduler {
         return cycle;
     }
 
+    private boolean genericIsPrimary() { return needsGeneric && genericFails < FAILS_BEFORE_FALLBACK; }
+
     public synchronized Step next(long nowMs) {
         Step queued = queue.poll();
         if (queued != null) {
             if (queued.kind == Kind.SWITCH_TO_SCI) bus = Source.SCI;
+            else if (queued.kind == Kind.SWITCH_TO_GENERIC) bus = Source.GENERIC;
             return queued;
         }
-        if (sciCycle.isEmpty() && genericCycle.isEmpty()) return new Step(Kind.IDLE, null);
+        if (!any) return new Step(Kind.IDLE, null);
 
-        if (sciCycle.isEmpty()) {
-            if (bus != Source.GENERIC) { bus = Source.GENERIC; return new Step(Kind.SWITCH_TO_GENERIC, null); }
-            return new Step(Kind.READ_GENERIC, genericCycle.get(genIdx++ % genericCycle.size()));
+        if (!needsGeneric) {
+            if (bus != Source.SCI) { bus = Source.SCI; return new Step(Kind.SWITCH_TO_SCI, null); }
+            return new Step(Kind.READ_SCI, sciCycle.get(sciIdx++ % sciCycle.size()));
         }
 
-        if (bus != Source.SCI) {
-            if (lastBlockMs < 0) lastBlockMs = nowMs;
-            bus = Source.SCI;
-            return new Step(Kind.SWITCH_TO_SCI, null);
+        if (genericIsPrimary()) {
+            if (bus != Source.GENERIC) {
+                if (!sciOnly.isEmpty() && !visitedOthers) return visitJeepLine(nowMs);
+                bus = Source.GENERIC;
+                return new Step(Kind.SWITCH_TO_GENERIC, null);
+            }
+            if (!sciOnly.isEmpty() && nowMs - lastBlockMs >= otherEveryMs) return visitJeepLine(nowMs);
+            return new Step(Kind.READ_GENERIC, genCycle.get(genIdx++ % genCycle.size()));
         }
-        if (!genericOnly.isEmpty() && nowMs - lastBlockMs >= genericIntervalMs()) {
-            lastBlockMs = nowMs;
-            for (Param p : genericOnly) queue.add(new Step(Kind.READ_GENERIC, p));
-            queue.add(new Step(Kind.SWITCH_TO_SCI, null));
+
+        // The generic line is not answering: work on the Jeep line and try generic again now and then.
+        if (nowMs - lastGenericTryMs >= genericRetryMs()) {
+            lastGenericTryMs = nowMs;
             bus = Source.GENERIC;
             return new Step(Kind.SWITCH_TO_GENERIC, null);
         }
+        if (sciCycle.isEmpty()) return new Step(Kind.IDLE, null);
+        if (bus != Source.SCI) { bus = Source.SCI; return new Step(Kind.SWITCH_TO_SCI, null); }
         return new Step(Kind.READ_SCI, sciCycle.get(sciIdx++ % sciCycle.size()));
+    }
+
+    private Step visitJeepLine(long nowMs) {
+        visitedOthers = true;
+        lastBlockMs = nowMs;
+        for (Param p : sciOnly) queue.add(new Step(Kind.READ_SCI, p));
+        queue.add(new Step(Kind.SWITCH_TO_GENERIC, null));
+        bus = Source.SCI;
+        return new Step(Kind.SWITCH_TO_SCI, null);
     }
 
     /** Forgets which line the dongle is on, so the next step sets the line up again. */
@@ -95,23 +131,40 @@ public final class PollScheduler {
         queue.clear();
     }
 
-    public long genericEveryMs() { return genericEveryMs; }
+    public long otherEveryMs() { return otherEveryMs; }
 
-    /** Doubles after every failed wake-up (up to 2 minutes) so a dead generic line can't stall the fast one. */
-    public synchronized long genericIntervalMs() {
-        return Math.min(MAX_GENERIC_INTERVAL_MS, genericEveryMs << Math.min(genericFails, 8));
+    /** How long to stay off the generic line after it failed. */
+    public synchronized long genericRetryMs() {
+        int extra = Math.max(0, Math.min(genericFails - FAILS_BEFORE_FALLBACK, 2));
+        return Math.min(MAX_RETRY_MS, FIRST_RETRY_MS << extra);
     }
 
-    /** The generic wake-up got no answer: drop the rest of the block and wait longer before the next try. */
+    /** The generic wake-up got no answer. */
     public synchronized void genericFailed(long nowMs) {
         genericFails++;
-        lastBlockMs = nowMs;
+        lastGenericTryMs = nowMs;
         bus = null;
         queue.clear();
     }
 
-    /** A generic reading came back: normal interval again. */
+    /** The generic wake-up worked. */
     public synchronized void genericWorked() { genericFails = 0; }
+
+    /** Something changed (the engine computer just started answering): try generic at the next step. */
+    public synchronized void retryGenericSoon() { lastGenericTryMs = Long.MIN_VALUE / 2; }
+
+    /** The line the dash is working on (the other one is only visited); null when nothing is active. */
+    public synchronized Source primary() {
+        if (!any) return null;
+        return genericIsPrimary() ? Source.GENERIC : Source.SCI;
+    }
+
+    /** Active values that are only visited now and then because they live on the other line. */
+    public synchronized Set<String> slowIds() {
+        Set<String> ids = new LinkedHashSet<>();
+        if (genericIsPrimary()) for (Param p : sciOnly) ids.add(p.id);
+        return ids;
+    }
 
     /** The line the dongle is on after the last step handed out (null before the first switch). */
     public synchronized Source currentBus() { return bus; }

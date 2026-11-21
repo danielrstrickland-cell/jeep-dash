@@ -43,4 +43,12 @@ public class LayoutCodecTest {
                 T.ok(apart, a.key + " overlaps " + b.key);
             }
     }
+
+    public static void defaultLayoutsNeedOnlyOneLine() {
+        for (String look : new String[]{"xp", "jeep"}) {
+            PollScheduler s = new PollScheduler(60000);
+            s.setActive(LayoutCodec.defaultFor(look, 1280, 800).activeParamIds());
+            T.eq(java.util.Collections.emptySet(), s.slowIds(), look + ": every default gauge is on the working line");
+        }
+    }
 }
