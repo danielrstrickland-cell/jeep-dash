@@ -29,7 +29,10 @@ public final class PollScheduler {
     public static final class Step {
         public final Kind kind;
         public final Param param;
-        Step(Kind kind, Param param) { this.kind = kind; this.param = param; }
+        /** A second one-byte value riding in the same Jeep-line read, or null. */
+        public final Param second;
+        Step(Kind kind, Param param) { this(kind, param, null); }
+        Step(Kind kind, Param param, Param second) { this.kind = kind; this.param = param; this.second = second; }
     }
 
     static final int FAILS_BEFORE_FALLBACK = 2;
@@ -39,6 +42,7 @@ public final class PollScheduler {
     private final long otherEveryMs;
     private final Function<String, Param> lookup;
     private List<Param> sciCycle = new ArrayList<>();      // everything the Jeep line can read
+    private List<Param[]> sciReads = new ArrayList<>();    // the same, as reads: one value, or two one-byte values
     private List<Param> genCycle = new ArrayList<>();      // everything generic can read
     private List<Param> sciOnly = new ArrayList<>();       // only on the Jeep line
     private boolean needsGeneric, any;
@@ -64,16 +68,19 @@ public final class PollScheduler {
      * The caller turns that into how long a reading may stay on screen.
      */
     public synchronized Map<String, Integer> readGaps() {
-        List<Param> cycle = genericIsPrimary() ? genCycle : sciCycle;
+        boolean generic = genericIsPrimary();
+        int n = generic ? genCycle.size() : sciReads.size();
         Map<String, Integer> first = new LinkedHashMap<>(), last = new LinkedHashMap<>(), gap = new LinkedHashMap<>();
-        for (int i = 0; i < cycle.size(); i++) {
-            String id = cycle.get(i).id;
-            Integer before = last.put(id, i);
-            if (before == null) first.put(id, i);
-            else gap.merge(id, i - before, Math::max);
+        for (int i = 0; i < n; i++) {
+            Param[] read = generic ? new Param[]{genCycle.get(i)} : sciReads.get(i);
+            for (Param p : read) {
+                Integer before = last.put(p.id, i);
+                if (before == null) first.put(p.id, i);
+                else gap.merge(p.id, i - before, Math::max);
+            }
         }
         for (Map.Entry<String, Integer> e : first.entrySet())      // wrap round to the next cycle
-            gap.merge(e.getKey(), cycle.size() - last.get(e.getKey()) + e.getValue(), Math::max);
+            gap.merge(e.getKey(), n - last.get(e.getKey()) + e.getValue(), Math::max);
         return gap;
     }
 
@@ -98,6 +105,7 @@ public final class PollScheduler {
             if (p.sciIds == null) needs = true;
         }
         sciCycle = weighted(sci);
+        sciReads = paired(sciCycle);
         genCycle = weighted(gen);
         sciOnly = only;
         needsGeneric = needs;
@@ -118,6 +126,34 @@ public final class PollScheduler {
         return cycle;
     }
 
+    /**
+     * The engine computer answers two ids in one request, so two one-byte values share a read; a two-byte
+     * value already uses both ids and goes alone, and a value is never paired with itself.
+     */
+    private static List<Param[]> paired(List<Param> cycle) {
+        List<Param[]> reads = new ArrayList<>();
+        Param waiting = null;
+        for (Param p : cycle) {
+            if (p.sciIds.length != 1) {
+                reads.add(new Param[]{p});
+            } else if (waiting == null) {
+                waiting = p;
+            } else if (waiting == p) {
+                reads.add(new Param[]{p});
+            } else {
+                reads.add(new Param[]{waiting, p});
+                waiting = null;
+            }
+        }
+        if (waiting != null) reads.add(new Param[]{waiting});
+        return reads;
+    }
+
+    private Step sciRead() {
+        Param[] r = sciReads.get(sciIdx++ % sciReads.size());
+        return new Step(Kind.READ_SCI, r[0], r.length > 1 ? r[1] : null);
+    }
+
     private boolean genericIsPrimary() { return needsGeneric && genericFails < FAILS_BEFORE_FALLBACK; }
 
     public synchronized Step next(long nowMs) {
@@ -131,7 +167,7 @@ public final class PollScheduler {
 
         if (!needsGeneric) {
             if (bus != Source.SCI) { bus = Source.SCI; return new Step(Kind.SWITCH_TO_SCI, null); }
-            return new Step(Kind.READ_SCI, sciCycle.get(sciIdx++ % sciCycle.size()));
+            return sciRead();
         }
 
         if (genericIsPrimary()) {
@@ -152,7 +188,7 @@ public final class PollScheduler {
         }
         if (sciCycle.isEmpty()) return new Step(Kind.IDLE, null);
         if (bus != Source.SCI) { bus = Source.SCI; return new Step(Kind.SWITCH_TO_SCI, null); }
-        return new Step(Kind.READ_SCI, sciCycle.get(sciIdx++ % sciCycle.size()));
+        return sciRead();
     }
 
     private Step visitJeepLine(long nowMs) {

@@ -15,6 +15,9 @@ public class PollRunnerTest {
         boolean dongleAnswers = true;
         boolean wakeAnswers = true;       // generic 5-baud wake-up
         int rpmRaw = 0x1680;              // 720 rpm over SCI (raw/8)
+        boolean garblePairs;              // answer two-id reads with the wrong echo
+
+        static int val(int id) { return id == 0x16 ? 0x80 : id == 0x17 ? 0x69 : 0x80; }
 
         @Override public void write(byte[] f) {
             int seq = ((f[2] & 0xff) << 8) | (f[3] & 0xff);
@@ -40,7 +43,9 @@ public class PollRunnerTest {
             else if (hex.equals("61 04 00 02 f4 16 01")) reply(seq, "01 00 02 16 80");
             else if (hex.equals("61 04 00 02 f4 17 01")) reply(seq, "01 00 02 17 69");
             else if (hex.startsWith("61 04 00 02 f4")) reply(seq, String.format("01 00 02 %02x 80", inner[5] & 0xff));
-            else if (hex.startsWith("61 04 00 03 f4")) reply(seq, String.format("01 00 03 10 %02x 00", inner[6] & 0xff));
+            else if (hex.startsWith("61 04 00 03 f4"))      // two ids: <first value> <second id> <second value>
+                reply(seq, String.format("01 00 03 %02x %02x %02x", val(inner[5] & 0xff),
+                        garblePairs ? 0xee : inner[6] & 0xff, val(inner[6] & 0xff)));
             else reply(seq, "01 00 01 00");
         }
         void reply(int seq, String payload) {
@@ -242,7 +247,7 @@ public class PollRunnerTest {
 
     public static void valuesBlankAsSoonAsTheEngineStopsAnswering() throws Exception {
         Rig r = new Rig("rpm", "coolant");
-        r.steps(4);
+        r.steps(5);                                        // set-up, rpm three times, then coolant
         T.ok(r.values.get("coolant", 0) != null, "coolant was read");
         r.car.engineAnswers = false;
         r.steps(3);
@@ -312,5 +317,23 @@ public class PollRunnerTest {
         sent.addAll(real.car.sent);
         T.ok(sent.size() > 400, "both rigs talked");
         for (String s : sent) T.ok(Protocols.allowed(Hex.bytes(s)), "sent something off the read-only list: " + s);
+    }
+
+    public static void twoOneByteValuesComeBackFromOneRead() throws Exception {
+        Rig r = new Rig("coolant", "map_v");
+        r.steps(2);                                        // set-up, then one read
+        T.eq("61 04 00 03 f4 16 17 01", r.car.sent.get(r.car.sent.size() - 1), "both ids in one request");
+        T.near(147.2, r.values.get("coolant", 0), 0.1, "first value");
+        T.near(2.06, r.values.get("map_v", 0), 0.01, "second value");
+        T.eq(2, r.runner.goodReads(), "two readings from one read");
+    }
+
+    public static void aPairWithTheWrongEchoFillsNothing() throws Exception {
+        Rig r = new Rig("map_v", "spark");               // equal weights: every read is a pair
+        r.car.garblePairs = true;
+        r.steps(4);
+        T.eq(null, r.values.get("map_v", 0), "a reply that does not name the second id is not trusted");
+        T.eq(null, r.values.get("spark", 0), "for either value");
+        T.ok(!r.runner.vehicleAnswering(), "three such replies count as no answer");
     }
 }

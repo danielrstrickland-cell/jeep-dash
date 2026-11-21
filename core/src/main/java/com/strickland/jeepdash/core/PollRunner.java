@@ -142,7 +142,8 @@ public final class PollRunner {
                 break;
             case READ_SCI:
                 exchange(Hex.bytes(Protocols.SCI_FAST), false, ackMs);
-                read(s.param, Source.SCI, Protocols.sciRequest(s.param.sciIds));
+                if (s.second == null) read(s.param, Source.SCI, Protocols.sciRequest(s.param.sciIds));
+                else readPair(s.param, s.second);
                 break;
             case READ_GENERIC:
                 read(s.param, Source.GENERIC, Protocols.genericRequest(s.param.pid));
@@ -179,15 +180,40 @@ public final class PollRunner {
         Double v = p.decode(src, r.data);
         if (v != null) {
             values.put(p.id, v, clock.getAsLong());
-            goodReads++;
-            misses = 0;
-            if (!answering) {
-                answering = true;
-                sched.engineAnswering();       // key just came on: generic gets a fresh start
-                applyStaleTimes();
-            }
+            good(1);
+        } else {
+            miss(src);
+        }
+    }
+
+    /** Two one-byte values in one request; the answer is <first value> <second id> <second value>. */
+    private void readPair(Param a, Param b) throws IOException {
+        int ia = a.sciIds[0], ib = b.sciIds[0];
+        byte[] d = exchange(Protocols.sciRequest(ia, ib), true, readMs).data;
+        boolean named = d != null && d.length >= 3 && (d[1] & 0xff) == ib;
+        Double va = named ? a.decode(Source.SCI, new byte[]{(byte) ia, d[0]}) : null;
+        Double vb = named ? b.decode(Source.SCI, new byte[]{(byte) ib, d[2]}) : null;
+        if (va == null || vb == null) {
+            miss(Source.SCI);
             return;
         }
+        long now = clock.getAsLong();
+        values.put(a.id, va, now);
+        values.put(b.id, vb, now);
+        good(2);
+    }
+
+    private void good(int readings) {
+        goodReads += readings;
+        misses = 0;
+        if (!answering) {
+            answering = true;
+            sched.engineAnswering();       // key just came on: generic gets a fresh start
+            applyStaleTimes();
+        }
+    }
+
+    private void miss(Source src) {
         // Only the working line says whether the engine computer is there; a miss on a visit is just a miss.
         if (src != sched.primary()) return;
         misses++;

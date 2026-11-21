@@ -136,4 +136,32 @@ public class PollSchedulerTest {
         T.eq(Source.GENERIC, s.primary(), "key on: generic is the working line again");
         T.eq("SWITCH_TO_GENERIC", show(s.next(1000)), "and is tried at once");
     }
+
+    static String pair(PollScheduler.Step st) {
+        return st.kind + " " + st.param.id + (st.second == null ? "" : "+" + st.second.id);
+    }
+
+    public static void oneByteValuesShareAJeepLineRead() {
+        PollScheduler s = sched("coolant", "map_v", "spark");      // weights 1, 2, 2
+        s.next(0);
+        T.eq("READ_SCI coolant+map_v", pair(s.next(1)), "two one-byte values in one read");
+        T.eq("READ_SCI spark+map_v", pair(s.next(2)), "pairs keep forming across the cycle");
+        T.eq("READ_SCI spark", pair(s.next(3)), "an odd one out goes alone");
+        T.eq("READ_SCI coolant+map_v", pair(s.next(4)), "three reads instead of five per cycle");
+    }
+
+    public static void twoByteValuesAndRepeatsAreNeverPaired() {
+        PollScheduler s = sched("rpm", "map_v");                   // rpm is a two-byte value; map_v comes twice
+        s.next(0);
+        for (int i = 1; i <= 10; i++) {
+            PollScheduler.Step st = s.next(i);
+            T.ok(st.second == null, "read " + i + " carries one value: " + pair(st));
+        }
+    }
+
+    public static void readGapsCountPairedReads() {
+        Map<String, Integer> g = sched("coolant", "map_v", "spark").readGaps();
+        T.eq(3, g.get("coolant"), "coolant comes round every third read now");
+        T.eq(2, g.get("map_v"), "map_v at most two reads apart");
+    }
 }
