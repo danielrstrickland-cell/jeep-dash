@@ -377,7 +377,7 @@ public class SplashActivity extends Activity implements ServiceConnection, LinkS
             }
             if (at == label.length && doneAt < 0) doneAt = t;
             boolean ready = linkGood && engineGood;
-            String verdict = doneAt < 0 ? null : ready ? "READY  ·  START ENGINE" : "OPENING DASH  ·  CHECK THE LINK";
+            String verdict = doneAt < 0 ? null : ready ? "READY  \u00B7  START ENGINE" : "OPENING DASH  ·  CHECK THE LINK";
             art.draw(c, getWidth(), getHeight(), t, label, result, state, verdict, ready);
             if (doneAt >= 0 && t >= doneAt + HOLD + 0.4f) openDash();
             else postInvalidateOnAnimation();
