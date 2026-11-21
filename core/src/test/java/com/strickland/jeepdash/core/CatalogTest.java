@@ -25,7 +25,7 @@ public class CatalogTest {
     }
 
     public static void everyValueIsOnTheJeepLine() {
-        for (Param p : Catalog.all()) T.ok(!p.slow(), p.id + " must have a Jeep-line id");
+        for (Param p : Catalog.all()) if (!p.tablet) T.ok(!p.slow(), p.id + " must have a Jeep-line id");
     }
 
     /** Raw answers from the 22:31 capture of the GearWrench app; formulas cross-checked with ChryslerScanner. */
@@ -52,5 +52,21 @@ public class CatalogTest {
         T.near(0, sci("knock_v", "1f 00"), 0.001, "knock sensor");
         T.near(-3.125, gen("stft", "48 6b d1 41 06 7c 00"), 0.001, "generic short-term trim");
         T.near(50.2, gen("load", "48 6b d1 41 04 80 00"), 0.1, "generic load");
+    }
+
+    public static void tabletValuesAreNeverAskedOfTheEngine() {
+        for (String id : new String[]{"gps_mph", "g_force", "g_accel", "zero_sixty", "speedo_err"}) {
+            Param p = Catalog.byId(id);
+            T.ok(p != null && p.tablet, id + " comes from the tablet");
+            T.ok(p.sciIds == null && p.pid == null, id + " has nothing to request");
+        }
+        T.ok(!Catalog.byId("rpm").tablet, "engine values are not tablet values");
+    }
+
+    public static void aTabletValueIsNotAGenericLineValue() {
+        Param p = Catalog.byId("g_force");
+        T.ok(!p.slow(), "nothing to wait for on the generic line");
+        T.ok(p.decode(Source.SCI, new byte[]{0x0a, 0x10}) == null && p.decode(Source.GENERIC, new byte[8]) == null,
+                "and no reply from the Jeep is ever taken for it");
     }
 }
