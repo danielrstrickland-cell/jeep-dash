@@ -11,8 +11,12 @@ import android.view.Window;
 import android.view.WindowManager;
 
 import com.strickland.jeepdash.core.Spectrum;
+import com.strickland.jeepdash.core.VizTune;
 
-/** The visualizer screen: tap for the next look, COLORS for the next colour profile, drag the BARS slider. */
+/**
+ * The visualizer screen: tap for the next look, COLORS for the next colour profile, drag the BARS slider,
+ * TUNE for a drop-down panel that adjusts the look on screen (every look remembers its own settings).
+ */
 public class VisualizerView extends View {
     public interface Host { void onDashButton(); }
 
@@ -22,6 +26,7 @@ public class VisualizerView extends View {
     private volatile Spectrum spectrum;
     private long lastNs, startNs;
     private boolean running, sliding;
+    private int tuneRow = -1;
 
     public VisualizerView(Context context, Host host) {
         super(context);
@@ -32,6 +37,7 @@ public class VisualizerView extends View {
         painter.color = Math.floorMod(prefs.getInt("color", 1), VizPainter.COLORS.length);
         int bars = prefs.getInt("bars", 32);
         for (int n : VizPainter.COUNTS) if (n == bars) painter.shown = n;
+        painter.tune = VizTune.load(prefs.getString("tune", null));
     }
 
     void setSpectrum(Spectrum s) { spectrum = s; }
@@ -67,6 +73,7 @@ public class VisualizerView extends View {
         lastNs = now;
         Spectrum s = spectrum;
         if (s != null) {
+            s.fallSpeed = painter.tune.get(painter.look, "fall");
             s.copy(painter.levels, painter.peaks);
             painter.vu = s.vu();
             painter.bass = s.bass();
@@ -88,11 +95,22 @@ public class VisualizerView extends View {
             }
             return true;
         }
+        float x = e.getX(), y = e.getY();
+        if (action == MotionEvent.ACTION_DOWN) tuneRow = painter.tuneOpen ? painter.rowAt(x, y) : -1;
+        if (tuneRow >= 0 && !painter.rowIsSwitch(tuneRow)) painter.dragRow(tuneRow, x);
         if (action != MotionEvent.ACTION_UP) return true;
-        if (painter.dashButton.contains(e.getX(), e.getY())) {
+        if (tuneRow >= 0) {
+            if (painter.rowIsSwitch(tuneRow) && painter.rowAt(x, y) == tuneRow) painter.flipRow(tuneRow);
+            tuneRow = -1;
+        } else if (painter.dashButton.contains(x, y)) {
             host.onDashButton();
-        } else if (painter.colorButton.contains(e.getX(), e.getY())) {
+        } else if (painter.colorButton.contains(x, y)) {
             painter.color = (painter.color + 1) % VizPainter.COLORS.length;
+        } else if (painter.tuneButton.contains(x, y)) {
+            painter.tuneOpen = !painter.tuneOpen;
+        } else if (painter.tuneOpen) {
+            if (painter.resetButton.contains(x, y)) painter.tune.reset(painter.look);
+            else if (!painter.panel.contains(x, y)) painter.tuneOpen = false;      // a tap outside closes the panel
         } else {
             painter.look = (painter.look + 1) % VizPainter.LOOKS.length;
         }
@@ -101,7 +119,8 @@ public class VisualizerView extends View {
     }
 
     private void save() {
-        prefs.edit().putInt("look2", painter.look).putInt("color", painter.color).putInt("bars", painter.shown).apply();
+        prefs.edit().putInt("look2", painter.look).putInt("color", painter.color).putInt("bars", painter.shown)
+                .putString("tune", painter.tune.save()).apply();
         invalidate();
     }
 }
