@@ -194,7 +194,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         switch (action) {
             case "switch": switchLook(); break;
             case "tab:gauges": view.chrome.tab = "gauges"; view.invalidate(); break;
-            case "tab:viz": view.chrome.tab = "viz"; view.invalidate(); break;
+            case "tab:viz": openVisualizer(); break;
             case "logs": showLogs(); break;
             case "edit":
                 view.chrome.tab = "gauges";
@@ -216,6 +216,11 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case "status": showStatus(); break;
             default: break;
         }
+    }
+
+    /** The visualizer is its own screen with its own app icon; this brings it up from the dash. */
+    private void openVisualizer() {
+        startActivity(new Intent(this, VisualizerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
     }
 
     @Override
@@ -289,11 +294,12 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         final boolean isXp = "xp".equals(look);
         final String[] choices = isXp ? XpTheme.SCHEMES : JeepTheme.BACKLIGHTS;
         final int n = choices.length;
-        String[] items = new String[n + 3];
+        String[] items = new String[n + 4];
         for (int i = 0; i < n; i++) items[i] = (isXp ? "Window colour: " : "Backlight: ") + choices[i];
         items[n] = "Check for update";
         items[n + 1] = "Put this look's gauges back to the original layout";
         items[n + 2] = "Share link log (for troubleshooting)";
+        items[n + 3] = "Music visualizer";
         new AlertDialog.Builder(this)
                 .setTitle("Jeep Dash  (build " + buildNumber() + ")")
                 .setItems(items, (dlg, which) -> {
@@ -307,6 +313,10 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                     }
                     if (which == n + 2) {
                         shareLinkLog();
+                        return;
+                    }
+                    if (which == n + 3) {
+                        openVisualizer();
                         return;
                     }
                     if (isXp) {

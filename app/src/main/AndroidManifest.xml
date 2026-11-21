@@ -18,6 +18,7 @@
             android:name=".DashActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:exported="true"
+            android:launchMode="singleTask"
             android:screenOrientation="sensorLandscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -29,7 +30,9 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:exported="true"
             android:label="Jeep Visualizer"
-            android:screenOrientation="sensorLandscape">
+            android:launchMode="singleTask"
+            android:screenOrientation="sensorLandscape"
+            android:taskAffinity="com.strickland.jeepdash.visualizer">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
