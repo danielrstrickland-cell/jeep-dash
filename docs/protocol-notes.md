@@ -25,19 +25,82 @@ Payload: `01 | innerLen(2) | inner`. RX ack `00 00 02 00 00`, then reply `01 | l
 - `61 05 1e 33 02 02 01 e0 00 00 00 05` = 5-baud init to 0x33 -> reply `.. 08 08 ..` (ISO 9141-2 keywords).
 - `61 04 | len(2) | msg | flag` send vehicle message, get reply.
 
-## Generic (ISO 9141-2) setup replay
-60 05 02 01 / 60 01 09 c5 92 / 60 03 00 50 03 e8 00 37 00 05 / 61 06 01 / 61 05 1e 33 02 02 01 e0 00 00 00 05 (init) /
-61 04 00 06 68 6a f1 01 00 c4 ff / 60 04 00 06 68 6a f1 01 00 c4 02 58 01 / 60 06 ff / 60 05 01 01 / 60 01 09 c5 92 /
-60 02 00 00 28 a0 00 08 / 60 03 00 c8 0b b8 00 37 00 05 / 61 06 01 / 60 c3
-Request: `61 04 00 06 68 6a f1 01 <PID> <sum> 01` -> reply `48 6b d1 41 <PID> data.. sum`.
-Polled: 0C RPM (/4), 0D speed, 0E timing, 0F IAT, 11 TPS. Verified vs screenshot (720 rpm, 0 mph, 127.4 F, 13.7 %).
+## Generic (ISO 9141-2) — what the dash sends (matches `Protocols.java`)
 
-## SCI (Chrysler JTEC) setup replay
-60 05 19 01 / 60 01 49 c4 21 / 60 02 00 00 1e 84 00 08 / 60 03 00 78 07 d0 00 14 00 05 / 61 04 00 01 10 01
-Before each read: `60 02 00 00 f4 24 00 08 ff` (62500).
-Request: `61 04 00 02 f4 <id> 01` -> reply `<id> <val>`; 2-byte: `f4 <hi> <lo>` -> `<hiVal> <lo> <loVal>`.
-- F4 0A/0B RPM = raw16 / 8 (idle ~730, matches generic)
-- F4 16 coolant: (raw - 64) C  (0x91 -> 177.8 F; screenshot 177)
-- F4 17 MAP volts = raw / 51 (0x69 -> 2.06 V; screenshot 2.060)
-- F4 2F spark advance = raw deg (07/08; screenshot 7)
-Rates seen: generic ~3.3 reads/s total, SCI ~4 reads/s total.
+Set-up, in order: `60 05 02 01`, `60 01 09 c5 92`, `60 03 00 50 03 e8 00 37 00 05`, `61 06 01`, then a
+5 s wait, then the 5-baud wake-up `61 05 1e 33 02 02 01 e0 00 00 00 05`. The wake-up answer comes back as
+payload type `02` (`02 00 02 08 08 ..`), about 2.3 s later. First request `61 04 00 06 68 6a f1 01 00 c4 ff`
+(supported PIDs; an answer means the line is up). Then `60 04 00 06 68 6a f1 01 00 c4 02 58 01`
+(keep-alive message every 600 ms), `60 06 ff` (keep-alive on), `61 06 02 00 03 48 6b d1 00 00` (reply filter).
+
+Read: `61 04 00 06 68 6a f1 01 <pid> <sum> 01`, answer `48 6b d1 41 <pid> A [B] <sum>`, about 290 ms each.
+Supported PIDs on this Jeep: 01 03 04 05 06 07 0b 0c 0d 0e 0f 11 13 14 15 1c 1e.
+
+Leaving: `60 06 00`, `60 0c 13 88 ff ff ff ff`, `60 06 00`. The keep-alive must be off before the Jeep
+line is used, or it talks over it.
+
+On the tablet the first wake-up after connecting sometimes gets no answer and the second works.
+
+## Jeep line (Chrysler SCI, JTEC) — what the dash sends
+
+Set-up: `60 05 19 01`, `60 01 49 c4 21`, `60 02 00 00 1e 84 00 08` (7812.5 baud),
+`60 03 00 78 07 d0 00 14 00 05`, `61 04 00 01 10 01` (answer `10 05 96 7e 6d 6b 6a fe 69`).
+
+Read: `60 02 00 00 f4 24 00 08 ff` (62500 baud, fast mode) then `61 04 00 0N f4 <id> [<id>] 01`.
+A one-id answer is `<id> <value>`. A two-id answer is `<high value> <second id> <low value>`.
+About 220 ms per read. `60 02 00 00 1e 84 00 08 ff` drops back to slow speed.
+
+The GearWrench app itself reads two-id answers wrongly: it takes the echoed second id as the high byte.
+That is why it shows engine speed stuck at 352-383 rpm, 53 mph while parked and a 1728 rpm target idle.
+
+## Jeep-line live data (table F4)
+
+Ids and scalings: second capture of the GearWrench app (engine running, whole list scrolled), checked
+against the generic line on the same evening and against the open-source ChryslerScanner project's JTEC
+table. "A" is the value byte, "AB" a two-id value (A high, B low).
+
+| id | value | scaling | in the dash |
+|----|-------|---------|-------------|
+| 0a 0b | engine speed | AB / 8 rpm | rpm |
+| 0c 0d | vehicle speed | AB / 64 mph | speed |
+| 0f | battery voltage | A x 0.0625 V | batt_v |
+| 10 | battery/ambient temp sensor | A x 5/255 V | |
+| 11 | battery/ambient temperature | A - 64 degC | batt_temp |
+| 12 | throttle sensor | A x 5/255 V; A x 100/255 % equals generic PID 11 | throttle |
+| 13, 14 | minimum / calculated throttle volts | A x 5/255 V | |
+| 15 | coolant sensor volts | A x 5/255 V | |
+| 16 | coolant temperature | A - 64 degC | coolant |
+| 17 | MAP sensor volts | A x 5/255 V | map_v |
+| 18 | manifold pressure | A x 0.412 kPa | map_kpa |
+| 19 | barometric pressure | A x 0.412 kPa | baro |
+| 1b | upstream O2 volts | A x 5/255 V | o2_front |
+| 1d | intake air sensor volts | A x 5/255 V | |
+| 1e | intake air temperature | A - 64 degC | iat |
+| 1f | knock sensor volts | A x 5/255 V | knock_v |
+| 21 | cruise switch volts | A x 5/255 V | |
+| 27 28 | injector pulse width | AB / 256 ms | inj_ms |
+| 2b | long-term fuel trim | signed A x 0.196 % | ltft |
+| 2f | spark advance | signed A x 0.5 deg | spark |
+| 35 36 | target idle | AB / 8 rpm | target_idle |
+| 37, 3e | target / actual idle motor steps | A | iac (3e) |
+| 3a | charging voltage target | A x 0.0625 V | charge_v |
+| 3b | cruise set speed | A x 0.5 mph | |
+| 43 | adaptive cell id | A | |
+| 44 | short-term fuel trim | signed A x 0.196 % | stft |
+| 48 | downstream O2 volts | A x 5/255 V | o2_rear |
+| 4a | closed-loop timer | A x 0.0535 min | |
+| 4b 4c | time from start | AB x 0.000209 min | |
+| de | fuel level sender volts | A x 5/255 V | fuel_v |
+| e3 | engine load | A x 100/255 % | load |
+
+Seen but not used yet: switch and relay state bytes (0e, 3c, 3d, 3f, 40, 41, 42, 4e, 4f, 60, 7a, 7b, 8e,
+ee), fuel level and fuel used (df, e0), transmission temperature (9b), total knock retard (30; this
+engine computer answers f0/0f alternately, so it is not real data here).
+
+The app also uses slow-speed requests (`14 46` throttle percent, `14 42`, `1a 03`, `1a 04`) and table
+`f3` (purge readings). The dash does not send those.
+
+## Read-only rule
+
+`Protocols.allowed()` is the complete list of what the dash may send: the set-up commands above, generic
+mode 01 reads and Jeep-line F4 reads. `PollRunner` refuses anything else.

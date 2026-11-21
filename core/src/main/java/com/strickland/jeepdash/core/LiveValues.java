@@ -17,6 +17,13 @@ public final class LiveValues {
     /** Gives one value its own stale time (slow values read only every few seconds). */
     public void setStaleMs(String id, long ms) { staleMs.put(id, ms); }
 
+    /** Forgets every reading and any hold: the link dropped or the engine computer went silent. */
+    public synchronized void clear() {
+        latest.clear();
+        holding = false;
+        holdUntil = -1;
+    }
+
     public void clearStaleMs() { staleMs.clear(); }
 
     /**

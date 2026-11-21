@@ -43,6 +43,32 @@ public final class Protocols {
      */
     public static final String SCI_SLOW = "60 02 00 00 1e 84 00 08 ff";
 
+    private static final java.util.Set<String> FIXED = new java.util.HashSet<>();
+    static {
+        String[][] groups = {GENERIC_SETUP_PRE, {GENERIC_INIT, GENERIC_FIRST_QUERY}, GENERIC_SETUP_POST,
+                {STOP_KEEPALIVE, SCI_FAST, SCI_SLOW}, GENERIC_LEAVE, SCI_SETUP};
+        for (String[] g : groups) for (String c : g) FIXED.add(c);
+    }
+
+    /**
+     * The read-only list. True only for the captured line-setup commands above, a generic "show current
+     * data" request (mode 01) and a Jeep-line read of the F4 live-data table. Nothing that clears codes,
+     * runs a test or writes anything can pass, whatever the rest of the app asks for.
+     */
+    public static boolean allowed(byte[] inner) {
+        if (inner == null || inner.length < 2) return false;
+        if (FIXED.contains(Hex.str(inner))) return true;
+        if ((inner[0] & 0xff) != 0x61 || (inner[1] & 0xff) != 0x04 || inner.length < 7) return false;
+        int n = ((inner[2] & 0xff) << 8) | (inner[3] & 0xff);
+        if (inner.length != 4 + n + 1 || inner[inner.length - 1] != 0x01) return false;
+        if (n == 6) {                                   // 68 6a f1 01 <pid> <sum>
+            return (inner[4] & 0xff) == 0x68 && (inner[5] & 0xff) == 0x6a && (inner[6] & 0xff) == 0xf1
+                    && (inner[7] & 0xff) == 0x01
+                    && (inner[9] & 0xff) == ((0x68 + 0x6a + 0xf1 + 0x01 + (inner[8] & 0xff)) & 0xff);
+        }
+        return (n == 2 || n == 3) && (inner[4] & 0xff) == 0xf4;      // f4 <id> [<id>]
+    }
+
     public static byte[] genericRequest(int pid) {
         int sum = (0x68 + 0x6a + 0xf1 + 0x01 + pid) & 0xff;
         return new byte[]{0x61, 0x04, 0x00, 0x06, 0x68, 0x6a, (byte) 0xf1, 0x01, (byte) pid, (byte) sum, 0x01};

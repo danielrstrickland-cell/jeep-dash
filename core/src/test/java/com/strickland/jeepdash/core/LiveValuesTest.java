@@ -29,4 +29,14 @@ public class LiveValuesTest {
         v.endHold(17000);
         T.eq(null, v.get("rpm", 20001), "after endHold the normal 3 s applies");
     }
+
+    public static void clearDropsReadingsAndAnyHold() {
+        LiveValues v = new LiveValues();
+        v.put("rpm", 700, 0);
+        v.hold(1000, 20000);
+        v.clear();
+        T.eq(null, v.get("rpm", 1500), "cleared");
+        v.put("rpm", 710, 30000);
+        T.eq(null, v.get("rpm", 40000), "the old hold is gone too");
+    }
 }
