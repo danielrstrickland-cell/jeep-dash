@@ -174,6 +174,7 @@ public final class KwpRunner implements Poller {
     private void keyOff() {
         answering = false;
         values.clear();
+        PorscheCatalog.newDrive();
     }
 
     private void send(String hex) throws IOException { exchange(Hex.bytes(hex), false, ackMs); }

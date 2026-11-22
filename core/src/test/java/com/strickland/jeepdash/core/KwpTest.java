@@ -58,6 +58,7 @@ public class KwpTest {
         final long[] now = {0};
         final KwpRunner runner;
         Rig(String... active) {
+            PorscheCatalog.newDrive();                      // the held peak belongs to the app, not to one rig
             car.session = new DongleSession(car);
             runner = new KwpRunner(car.session, values, () -> now[0]);
             runner.setTimeouts(30, 30, 30);
@@ -222,12 +223,70 @@ public class KwpTest {
     }
 
     public static void everyPorscheValueHasAGaugeRange() {
-        T.eq(11, PorscheCatalog.all().size(), "the nine recorded values, the boost sensor and battery volts");
+        T.eq(17, PorscheCatalog.all().size(), "the nine recorded values, the boost sensor, battery volts, peak boost"
+                + " and the five worked out by the screen itself");
         for (Param p : PorscheCatalog.all()) {
             T.ok(p.max > p.min, p.id + " has a scale");
             T.ok(PorscheCatalog.byId(p.id) == p, p.id + " can be looked up");
         }
         T.ok(PorscheCatalog.byId("map_v") == null, "Jeep-only values are not offered");
+    }
+
+    /** Group 16 as captured at idle, with the manifold pressure changed (250 x b x 0.04 mbar). */
+    static String group16(int b) {
+        return withSum(String.format("9a f1 10 61 16 0f 29 04 19 f9 06 01 32 5f 12 fa %02x 12 7d c8 19 b6 03 1a 3c 61 21 85 1c", b));
+    }
+
+    public static void peakBoostHoldsTheHighestBoostOfTheDrive() throws Exception {
+        Rig r = new Rig("boost_peak");
+        r.steps(2);
+        T.near(0, r.get("boost_peak"), 1e-9, "vacuum at idle is not boost: the peak starts at zero");
+        T.eq(Arrays.asList(0x16), r.car.groupsRead(), "its group is read without the boost gauge on screen");
+        r.car.replies.put(0x16, group16(180));              // 1800 mbar in the manifold, 1000 outside
+        r.steps(1);
+        T.near(800 * 0.0145038, r.get("boost_peak"), 1e-6, "11.6 psi of boost");
+        r.car.replies.put(0x16, group16(150));              // easing off: 1500 mbar
+        r.steps(1);
+        T.near(800 * 0.0145038, r.get("boost_peak"), 1e-6, "the peak is held");
+        r.car.replies.put(0x16, group16(190));
+        r.steps(1);
+        T.near(900 * 0.0145038, r.get("boost_peak"), 1e-6, "a higher one replaces it");
+    }
+
+    public static void peakBoostStartsAgainAfterTheKeyIsTurnedOff() throws Exception {
+        Rig r = new Rig("boost_peak");
+        r.car.replies.put(0x16, group16(180));
+        r.steps(2);
+        T.near(800 * 0.0145038, r.get("boost_peak"), 1e-6, "a peak from this drive");
+        r.car.keyOn = false;
+        r.steps(4);                                          // three misses, then a wake-up that fails
+        r.car.keyOn = true;
+        r.car.replies.put(0x16, group16(38));               // idle again
+        r.now[0] += KwpRunner.RETRY_WAKE_MS;
+        r.steps(2);
+        T.near(0, r.get("boost_peak"), 1e-9, "a new drive starts from zero");
+    }
+
+    public static void aPeakIsNotInventedFromADamagedReply() throws Exception {
+        Rig r = new Rig("boost_peak");
+        r.car.replies.put(0x16, withSum("9a f1 10 61 16 0f 29 04 19 f9 06 01 32 5f 05 fa 26 12 7d c8 19 b6 03 1a 3c 61 21 85 1c"));
+        r.steps(2);
+        T.ok(r.values.get("boost_peak", r.now[0]) == null, "manifold slot is not a pressure: nothing shown");
+    }
+
+    public static void theScreensOwnValuesAreOfferedAndNeverAskedOfTheCar() throws Exception {
+        for (String id : new String[]{"zero_sixty", "g_accel", "gps_mph", "g_force", "speedo_err"}) {
+            Param p = PorscheCatalog.byId(id);
+            T.ok(p != null && p.tablet, id + " is offered and comes from the screen itself");
+            T.ok(PorscheCatalog.value(id) == null, id + " has no group to read");
+        }
+        T.ok(!PorscheCatalog.byId("boost_peak").tablet && PorscheCatalog.value("boost_peak").group == 0x16, "peak boost is read from the car");
+        Rig r = new Rig("zero_sixty", "g_accel", "gps_mph");
+        T.eq(KwpRunner.Kind.IDLE, r.runner.step(), "nothing to ask the car for");
+        T.eq(0, r.car.sent.size(), "nothing sent");
+        Rig withSpeed = new Rig("zero_sixty", "speed");
+        withSpeed.steps(2);
+        T.eq(Arrays.asList(0x0a), withSpeed.car.groupsRead(), "only the road speed's group is read for the timer");
     }
 
     public static void choosingThePorscheSwapsTheWholeCatalog() {
