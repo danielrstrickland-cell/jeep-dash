@@ -34,8 +34,10 @@ Jeep's normal behavior and warn him when something drifts before a code ever set
 
 ## Anti-goals (failure even if it "works")
 
-- **Never writes to the engine computer.** The dash only reads. No actuation tests, resets, code
-  clearing or anything that changes how the engine runs.
+- **Never writes to the engine computer, with one exception** added on 2026-11-22 at the owner's request:
+  clearing the Jeep's stored codes from the Codes screen, after a confirmation that lists them and with the
+  engine stopped (docs/protocol-notes.md). No actuation tests, resets of learned values or anything else
+  that changes how the engine runs.
 - Not distracting: big readable values; layout editing only in an explicit edit mode, never by accident.
 - Not fragile: dropping the Bluetooth link must not crash or freeze the screen; it reconnects on its own.
 
