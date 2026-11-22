@@ -94,4 +94,7 @@ public final class Catalog {
     }
 
     public static Param byId(String id) { return porsche ? PorscheCatalog.byId(id) : BY_ID.get(id); }
+
+    /** A Jeep value whichever vehicle is selected (the Jeep's own runner uses it). */
+    public static Param jeep(String id) { return BY_ID.get(id); }
 }
