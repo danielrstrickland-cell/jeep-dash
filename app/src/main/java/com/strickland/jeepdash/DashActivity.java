@@ -21,6 +21,7 @@ import android.view.WindowManager;
 import android.widget.Toast;
 
 import com.strickland.jeepdash.core.Catalog;
+import com.strickland.jeepdash.core.PollRunner;
 import com.strickland.jeepdash.core.GaugeSpec;
 import com.strickland.jeepdash.core.GaugeType;
 import com.strickland.jeepdash.core.Layout;
@@ -432,6 +433,17 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                     view.invalidate();
                 });
             }
+        }
+        if (service != null && service.codesAvailable()) {
+            items.add("Trouble codes (read and clear)");
+            actions.add(() -> { if (service != null) CodesDialog.show(this, service); });
+        }
+        if (service != null && service.fastRefreshAvailable()) {
+            final PollRunner.Fast fast = service.fastRefresh();
+            items.add(fast == PollRunner.Fast.OFF ? "Fast refresh (experimental): off"
+                    : fast == PollRunner.Fast.ON ? "Fast refresh (experimental): ON"
+                    : "Fast refresh: turned itself off (readings went missing). Tap to try again");
+            actions.add(() -> { if (service != null) service.setFastRefresh(fast != PollRunner.Fast.ON); });
         }
         items.add("Check for update");
         actions.add(() -> UpdateChecker.check(this, buildNumber(), true));

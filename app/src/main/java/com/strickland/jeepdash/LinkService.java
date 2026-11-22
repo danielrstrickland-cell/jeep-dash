@@ -35,6 +35,7 @@ import com.strickland.jeepdash.core.KwpRunner;
 import com.strickland.jeepdash.core.PollRunner;
 import com.strickland.jeepdash.core.Poller;
 import com.strickland.jeepdash.core.PollScheduler;
+import com.strickland.jeepdash.core.SciCodes;
 import com.strickland.jeepdash.core.Trace;
 
 import java.io.IOException;
@@ -51,7 +52,8 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Keeps the dongle connection alive in the background: connects, runs the read loop, reconnects on its own,
- * and writes the drive log. Read-only toward the Jeep (see PollRunner / Protocols).
+ * and writes the drive log. Read-only toward the Jeep, except for clearing stored codes when the owner asks
+ * (see PollRunner / Protocols).
  */
 public class LinkService extends Service {
 
@@ -61,6 +63,17 @@ public class LinkService extends Service {
     public interface Listener {
         void onValues(LiveValues v);
         void onStatus(Status s, String detail);
+    }
+
+    /** Answer to a codes request, on the main thread. codes is null when the engine computer gave no list. */
+    public interface CodesListener {
+        void onCodes(List<Integer> codes, SciCodes.Outcome cleared);
+    }
+
+    private static final class CodesJob {
+        final boolean clear;
+        final CodesListener listener;
+        CodesJob(boolean clear, CodesListener listener) { this.clear = clear; this.listener = listener; }
     }
 
     public final class LocalBinder extends Binder {
@@ -103,6 +116,7 @@ public class LinkService extends Service {
     private volatile DongleSession session;
     private volatile Poller runner;
     private volatile int readsPerSec;
+    private volatile CodesJob codesJob;
     private Thread worker;
     private ScheduledExecutorService ticker;
 
@@ -137,11 +151,73 @@ public class LinkService extends Service {
 
     public String statusDetail() { return detail; }
 
+    /** True when the experimental fast refresh exists for this vehicle (the Jeep line for now). */
+    public boolean fastRefreshAvailable() { return !Catalog.porsche(); }
+
+    /** OFF, ON, or BACKED_OFF when it was dropped again because readings went missing. */
+    public PollRunner.Fast fastRefresh() {
+        Poller r = runner;
+        if (r instanceof PollRunner) return ((PollRunner) r).fastRefresh();
+        return getSharedPreferences("link", MODE_PRIVATE).getBoolean("fast", false) ? PollRunner.Fast.ON : PollRunner.Fast.OFF;
+    }
+
+    /** Turns the fast refresh on or off, now and for the next time the app starts. */
+    public void setFastRefresh(boolean on) {
+        getSharedPreferences("link", MODE_PRIVATE).edit().putBoolean("fast", on).apply();
+        Poller r = runner;
+        if (r instanceof PollRunner) ((PollRunner) r).setFastRefresh(on);
+    }
+
+    /** True when stored codes can be read on this vehicle (the Jeep for now). */
+    public boolean codesAvailable() { return !Catalog.porsche(); }
+
+    /** Reads the stored codes between two live-data reads. The answer comes on the main thread. */
+    public void readCodes(CodesListener l) { askCodes(new CodesJob(false, l)); }
+
+    /** Clears the stored codes (the one thing the dash ever changes in the engine computer), then reads them back. */
+    public void clearCodes(CodesListener l) { askCodes(new CodesJob(true, l)); }
+
+    private void askCodes(CodesJob job) {
+        if (!(runner instanceof PollRunner)) {      // no dongle link right now, or not the Jeep
+            answerCodes(job, null, job.clear ? SciCodes.Outcome.NOT_ANSWERING : null);
+            return;
+        }
+        codesJob = job;
+    }
+
+    private void answerCodes(CodesJob job, List<Integer> codes, SciCodes.Outcome cleared) {
+        main.post(() -> job.listener.onCodes(codes, cleared));
+    }
+
+    /** Runs a waiting codes request on the link thread, so nothing else talks to the dongle meanwhile. */
+    private void doCodes(Poller r) throws IOException {
+        CodesJob job = codesJob;
+        if (job == null) return;
+        codesJob = null;
+        if (!(r instanceof PollRunner)) {
+            answerCodes(job, null, job.clear ? SciCodes.Outcome.NOT_ANSWERING : null);
+            return;
+        }
+        PollRunner jeep = (PollRunner) r;
+        try {
+            if (job.clear) {
+                SciCodes.Cleared c = jeep.clearCodes();
+                answerCodes(job, c.left, c.outcome);
+            } else {
+                answerCodes(job, jeep.readCodes(), null);
+            }
+        } catch (IOException e) {
+            answerCodes(job, null, job.clear ? SciCodes.Outcome.FAILED : null);
+            throw e;
+        }
+    }
+
     /** Everything said to the dongle lately and what came back, for sharing when something misbehaves. */
     public String linkLog() {
         return "Jeep Dash link log\nAndroid " + Build.VERSION.RELEASE + " (SDK " + Build.VERSION.SDK_INT + "), "
                 + Build.MANUFACTURER + " " + Build.MODEL + "\nStatus now: " + status + " " + detail
-                + "\nReading: " + active + "\nUSB: " + usbDevices() + "\n\n" + trace.snapshot();
+                + "\nReading: " + active + "\nFast refresh: " + fastRefresh() + ", " + readsPerSec + " readings/s"
+                + "\nUSB: " + usbDevices() + "\n\n" + trace.snapshot();
     }
 
     /** What is plugged into the USB ports, as maker:product numbers (tells one cable's chip from another's). */
@@ -640,8 +716,14 @@ public class LinkService extends Service {
         reader.start();
 
         // the Porsche speaks a different language on a different line; which car this is was chosen in SETUP
-        Poller r = Catalog.porsche() ? new KwpRunner(s, values, LinkService::now)
-                : new PollRunner(s, new PollScheduler(OTHER_LINE_EVERY_MS), values, LinkService::now);
+        Poller r;
+        if (Catalog.porsche()) {
+            r = new KwpRunner(s, values, LinkService::now);
+        } else {
+            PollRunner jeep = new PollRunner(s, new PollScheduler(OTHER_LINE_EVERY_MS), values, LinkService::now);
+            jeep.setFastRefresh(getSharedPreferences("link", MODE_PRIVATE).getBoolean("fast", false));
+            r = jeep;
+        }
         r.setTrace(trace);
         activeDirty = false;
         r.setActive(active);
@@ -654,6 +736,7 @@ public class LinkService extends Service {
                     activeDirty = false;
                     r.setActive(active);
                 }
+                doCodes(r);
                 boolean busy = r.poll();
                 live = true;
                 setStatus(Status.LIVE, r.vehicleAnswering() ? "" : KEY_OFF_DETAIL);
@@ -664,6 +747,11 @@ public class LinkService extends Service {
             note("link lost: " + e.getMessage());
         } finally {
             if (runner == r) runner = null;
+            CodesJob waiting = codesJob;            // asked just as the link went away
+            if (waiting != null) {
+                codesJob = null;
+                answerCodes(waiting, null, waiting.clear ? SciCodes.Outcome.NOT_ANSWERING : null);
+            }
             if (session == s) session = null;
             s.close();
             values.clear();       // nothing on screen may outlive the link it came over

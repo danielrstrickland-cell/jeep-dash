@@ -100,10 +100,50 @@ engine computer answers f0/0f alternately, so it is not real data here).
 The app also uses slow-speed requests (`14 46` throttle percent, `14 42`, `1a 03`, `1a 04`) and table
 `f3` (purge readings). The dash does not send those.
 
-## Read-only rule
+## Jeep line: stored codes (captures of 2026-11-20 and 2026-11-22)
 
-`Protocols.allowed()` is the complete list of what the dash may send: the set-up commands above, generic
-mode 01 reads and Jeep-line F4 reads. `PollRunner` refuses anything else.
+All at slow speed: the app sends `60 02 00 00 1e 84 00 08 ff` before each request.
+
+| Request | Answer | Meaning |
+|---|---|---|
+| `61 04 00 01 10 01` | `10 <one byte per code> fe <sum>` | Stored-code list; `fe` ends it, `fd` is not a code, the last byte is the sum of the rest. `10 fe 0e` is an empty list. |
+| `61 04 00 01 17 01` | `17 e0 e0 e0` | Erase stored codes. `17 00` means refused (engine running). |
+| `61 04 00 02 23 01 01` | `01 01 f0` | Erase all fault data; the app sends it straight after the erase. |
+
+With codes stored the Jeep answered `10 05 96 7e 6d 6b 6a fe 69`. The GearWrench app's Read DTC screen
+showed four of them as P1682 (`05`), P0463 (`96`), P0138 (`7e`) and P0303 (`6d`); `6a` to `6e` are the
+misfire codes P0300 to P0304 and `ae` to `b1` are P0305 to P0308. The names of the other code numbers
+(`SciCodeNames`) are cross-checked against the open-source ChryslerScanner project's list for this family of
+engine computers. The dash shows a P number only where it is confirmed, and the Chrysler number otherwise.
+
+The app's Read DTC also sends `61 04 00 01 32 01`; this Jeep just echoes `32`. In the ChryslerScanner notes
+that request is the diesel computers' version of the same list. The dash does not send it.
+
+Other requests in the same family that the dash does not send: `23 02` (reset learned fuel trim), `23 03`
+(reset idle-air counter), `13` (actuator tests), `19` (set idle speed), `1c` (write memory).
+
+## Fast refresh (experimental, Jeep line)
+
+In every capture a Jeep-line read comes back about 183 ms after the request (the GearWrench app manages one
+read per 250 ms, the dash one per 225 ms), although the bytes take about 2 ms on the wire. That fits the
+dongle's timing command `60 03 00 78 07 d0 00 14 00 05`: 20 ms before sending, then 120 ms (`00 78`) of
+silence before the answer counts as complete. With Fast refresh on, the dash sends the same command with
+`00 1e` (30 ms). The GearWrench app never does, so this is a guess to be tried on the Jeep: `PollRunner`
+starts it only after three good reads, goes back to the captured value after two misses in a row or one
+miss in ten, leaves it off if readings then return, and always reads and clears codes at the captured value.
+It is a setting in the dongle; nothing extra is sent to the engine computer.
+
+## What the dash may send
+
+Reading: `Protocols.allowed()` is the complete list of what live data may send: the set-up commands above,
+generic mode 01 reads, Jeep-line F4 reads, the stored-code request and the Porsche's measured-value reads.
+`PollRunner` and `KwpRunner` refuse anything else.
+
+Writing: the dash was read-only until 2026-11-22, when the owner asked for clearing codes. That is the one
+write. `Protocols.allowedWrite()` passes exactly the two erase frames in the table above, and only
+`PollRunner.clearCodes()` asks it. A clear is sent only from the Codes screen after the owner confirms a box
+listing the codes, and only after the engine speed has been read as zero; the engine computer also refuses
+on its own while the engine runs. Still out: actuator tests, resets of learned values, writing memory.
 
 ## Porsche Cayenne Turbo (2003): KWP2000 on the K-line
 

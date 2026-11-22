@@ -2,7 +2,8 @@ package com.strickland.jeepdash.core;
 
 /**
  * Dongle setup sequences and read requests, exactly as captured from the GearWrench app
- * (docs/protocol-notes.md). Read-only: nothing here changes how the engine runs.
+ * (docs/protocol-notes.md). Read-only, with one exception the owner asked for on 2026-11-22: clearing the
+ * Jeep's stored codes ({@link #allowedWrite}). Nothing here runs a test or changes how the engine runs.
  */
 public final class Protocols {
     private Protocols() { }
@@ -30,9 +31,20 @@ public final class Protocols {
     /** What the GearWrench app sends when it leaves generic live data. */
     public static final String[] GENERIC_LEAVE = {"60 06 00", "60 0c 13 88 ff ff ff ff", "60 06 00"};
 
+    /** The dongle's timing for the Jeep line as the GearWrench app sets it (part of the line setup). */
+    public static final String SCI_TIMING = "60 03 00 78 07 d0 00 14 00 05";
+    /**
+     * Experimental fast refresh: the same timing with the first figure cut from 120 ms to 30 ms. In the
+     * captures every Jeep-line answer comes back about 180 ms after the request although the bytes take
+     * 2 ms on the wire, which fits the dongle waiting out 120 ms of silence before it calls the answer
+     * complete. The GearWrench app never sends this value, so the runner watches for misreads and goes
+     * back to the captured one on its own. It only changes how the dongle listens; nothing goes to the Jeep.
+     */
+    public static final String SCI_TIMING_FAST = "60 03 00 1e 07 d0 00 14 00 05";
+
     /** Chrysler SCI (7812.5 baud) setup. */
     public static final String[] SCI_SETUP = {
-            "60 05 19 01", "60 01 49 c4 21", "60 02 00 00 1e 84 00 08", "60 03 00 78 07 d0 00 14 00 05",
+            "60 05 19 01", "60 01 49 c4 21", "60 02 00 00 1e 84 00 08", SCI_TIMING,
             "61 04 00 01 10 01"};
     /** Sent before every SCI read: switches the dongle to 62500 baud. */
     public static final String SCI_FAST = "60 02 00 00 f4 24 00 08 ff";
@@ -58,7 +70,7 @@ public final class Protocols {
     private static final java.util.Set<String> FIXED = new java.util.HashSet<>();
     static {
         String[][] groups = {GENERIC_SETUP_PRE, {GENERIC_INIT, GENERIC_FIRST_QUERY}, GENERIC_SETUP_POST,
-                {STOP_KEEPALIVE, SCI_FAST, SCI_SLOW}, GENERIC_LEAVE, SCI_SETUP,
+                {STOP_KEEPALIVE, SCI_FAST, SCI_SLOW, SCI_TIMING_FAST}, GENERIC_LEAVE, SCI_SETUP,
                 KWP_SETUP_PRE, {KWP_INIT}, KWP_SETUP_POST};
         for (String[] g : groups) for (String c : g) FIXED.add(c);
     }
@@ -67,7 +79,7 @@ public final class Protocols {
      * The read-only list. True only for the captured line-setup commands above, a generic "show current
      * data" request (mode 01), a Jeep-line read of the F4 live-data table and a Porsche "read measured
      * values" request (service 21) to the engine computer. Nothing that clears codes, runs a test or writes
-     * anything can pass, whatever the rest of the app asks for.
+     * anything can pass, whatever the rest of the app asks for; clearing codes has its own list below.
      */
     public static boolean allowed(byte[] inner) {
         if (inner == null || inner.length < 2) return false;
@@ -85,6 +97,17 @@ public final class Protocols {
                     && (inner[9] & 0xff) == ((0x68 + 0x6a + 0xf1 + 0x01 + (inner[8] & 0xff)) & 0xff);
         }
         return (n == 2 || n == 3) && (inner[4] & 0xff) == 0xf4;      // f4 <id> [<id>]
+    }
+
+    /**
+     * The one thing the dash may change in the engine computer: clearing its stored codes, as the two
+     * frames the GearWrench app sends for Clear DTC and nothing else. Kept apart from {@link #allowed} so
+     * that live data can never send them; only the clear itself asks this.
+     */
+    public static boolean allowedWrite(byte[] inner) {
+        if (inner == null) return false;
+        String hex = Hex.str(inner);
+        return hex.equals(SciCodes.CLEAR) || hex.equals(SciCodes.CLEAR_ALL);
     }
 
     public static byte[] genericRequest(int pid) {

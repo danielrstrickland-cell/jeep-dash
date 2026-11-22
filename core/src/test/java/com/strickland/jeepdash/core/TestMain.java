@@ -22,6 +22,8 @@ public final class TestMain {
             VizTuneTest.class,
             MotionTest.class,
             KwpTest.class,
+            SciCodesTest.class,
+            FastRefreshTest.class,
     };
 
     public static void main(String[] args) {
