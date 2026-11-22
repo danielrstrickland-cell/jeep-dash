@@ -16,6 +16,12 @@ public class PollRunnerTest {
         boolean wakeAnswers = true;       // generic 5-baud wake-up
         int rpmRaw = 0x1680;              // 720 rpm over SCI (raw/8)
         boolean garblePairs;              // answer two-id reads with the wrong echo
+        boolean fastTiming;               // the dongle has been given the shorter wait
+        boolean fastBreaksReads;          // live-data reads fail while the shorter wait is set
+        int fastDropsEvery;               // every n-th live-data read fails while the shorter wait is set
+        int fastReadCount;
+        String codes = "10 fe 0e";        // stored-code list as the engine computer sends it
+        String clearReply = "17 e0 e0 e0"; // what the engine computer says to a clear
 
         static int val(int id) { return id == 0x16 ? 0x80 : id == 0x17 ? 0x69 : 0x80; }
 
@@ -26,6 +32,8 @@ public class PollRunnerTest {
             String hex = Hex.str(inner);
             sent.add(hex);
             if (!dongleAnswers) return;
+            if (hex.equals(Protocols.SCI_TIMING_FAST)) fastTiming = true;
+            else if (hex.equals(Protocols.SCI_TIMING)) fastTiming = false;
             reply(seq, "00 00 02 00 00");
             if (!Protocols.wantsReply(inner)) return;
             if (hex.startsWith("61 05")) { reply(seq, wakeAnswers ? "02 00 02 08 08 00 01 cc" : "01 ff ff"); return; }
@@ -38,6 +46,18 @@ public class PollRunnerTest {
                 return;
             }
             if (!engineAnswers) { reply(seq, "01 ff ff"); return; }
+            if (fastTiming && hex.contains(" f4 ")
+                    && (fastBreaksReads || (fastDropsEvery > 0 && ++fastReadCount % fastDropsEvery == 0))) {
+                reply(seq, "01 ff ff");
+                return;
+            }
+            if (hex.equals("61 04 00 01 10 01")) { data(seq, codes); return; }
+            if (hex.equals("61 04 00 01 17 01")) {
+                if (clearReply.startsWith("17 e0")) codes = "10 fe 0e";
+                data(seq, clearReply);
+                return;
+            }
+            if (hex.equals("61 04 00 02 23 01 01")) { data(seq, "01 01 f0"); return; }
             if (hex.equals("61 04 00 03 f4 0a 0b 01"))
                 reply(seq, String.format("01 00 03 %02x 0b %02x", rpmRaw >> 8, rpmRaw & 0xff));
             else if (hex.equals("61 04 00 02 f4 16 01")) reply(seq, "01 00 02 16 80");
@@ -47,6 +67,9 @@ public class PollRunnerTest {
                 reply(seq, String.format("01 00 03 %02x %02x %02x", val(inner[5] & 0xff),
                         garblePairs ? 0xee : inner[6] & 0xff, val(inner[6] & 0xff)));
             else reply(seq, "01 00 01 00");
+        }
+        void data(int seq, String bytes) {
+            reply(seq, String.format("01 00 %02x %s", Hex.bytes(bytes).length, bytes));
         }
         void reply(int seq, String payload) {
             byte[] r = DongleSessionTest.rx(seq, payload);
