@@ -254,7 +254,7 @@ Neither engine computer reports fuel use; the dash works it out from values it a
   injection per cylinder every two turns. 24 lb/h an injector is a starting figure; the fill-up calibration
   corrects it.
 - gal/h = lb/h / 6.17, times the car's calibration factor (default 1.0).
-- MPG now = mph / gal/h: 0 below 1 mph, at most 99, blank when its inputs are stale (older than 2 s).
+- MPG now = mph / gal/h: 0 below 1 mph, at most 99, blank when an input has gone stale (it would no longer show on its own gauge).
 - Gallons and miles add up between readings (average of the two ends x time); a gap over 2 s adds nothing.
   MPG this drive = miles / gallons once 0.01 gal has been used.
 - Calibration at a fill-up: new factor = factor x pumped / counted, refused under 2 gal counted, one step

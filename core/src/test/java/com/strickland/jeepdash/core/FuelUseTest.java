@@ -154,12 +154,17 @@ public class FuelUseTest {
         for (String id : FuelUse.inputs(false)) T.ok(Catalog.jeep(id) != null, id + " is a Jeep value");
     }
 
-    public static void onlyFreshReadingsAreUsed() {
+    public static void aReadingCountsForAsLongAsItsGaugeWouldShowIt() {
         LiveValues v = new LiveValues();
         v.put("maf", 500, 1000);
-        T.near(500, FuelUse.fresh(v, "maf", 1000 + FuelUse.FRESH_MS), 0, "just fresh enough");
-        T.eq(null, FuelUse.fresh(v, "maf", 1001 + FuelUse.FRESH_MS), "too old to count fuel on");
+        T.near(500, FuelUse.fresh(v, "maf", 1000 + LiveValues.STALE_MS), 0, "still on its gauge: still counted");
+        T.eq(null, FuelUse.fresh(v, "maf", 1001 + LiveValues.STALE_MS), "gone from its gauge: too old to count fuel on");
         T.eq(null, FuelUse.fresh(v, "speed", 1000), "never read");
+        // with many gauges on screen a value is read once per long cycle, and the runner allows it that long
+        v.setStaleMs("maf", 6000);
+        T.near(500, FuelUse.fresh(v, "maf", 6500), 0, "a slow cycle is not a missing reading");
+        v.clear();
+        T.eq(null, FuelUse.fresh(v, "maf", 1100), "key off clears everything at once");
     }
 
     public static void theFuelGaugesAreOnBothCars() {

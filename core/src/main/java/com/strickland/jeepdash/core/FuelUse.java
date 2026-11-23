@@ -29,7 +29,7 @@ public final class FuelUse {
     static final double JEEP_INJECTOR_LB_H = 24;
     static final double LAMBDA_LOW = 0.5, LAMBDA_HIGH = 2.5;       // anything outside is not a real reading
     /** A reading older than this is not used; a step between readings longer than this adds nothing. */
-    public static final long FRESH_MS = 2000, GAP_MS = 2000;
+    public static final long GAP_MS = 2000;
     /** Flow and economy go blank when no new readings came for this long. */
     public static final long STALE_MS = 2000;
     static final double STOPPED_MPH = 1, MAX_MPG = 99, MIN_GAL_FOR_AVERAGE = 0.01;
@@ -85,12 +85,12 @@ public final class FuelUse {
         return missingMs > MIN_MISSING_MS && missingMs > MAX_MISSING_SHARE * movingMs;
     }
 
-    /** A reading only if it was read within FRESH_MS, so a dropped link cannot keep fuel flowing. */
-    public static Double fresh(LiveValues v, String id, long nowMs) {
-        Long at = v.timeOf(id);
-        if (at == null || nowMs - at > FRESH_MS) return null;
-        return v.get(id, nowMs);
-    }
+    /**
+     * A reading for as long as its own gauge would still show it. With many gauges on screen a value is read
+     * once per long cycle and the runner allows it that long; a dropped link or key-off clears the values, so
+     * neither can keep fuel flowing.
+     */
+    public static Double fresh(LiveValues v, String id, long nowMs) { return v.get(id, nowMs); }
 
     /** The Cayenne: fuel lb/h = air lb/h ÷ (14.7 × lambda); lambda is the banks' average, 1.0 when missing. */
     public synchronized void porsche(Double mafLbH, Double lambdaR, Double lambdaL, Double mph, long nowMs) {
