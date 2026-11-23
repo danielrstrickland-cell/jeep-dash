@@ -61,7 +61,7 @@ public final class GtTheme implements Theme {
     /** Whole numbers where a decimal would only flicker (temperatures, engine speed, road speed). */
     private static String reading(Param p, Double v) {
         if (v == null) return Art.DASH;
-        if (p.unit.startsWith("°F") || p.unit.equals("rpm") || p.unit.equals("mph")) return String.valueOf(Math.round(v));
+        if (p.unit.startsWith("°F") || p.unit.equals("rpm") || p.unit.equals("mph") || Art.whole(p)) return String.valueOf(Math.round(v));
         return String.format(Locale.US, "%.1f", v);
     }
 

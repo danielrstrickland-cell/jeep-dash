@@ -223,8 +223,8 @@ public class KwpTest {
     }
 
     public static void everyPorscheValueHasAGaugeRange() {
-        T.eq(17, PorscheCatalog.all().size(), "the nine recorded values, the boost sensor, battery volts, peak boost"
-                + " and the five worked out by the screen itself");
+        T.eq(18, PorscheCatalog.all().size(), "the nine recorded values, the boost sensor, battery volts, peak boost"
+                + " and the six worked out by the screen itself");
         for (Param p : PorscheCatalog.all()) {
             T.ok(p.max > p.min, p.id + " has a scale");
             T.ok(PorscheCatalog.byId(p.id) == p, p.id + " can be looked up");

@@ -2,6 +2,7 @@ package com.strickland.jeepdash;
 
 import android.Manifest;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -14,6 +15,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 
+import com.strickland.jeepdash.core.Catalog;
+import com.strickland.jeepdash.core.Gears;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Motion;
 
@@ -24,9 +27,14 @@ import com.strickland.jeepdash.core.Motion;
  */
 final class TabletSensors implements SensorEventListener, LocationListener {
     private static final long PUBLISH_MS = 50;             // new numbers for the gauges 20 times a second
+    private static final long RPM_WITHIN_MS = 1500;        // engine and road speed this close in time make a pair
     private static final double MPH_PER_MPS = 2.23694;
 
     private final Motion motion = new Motion();
+    private final Gears gears = Catalog.porsche() ? Gears.porsche() : Gears.jeep();
+    private static final String GEARING_KEY = Catalog.porsche() ? "gearing_p" : "gearing";
+    private SharedPreferences prefs;
+    private double savedGearing;                           // the learned gearing as last written to storage
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable onPublished;
     private final Runnable tick = this::publish;
@@ -47,6 +55,11 @@ final class TabletSensors implements SensorEventListener, LocationListener {
         Context app = c.getApplicationContext();
         if (!running) {
             running = true;
+            if (prefs == null) {
+                prefs = app.getSharedPreferences("dash", Context.MODE_PRIVATE);
+                savedGearing = prefs.getFloat(GEARING_KEY, 0);
+                gears.restore(savedGearing);                // what earlier drives taught it about this car
+            }
             sensors = app.getSystemService(SensorManager.class);
             Sensor s = sensors == null ? null : sensors.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
             if (s != null) sensors.registerListener(this, s, SensorManager.SENSOR_DELAY_GAME, main);
@@ -96,6 +109,22 @@ final class TabletSensors implements SensorEventListener, LocationListener {
         if (mph == null || !at.equals(v.timeOf("speed"))) return;      // replaced while we looked: next time
         lastDashMs = at;
         motion.dash(mph, at);
+        // the gear comes from engine speed against road speed, read within a moment of each other
+        Long rpmAt = v.timeOf("rpm");
+        Double rpm = rpmAt == null ? null : v.get("rpm", rpmAt);
+        if (rpm != null && Math.abs(at - rpmAt) <= RPM_WITHIN_MS) {
+            gears.sample(rpm, mph, at);
+            keepGearing();
+        }
+    }
+
+    /** Saves the learned gearing when it has moved by more than half a percent since it was last saved. */
+    private void keepGearing() {
+        double now = gears.topRpmPerMph();
+        if (prefs == null || savedGearing > 0 && Math.abs(now / savedGearing - 1) < 0.005) return;
+        if (savedGearing == 0 && !gears.learned()) return;      // nothing learned yet: do not store the stock guess
+        savedGearing = now;
+        prefs.edit().putFloat(GEARING_KEY, (float) now).apply();
     }
 
     private void publish() {
@@ -110,6 +139,7 @@ final class TabletSensors implements SensorEventListener, LocationListener {
         put(v, "g_accel", motion.gAccel(now), now);
         put(v, "zero_sixty", motion.zeroSixty(now), now);
         put(v, "speedo_err", motion.speedoError(now), now);
+        put(v, "gear", gears.gear(now), now);
         onPublished.run();
     }
 

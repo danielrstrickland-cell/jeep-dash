@@ -219,6 +219,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             Set<String> ids = l.activeParamIds();
             // Pull, 0-60 and the speedo check are worked out from the Jeep's speed, speed gauge or not.
             if (Motion.needsJeepSpeed(ids)) ids.add("speed");
+            if (Motion.needsRpm(ids)) ids.add("rpm");            // the gear indicator
             service.setActiveParams(ids);
         }
         syncTabletSensors();

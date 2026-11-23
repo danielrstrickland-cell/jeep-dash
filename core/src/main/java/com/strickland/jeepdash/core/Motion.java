@@ -34,8 +34,12 @@ public final class Motion {
 
     /** True when a value on screen is worked out from the Jeep's speed, so the speed has to be read as well. */
     public static boolean needsJeepSpeed(Collection<String> shownIds) {
-        return shownIds.contains("g_accel") || shownIds.contains("zero_sixty") || shownIds.contains("speedo_err");
+        return shownIds.contains("g_accel") || shownIds.contains("zero_sixty") || shownIds.contains("speedo_err")
+                || shownIds.contains("gear");
     }
+
+    /** True when a value on screen is worked out from engine speed, so that has to be read as well. */
+    public static boolean needsRpm(Collection<String> shownIds) { return shownIds.contains("gear"); }
 
     /** True when a value on screen cannot be worked out without GPS. */
     public static boolean needsGps(Collection<String> shownIds) {

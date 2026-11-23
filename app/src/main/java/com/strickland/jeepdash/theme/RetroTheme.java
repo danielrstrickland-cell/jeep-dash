@@ -122,7 +122,7 @@ public final class RetroTheme implements Theme {
 
     private static String reading(Param p, Double v) {
         if (v == null) return "--";
-        if (p.unit.startsWith("°") || p.unit.equals("rpm") || p.unit.equals("mph") || p.max - p.min > 250)
+        if (p.unit.startsWith("°") || p.unit.equals("rpm") || p.unit.equals("mph") || p.max - p.min > 250 || Art.whole(p))
             return String.valueOf(Math.round(v));
         return String.format(Locale.US, "%.1f", v);
     }

@@ -85,6 +85,8 @@ public final class PorscheCatalog {
         screen("gps_mph", "GPS speed", "mph", 0, 180);
         screen("g_force", "G-force", "g", 0, 1.2);
         screen("speedo_err", "Speedo vs GPS", "%", -15, 15);
+        // worked out from engine speed against road speed (see Gears)
+        screen("gear", "Gear", "of 6", 0, 6);
     }
 
     private static void screen(String id, String name, String unit, double min, double max) {

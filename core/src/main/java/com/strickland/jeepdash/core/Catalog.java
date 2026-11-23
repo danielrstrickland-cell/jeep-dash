@@ -78,6 +78,8 @@ public final class Catalog {
         add(Param.tablet("g_accel", "Pull / braking", "g", -1, 1));
         add(Param.tablet("zero_sixty", "0-60 time", "s", 0, 20));
         add(Param.tablet("speedo_err", "Speedo vs GPS", "%", -15, 15));
+        // Worked out from engine speed against road speed (see Gears).
+        add(Param.tablet("gear", "Gear", "of 4", 0, 4));
     }
 
     // Which car the app is set up for. Chosen once in SETUP and applied when the app starts, so every screen
