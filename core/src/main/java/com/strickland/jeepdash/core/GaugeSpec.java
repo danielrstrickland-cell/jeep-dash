@@ -2,7 +2,10 @@ package com.strickland.jeepdash.core;
 
 import java.util.Objects;
 
-/** One placed gauge: what it shows, where it sits (dp), and its warning flash setting. */
+/**
+ * One placed gauge: what it shows, where it sits (dp), its warning flash setting, and the unit it is shown in
+ * (null = the value's own). The warning limit is always kept in the value's own unit.
+ */
 public final class GaugeSpec {
     public final String key;
     public String paramId;
@@ -10,6 +13,7 @@ public final class GaugeSpec {
     public float x, y, w, h;
     public boolean warnOn = false, warnAbove = true;
     public double warnLimit = 0;
+    public String unit;
 
     public GaugeSpec(String key, String paramId, GaugeType type, float x, float y, float w, float h) {
         this.key = key; this.paramId = paramId; this.type = type;
@@ -21,13 +25,14 @@ public final class GaugeSpec {
         GaugeSpec g = (GaugeSpec) o;
         return key.equals(g.key) && Objects.equals(paramId, g.paramId) && type == g.type
                 && x == g.x && y == g.y && w == g.w && h == g.h
-                && warnOn == g.warnOn && warnAbove == g.warnAbove && warnLimit == g.warnLimit;
+                && warnOn == g.warnOn && warnAbove == g.warnAbove && warnLimit == g.warnLimit
+                && Objects.equals(unit, g.unit);
     }
 
     @Override public int hashCode() { return Objects.hash(key, paramId, type, x, y, w, h); }
 
     @Override public String toString() {
         return key + "[" + paramId + " " + type + " " + x + "," + y + " " + w + "x" + h
-                + (warnOn ? " warn" + (warnAbove ? ">" : "<") + warnLimit : "") + "]";
+                + (warnOn ? " warn" + (warnAbove ? ">" : "<") + warnLimit : "") + (unit != null ? " in " + unit : "") + "]";
     }
 }

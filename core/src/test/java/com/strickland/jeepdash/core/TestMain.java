@@ -26,6 +26,9 @@ public final class TestMain {
             FastRefreshTest.class,
             GearsTest.class,
             KwpCodesTest.class,
+            UnitsTest.class,
+            NightHoursTest.class,
+            FuelUseTest.class,
     };
 
     public static void main(String[] args) {

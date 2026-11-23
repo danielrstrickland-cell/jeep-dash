@@ -232,8 +232,8 @@ public class KwpTest {
     }
 
     public static void everyPorscheValueHasAGaugeRange() {
-        T.eq(34, PorscheCatalog.all().size(), "the nine recorded values, the boost sensor, battery volts, peak boost,"
-                + " the sixteen from the warm-idle capture and the six worked out by the screen itself");
+        T.eq(38, PorscheCatalog.all().size(), "the nine recorded values, the boost sensor, battery volts, peak boost,"
+                + " the sixteen from the warm-idle capture, the six worked out by the screen itself and the four fuel gauges");
         for (Param p : PorscheCatalog.all()) T.ok(!p.unit.isEmpty(), p.id + " has a unit to show in the gauge picker");
         for (Param p : PorscheCatalog.all()) {
             T.ok(p.max > p.min, p.id + " has a scale");

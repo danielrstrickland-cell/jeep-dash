@@ -7,6 +7,8 @@ public final class Param {
     public interface Formula { double apply(int a, int b); }
 
     public final String id, name, unit;
+    /** The unit the value is read and logged in; differs from unit only for a gauge shown in another unit. */
+    public final String baseUnit;
     public final Integer pid;          // generic OBD2 Mode 01 PID, or null
     public final int[] sciIds;         // SCI F4 ids (1 or 2), or null
     public final double min, max;
@@ -21,7 +23,12 @@ public final class Param {
 
     private Param(String id, String name, String unit, int[] sciIds, Formula sciFormula,
                   Integer pid, Formula genericFormula, double min, double max, int weight, boolean tablet) {
-        this.id = id; this.name = name; this.unit = unit;
+        this(id, name, unit, unit, sciIds, sciFormula, pid, genericFormula, min, max, weight, tablet);
+    }
+
+    private Param(String id, String name, String unit, String baseUnit, int[] sciIds, Formula sciFormula,
+                  Integer pid, Formula genericFormula, double min, double max, int weight, boolean tablet) {
+        this.id = id; this.name = name; this.unit = unit; this.baseUnit = baseUnit;
         this.sciIds = sciIds; this.sciFormula = sciFormula;
         this.pid = pid; this.genericFormula = genericFormula;
         this.min = min; this.max = max; this.weight = weight;
@@ -31,6 +38,11 @@ public final class Param {
     /** A value from the tablet's sensors (GPS, accelerometer): nothing to request and nothing to decode. */
     public static Param tablet(String id, String name, String unit, double min, double max) {
         return new Param(id, name, unit, null, null, null, null, min, max, 1, true);
+    }
+
+    /** The same value labelled in another unit with its scale already converted (see Units.display). */
+    Param inUnit(String newUnit, double newMin, double newMax) {
+        return new Param(id, name, newUnit, baseUnit, sciIds, sciFormula, pid, genericFormula, newMin, newMax, weight, tablet);
     }
 
     /** True when the value can only be read over generic OBD2 (polled in occasional blocks). */

@@ -61,13 +61,15 @@ public final class GtTheme implements Theme {
     /** Whole numbers where a decimal would only flicker (temperatures, engine speed, road speed). */
     private static String reading(Param p, Double v) {
         if (v == null) return Art.DASH;
-        if (p.unit.startsWith("°F") || p.unit.equals("rpm") || p.unit.equals("mph") || Art.whole(p)) return String.valueOf(Math.round(v));
+        if (p.unit.startsWith("°F") || p.unit.equals("°C") || p.unit.equals("rpm") || p.unit.equals("mph")
+                || p.unit.equals("km/h") || Art.whole(p)) return String.valueOf(Math.round(v));
         return String.format(Locale.US, "%.1f", v);
     }
 
     private static Art.Scale scale(Param p) {
         Art.Scale s = new Art.Scale();
         double range = p.max - p.min;
+        if (Art.converted(p)) return Art.scale(p);          // shown in another unit: plain spacings
         if (p.id.equals("rpm")) {
             s.major = 1000; s.minor = 500; s.labelEvery = 1000; s.labelDiv = 1000; s.redFrom = Math.min(6500.0, p.max * 0.93);
         } else if (p.id.equals("speed")) {

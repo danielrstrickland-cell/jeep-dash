@@ -10,7 +10,7 @@ import java.util.Map;
  * What the dash can show on the 2003 Cayenne Turbo: which group each value comes in and how it is worked
  * out. Groups and slots are from the two captures of the GearWrench app on this car; every value read from
  * the car matched that app's own screen at idle, except the three marked "not on the vendor screen". Peak boost
- * is the boost reading held at its highest; the last five are worked out by the screen, not read.
+ * is the boost reading held at its highest; the last ten are worked out by the screen, not read.
  */
 public final class PorscheCatalog {
     private PorscheCatalog() { }
@@ -108,6 +108,11 @@ public final class PorscheCatalog {
         screen("speedo_err", "Speedo vs GPS", "%", -15, 15);
         // worked out from engine speed against road speed (see Gears)
         screen("gear", "Gear", "of 6", 0, 6);
+        // worked out from air flow and lambda (see FuelUse); the car does not report fuel use
+        screen("mpg", "MPG now", "mpg", 0, 40);
+        screen("mpg_avg", "MPG this drive", "mpg", 0, 40);
+        screen("fuel_used", "Fuel used this drive", "gal", 0, 10);
+        screen("fuel_gph", "Fuel flow", "gal/h", 0, 30);
     }
 
     private static void screen(String id, String name, String unit, double min, double max) {

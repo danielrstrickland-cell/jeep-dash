@@ -2,7 +2,8 @@ package com.strickland.jeepdash.core;
 
 /**
  * Layout <-> text. First line "v1", then one gauge per line:
- * key|paramId|TYPE|x|y|w|h|warnOn|warnAbove|warnLimit. Anything unreadable falls back to the look's default.
+ * key|paramId|TYPE|x|y|w|h|warnOn|warnAbove|warnLimit, then |unit only for a gauge shown in another unit (so
+ * layouts without one are written exactly as before). Anything unreadable falls back to the look's default.
  */
 public final class LayoutCodec {
     private LayoutCodec() { }
@@ -12,7 +13,10 @@ public final class LayoutCodec {
         for (GaugeSpec g : l.gauges) {
             sb.append(g.key).append('|').append(g.paramId).append('|').append(g.type).append('|')
                     .append(g.x).append('|').append(g.y).append('|').append(g.w).append('|').append(g.h).append('|')
-                    .append(g.warnOn).append('|').append(g.warnAbove).append('|').append(g.warnLimit).append('\n');
+                    .append(g.warnOn).append('|').append(g.warnAbove).append('|').append(g.warnLimit);
+            if (g.unit != null && !g.unit.isEmpty() && g.unit.indexOf('|') < 0 && g.unit.indexOf('\n') < 0)
+                sb.append('|').append(g.unit);
+            sb.append('\n');
         }
         return sb.toString();
     }
@@ -24,13 +28,14 @@ public final class LayoutCodec {
         Layout l = new Layout(w, h);
         for (int i = 1; i < lines.length; i++) {
             String[] f = lines[i].trim().split("\\|");
-            if (f.length != 10) continue;
+            if (f.length != 10 && f.length != 11) continue;
             try {
                 GaugeSpec g = new GaugeSpec(f[0], f[1], GaugeType.valueOf(f[2]),
                         Float.parseFloat(f[3]), Float.parseFloat(f[4]), Float.parseFloat(f[5]), Float.parseFloat(f[6]));
                 g.warnOn = Boolean.parseBoolean(f[7]);
                 g.warnAbove = Boolean.parseBoolean(f[8]);
                 g.warnLimit = Double.parseDouble(f[9]);
+                if (f.length == 11 && !f[10].isEmpty()) g.unit = f[10];
                 if (l.find(g.key) == null) l.add(g);
             } catch (IllegalArgumentException e) {
                 // skip an unreadable line

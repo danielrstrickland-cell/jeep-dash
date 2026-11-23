@@ -18,11 +18,16 @@ import com.strickland.jeepdash.core.GaugeSpec;
 import com.strickland.jeepdash.core.GaugeType;
 import com.strickland.jeepdash.core.Layout;
 import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.core.Units;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/** What a gauge shows, how it looks, and its warning flash. Opened by tapping a gauge in edit mode. */
+/**
+ * What a gauge shows, the unit it is shown in, how it looks, and its warning flash. Opened by tapping a gauge
+ * in edit mode. The warning limit is typed in the unit shown and kept in the value's own unit.
+ */
 final class GaugeSettingsDialog {
     private GaugeSettingsDialog() { }
 
@@ -52,6 +57,16 @@ final class GaugeSettingsDialog {
         what.setSelection(current);
         box.addView(what);
 
+        // only for values that have other units (see Units); the base unit is always the first choice
+        final TextView unitLabel = label(a, "Unit");
+        box.addView(unitLabel);
+        final Spinner unitPick = new Spinner(a);
+        box.addView(unitPick);
+        final List<String> units = new ArrayList<>(Units.choices(params.get(current).unit));
+        // the unit the limit box is in right now
+        final String[] shownUnit = {Units.offers(params.get(current).unit, g.unit) ? g.unit : params.get(current).unit};
+        showUnits(a, unitLabel, unitPick, units, shownUnit[0]);
+
         box.addView(label(a, "Style"));
         final Spinner style = new Spinner(a);
         style.setAdapter(adapter(a, STYLES));
@@ -73,10 +88,11 @@ final class GaugeSettingsDialog {
         final EditText limit = new EditText(a);
         limit.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
         limit.setEms(6);
-        limit.setText(g.warnOn || g.warnLimit != 0 ? number(g.warnLimit) : "");
+        limit.setText(g.warnOn || g.warnLimit != 0
+                ? number(Units.convert(g.warnLimit, params.get(current).unit, shownUnit[0])) : "");
         row.addView(limit);
         final TextView unit = new TextView(a);
-        unit.setText(params.get(current).unit);
+        unit.setText(shownUnit[0]);
         unit.setPadding(pad / 2, 0, 0, 0);
         row.addView(unit);
         box.addView(row);
@@ -92,9 +108,40 @@ final class GaugeSettingsDialog {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
                 Param p = params.get(pos);
-                unit.setText(p.unit);
-                if (limit.getText().length() == 0 || !p.id.equals(g.paramId))
-                    limit.setText(number(Math.round(p.min + 0.85 * (p.max - p.min))));
+                List<String> choices = Units.choices(p.unit);
+                String keep = p.id.equals(g.paramId) && Units.offers(p.unit, g.unit) ? g.unit : p.unit;
+                if (!choices.equals(units) || !keep.equals(shownUnit[0])) {
+                    // a different value: back to its own unit (or the gauge's saved one), limit and all
+                    units.clear();
+                    units.addAll(choices);
+                    if (limit.getText().length() > 0 && Units.offers(p.unit, shownUnit[0])) {
+                        Double lim = parse(limit.getText().toString());
+                        if (lim != null) limit.setText(number(Units.convert(lim, shownUnit[0], keep)));
+                    }
+                    shownUnit[0] = keep;
+                    showUnits(a, unitLabel, unitPick, choices, keep);
+                }
+                unit.setText(shownUnit[0]);
+                if (limit.getText().length() == 0 || !p.id.equals(g.paramId)) {
+                    Param d = Units.display(p, shownUnit[0]);
+                    limit.setText(number(Math.round(d.min + 0.85 * (d.max - d.min))));
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) { }
+        });
+
+        unitPick.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
+                if (pos < 0 || pos >= units.size()) return;
+                String to = units.get(pos);
+                if (to.equals(shownUnit[0])) return;
+                Double lim = parse(limit.getText().toString());
+                if (lim != null) limit.setText(number(Units.convert(lim, shownUnit[0], to)));
+                shownUnit[0] = to;
+                unit.setText(to);
             }
 
             @Override
@@ -107,11 +154,15 @@ final class GaugeSettingsDialog {
                 .setTitle("Gauge")
                 .setView(scroll)
                 .setPositiveButton("OK", (dlg, w) -> {
-                    g.paramId = params.get(what.getSelectedItemPosition()).id;
+                    Param chosen = params.get(what.getSelectedItemPosition());
+                    g.paramId = chosen.id;
+                    g.unit = Units.offers(chosen.unit, shownUnit[0]) && !shownUnit[0].equals(chosen.unit) ? shownUnit[0] : null;
                     int s = style.getSelectedItemPosition();
                     g.type = s == 0 ? GaugeType.DIAL : s == 1 ? GaugeType.DIGITAL : GaugeType.BAR;
                     g.warnAbove = dir.getSelectedItemPosition() == 0;
                     Double lim = parse(limit.getText().toString());
+                    // typed in the unit shown; kept in the value's own unit
+                    if (lim != null) lim = Units.offers(chosen.unit, shownUnit[0]) ? Units.convert(lim, shownUnit[0], chosen.unit) : lim;
                     if (lim != null) g.warnLimit = lim;
                     g.warnOn = warn.isChecked() && lim != null;
                     onChanged.run();
@@ -122,6 +173,16 @@ final class GaugeSettingsDialog {
                     onChanged.run();
                 })
                 .show();
+    }
+
+    /** Fills the unit picker, or hides it when the value has no other units. */
+    private static void showUnits(Activity a, TextView label, Spinner pick, List<String> choices, String selected) {
+        int vis = choices.isEmpty() ? View.GONE : View.VISIBLE;
+        label.setVisibility(vis);
+        pick.setVisibility(vis);
+        if (choices.isEmpty()) return;
+        pick.setAdapter(adapter(a, choices.toArray(new String[0])));
+        pick.setSelection(Math.max(0, choices.indexOf(selected)));
     }
 
     private static TextView label(Activity a, String s) {

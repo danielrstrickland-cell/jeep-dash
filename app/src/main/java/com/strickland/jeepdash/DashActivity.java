@@ -21,6 +21,8 @@ import android.view.WindowManager;
 import android.widget.Toast;
 
 import com.strickland.jeepdash.core.Catalog;
+import com.strickland.jeepdash.core.FuelUse;
+import com.strickland.jeepdash.core.NightHours;
 import com.strickland.jeepdash.core.PollRunner;
 import com.strickland.jeepdash.core.GaugeSpec;
 import com.strickland.jeepdash.core.GaugeType;
@@ -67,6 +69,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         look = prefs.getString(lookKey(), looks[0]);
         if (!Arrays.asList(looks).contains(look)) look = looks[0];
         xp = new XpTheme(prefs.getString("xp_scheme", "Blue"));
+        xp.setMode(prefs.getString("xp_mode", NightHours.LIGHT));
         jeep = new JeepTheme(prefs.getString("jeep_backlight", "White"));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         view = new DashView(this, this);
@@ -220,6 +223,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             // Pull, 0-60 and the speedo check are worked out from the Jeep's speed, speed gauge or not.
             if (Motion.needsJeepSpeed(ids)) ids.add("speed");
             if (Motion.needsRpm(ids)) ids.add("rpm");            // the gear indicator
+            // the fuel gauges, and the fill-up estimate while one is being counted
+            if (FuelUse.needsInputs(ids, FuelStore.get(this).fillStarted())) ids.addAll(FuelUse.inputs(Catalog.porsche()));
             service.setActiveParams(ids);
         }
         syncTabletSensors();
@@ -235,7 +240,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         Layout l = view.layout();
         if (service == null || l == null) return;
         Set<String> ids = l.activeParamIds();
-        boolean any = false;
+        boolean any = FuelStore.get(this).fillStarted();       // the fill-up estimate is counted here too
         for (String id : ids) {
             Param p = Catalog.byId(id);
             if (p != null && p.tablet) any = true;
@@ -425,6 +430,14 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                     view.invalidate();
                 });
             }
+            for (String mode : XpTheme.MODES) {
+                items.add("Brightness: " + mode + (NightHours.AUTO.equals(mode) ? " (dark from 7 pm to 7 am)" : ""));
+                actions.add(() -> {
+                    prefs.edit().putString("xp_mode", mode).apply();
+                    xp.setMode(mode);
+                    view.invalidate();
+                });
+            }
         } else if ("jeep".equals(look)) {
             for (String light : JeepTheme.BACKLIGHTS) {
                 items.add("Backlight: " + light);
@@ -446,6 +459,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                     : "Fast refresh: turned itself off (readings went missing). Tap to try again");
             actions.add(() -> { if (service != null) service.setFastRefresh(fast != PollRunner.Fast.ON); });
         }
+        items.add("Fuel: calibrate at fill-up");
+        actions.add(() -> FuelDialog.show(this, this::pushActiveParams));
         items.add("Check for update");
         actions.add(() -> UpdateChecker.check(this, buildNumber(), true));
         items.add("Put this look's gauges back to the original layout");

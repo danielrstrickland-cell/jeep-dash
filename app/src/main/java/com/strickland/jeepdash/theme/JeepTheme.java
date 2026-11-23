@@ -68,13 +68,13 @@ public final class JeepTheme implements Theme {
 
     private static String caption(Param p) {
         if (p.id.equals("rpm")) return "RPM × 1000";
-        if (p.id.equals("speed")) return "MPH";
+        if (p.id.equals("speed")) return p.unit.toUpperCase(Locale.US);
         return p.name.toUpperCase(Locale.US);
     }
 
     private static String withUnit(Param p, Double v) {
         String s = Art.reading(p, v);
-        if (p.unit.equals("rpm") || p.unit.equals("mph")) return s;
+        if (p.unit.equals("rpm") || p.unit.equals("mph") || p.unit.equals("km/h")) return s;
         return p.unit.startsWith("°") && p.unit.length() == 1 ? s + p.unit : s + " " + p.unit;
     }
 

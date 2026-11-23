@@ -122,7 +122,7 @@ public final class RetroTheme implements Theme {
 
     private static String reading(Param p, Double v) {
         if (v == null) return "--";
-        if (p.unit.startsWith("°") || p.unit.equals("rpm") || p.unit.equals("mph") || p.max - p.min > 250 || Art.whole(p))
+        if (p.unit.startsWith("°") || p.unit.equals("rpm") || p.unit.equals("mph") || p.unit.equals("km/h") || p.max - p.min > 250 || Art.whole(p))
             return String.valueOf(Math.round(v));
         return String.format(Locale.US, "%.1f", v);
     }
@@ -146,13 +146,14 @@ public final class RetroTheme implements Theme {
 
     private static String unit(Param p) {
         if (p.id.equals("rpm")) return "r/min";
-        return p.unit.startsWith("°") ? p.unit : p.unit.toUpperCase(Locale.US).replace("MPH", "mph").replace("PSI", "psi");
+        return p.unit.startsWith("°") ? p.unit : p.unit.toUpperCase(Locale.US).replace("MPH", "mph").replace("PSI", "psi")
+                .replace("KM/H", "km/h");
     }
 
     private static float redFrom(Param p) {
         if (p.id.equals("rpm")) return Art.frac(p, p.max > 6500 ? 6500 : 5000);
-        if (p.id.equals("coolant")) return Art.frac(p, 230);
-        if (p.id.equals("oil_temp")) return Art.frac(p, 270);
+        if (p.id.equals("coolant")) return Art.frac(p, Art.fromBase(p, 230));
+        if (p.id.equals("oil_temp")) return Art.frac(p, Art.fromBase(p, 270));
         return 2;
     }
 

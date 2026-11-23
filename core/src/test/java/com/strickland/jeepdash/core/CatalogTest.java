@@ -55,7 +55,7 @@ public class CatalogTest {
     }
 
     public static void tabletValuesAreNeverAskedOfTheEngine() {
-        for (String id : new String[]{"gps_mph", "g_force", "g_accel", "zero_sixty", "speedo_err"}) {
+        for (String id : new String[]{"gps_mph", "g_force", "g_accel", "zero_sixty", "speedo_err", "mpg", "mpg_avg", "fuel_used", "fuel_gph"}) {
             Param p = Catalog.byId(id);
             T.ok(p != null && p.tablet, id + " comes from the tablet");
             T.ok(p.sciIds == null && p.pid == null, id + " has nothing to request");

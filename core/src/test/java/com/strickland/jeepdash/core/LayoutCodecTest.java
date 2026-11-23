@@ -9,6 +9,25 @@ public class LayoutCodecTest {
         T.eq(xp.gauges, back.gauges, "same gauges after encode/decode");
     }
 
+    public static void aChosenUnitIsSavedWithTheGauge() {
+        Layout xp = LayoutCodec.defaultFor("xp", 1280, 800);
+        xp.find("g3").unit = "°C";
+        String text = LayoutCodec.encode(xp);
+        Layout back = LayoutCodec.decode(text, "xp", 1280, 800);
+        T.eq("°C", back.find("g3").unit, "the unit comes back");
+        T.eq(null, back.find("g1").unit, "a gauge without one stays without");
+        T.eq(xp.gauges, back.gauges, "same gauges after encode/decode");
+        T.ok(!xp.find("g3").equals(LayoutCodec.defaultFor("xp", 1280, 800).find("g3")), "the unit counts as a change");
+    }
+
+    public static void layoutsSavedBeforeUnitsLoadUnchanged() {
+        String old = "v1\ng1|coolant|DIAL|0.0|0.0|300.0|300.0|true|true|230.0\n";
+        GaugeSpec g = LayoutCodec.decode(old, "xp", 1280, 800).find("g1");
+        T.ok(g != null && g.unit == null && g.warnLimit == 230, "an old line reads as before, in the base unit");
+        Layout l = LayoutCodec.decode(old, "xp", 1280, 800);
+        T.eq(old, LayoutCodec.encode(l), "and is written back exactly as it was");
+    }
+
     public static void decodeGarbageGivesDefault() {
         T.eq(LayoutCodec.defaultFor("jeep", 1280, 800).gauges,
                 LayoutCodec.decode("hello", "jeep", 1280, 800).gauges, "garbage -> Jeep default");

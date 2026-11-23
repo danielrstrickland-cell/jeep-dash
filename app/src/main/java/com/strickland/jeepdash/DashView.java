@@ -12,6 +12,7 @@ import com.strickland.jeepdash.core.GaugeSpec;
 import com.strickland.jeepdash.core.Layout;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.core.Units;
 import com.strickland.jeepdash.theme.Theme;
 
 import java.util.HashMap;
@@ -36,6 +37,7 @@ public class DashView extends View {
     private static final float GRID = 16;
 
     private static final double NEEDLE_MS = 160;      // needle catch-up time constant
+    private static final long IDLE_REDRAW_MS = 30000; // nothing moving: redraw anyway (clock, XP brightness on Auto)
 
     private final Host host;
     private final float density;
@@ -44,6 +46,8 @@ public class DashView extends View {
     private Layout layout;
     private LiveValues values;
     private final Map<String, Double> shown = new HashMap<>();
+    private final Map<String, Param> inUnits = new HashMap<>();     // gauges shown in another unit, by id and unit
+    private final Runnable idleRedraw = this::invalidate;
     private long lastFrameMs;
     private float wDp, hDp;
     private String downAction;
@@ -108,9 +112,14 @@ public class DashView extends View {
                     shown.put(g.key, next);
                     s = next;
                 }
-                boolean warn = Layout.shouldFlash(g, v);
+                boolean warn = Layout.shouldFlash(g, v);         // the limit is kept in the value's own unit
                 flashing |= warn;
-                theme.drawGauge(c, g, p, v, s, warn && blink, chrome.editing);
+                Param d = display(p, g.unit);
+                if (d != p) {
+                    if (v != null) v = Units.convert(v, p.unit, d.unit);
+                    if (s != null) s = Units.convert(s, p.unit, d.unit);
+                }
+                theme.drawGauge(c, g, d, v, s, warn && blink, chrome.editing);
             }
         }
         if (chrome.editing && layout != null && "gauges".equals(chrome.tab)) drawEditMarks(c);
@@ -118,6 +127,21 @@ public class DashView extends View {
         c.restore();
         if (moving) postInvalidateOnAnimation();
         else if (flashing) postInvalidateDelayed(100);
+        // one pending at a time, so it never adds frames of its own while readings are coming in
+        removeCallbacks(idleRedraw);
+        postDelayed(idleRedraw, IDLE_REDRAW_MS);
+    }
+
+    /** The value as its gauge shows it: converted to the gauge's chosen unit, made once and kept. */
+    private Param display(Param p, String unit) {
+        if (unit == null) return p;
+        String key = System.identityHashCode(p) + "|" + p.id + "|" + unit;
+        Param d = inUnits.get(key);
+        if (d == null) {
+            d = Units.display(p, unit);
+            inUnits.put(key, d);
+        }
+        return d;
     }
 
     /** Dashed outline and a corner handle on every gauge while editing. */

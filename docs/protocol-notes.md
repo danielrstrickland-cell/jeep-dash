@@ -244,3 +244,18 @@ Each was matched to the figure on the GearWrench screen at that moment. Kinds: 2
 Seen but not used, because nothing but zero was on screen to check the scale against: boost control deviation
 (1b/7, kind 32), per-cylinder ignition retard and the misfire counters.
 
+## Fuel use, worked out by the screen (both cars)
+
+Neither engine computer reports fuel use; the dash works it out from values it already reads (core `FuelUse`).
+
+- Cayenne: fuel lb/h = air flow (`maf`, lb/h) / (14.7 x lambda). Lambda is the average of `lambda_r` and
+  `lambda_l`, either one alone if only one is fresh, 1.0 when both are missing.
+- Jeep (no air-flow sensor): fuel lb/h = 8 injectors x 24 lb/h x (`inj_ms` / 1000) x (`rpm` / 120), one
+  injection per cylinder every two turns. 24 lb/h an injector is a starting figure; the fill-up calibration
+  corrects it.
+- gal/h = lb/h / 6.17, times the car's calibration factor (default 1.0).
+- MPG now = mph / gal/h: 0 below 1 mph, at most 99, blank when its inputs are stale (older than 2 s).
+- Gallons and miles add up between readings (average of the two ends x time); a gap over 2 s adds nothing.
+  MPG this drive = miles / gallons once 0.01 gal has been used.
+- Calibration at a fill-up: new factor = factor x pumped / counted, refused under 2 gal counted, one step
+  limited to 0.5x..2x, factor kept within 0.3..3.

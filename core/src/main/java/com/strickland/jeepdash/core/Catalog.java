@@ -80,6 +80,11 @@ public final class Catalog {
         add(Param.tablet("speedo_err", "Speedo vs GPS", "%", -15, 15));
         // Worked out from engine speed against road speed (see Gears).
         add(Param.tablet("gear", "Gear", "of 4", 0, 4));
+        // Worked out from injector time and engine speed (see FuelUse); the Jeep does not report fuel use.
+        add(Param.tablet("mpg", "MPG now", "mpg", 0, 40));
+        add(Param.tablet("mpg_avg", "MPG this drive", "mpg", 0, 40));
+        add(Param.tablet("fuel_used", "Fuel used this drive", "gal", 0, 10));
+        add(Param.tablet("fuel_gph", "Fuel flow", "gal/h", 0, 30));
     }
 
     // Which car the app is set up for. Chosen once in SETUP and applied when the app starts, so every screen

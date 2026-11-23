@@ -16,6 +16,7 @@ import android.os.Handler;
 import android.os.Looper;
 
 import com.strickland.jeepdash.core.Catalog;
+import com.strickland.jeepdash.core.FuelUse;
 import com.strickland.jeepdash.core.Gears;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Motion;
@@ -32,6 +33,8 @@ final class TabletSensors implements SensorEventListener, LocationListener {
 
     private final Motion motion = new Motion();
     private final Gears gears = Catalog.porsche() ? Gears.porsche() : Gears.jeep();
+    private final boolean porsche = Catalog.porsche();
+    private FuelUse fuel;                                  // shared with the fill-up dialog (see FuelStore)
     private static final String GEARING_KEY = Catalog.porsche() ? "gearing_p" : "gearing";
     private SharedPreferences prefs;
     private double savedGearing;                           // the learned gearing as last written to storage
@@ -60,6 +63,7 @@ final class TabletSensors implements SensorEventListener, LocationListener {
                 savedGearing = prefs.getFloat(GEARING_KEY, 0);
                 gears.restore(savedGearing);                // what earlier drives taught it about this car
             }
+            fuel = FuelStore.get(app);
             sensors = app.getSystemService(SensorManager.class);
             Sensor s = sensors == null ? null : sensors.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
             if (s != null) sensors.registerListener(this, s, SensorManager.SENSOR_DELAY_GAME, main);
@@ -73,6 +77,7 @@ final class TabletSensors implements SensorEventListener, LocationListener {
         if (!running) return;
         running = false;
         main.removeCallbacks(tick);
+        FuelStore.save();
         if (sensors != null) sensors.unregisterListener(this);
         stopGps();
     }
@@ -140,7 +145,23 @@ final class TabletSensors implements SensorEventListener, LocationListener {
         put(v, "zero_sixty", motion.zeroSixty(now), now);
         put(v, "speedo_err", motion.speedoError(now), now);
         put(v, "gear", gears.gear(now), now);
+        feedFuel(v, now);
+        put(v, "mpg", fuel.mpgNow(now), now);
+        put(v, "mpg_avg", fuel.driveMpg(), now);
+        put(v, "fuel_used", fuel.driveGallons(), now);
+        put(v, "fuel_gph", fuel.gph(now), now);
         onPublished.run();
+    }
+
+    /** Hands FuelUse the latest fuel readings; anything not read in the last 2 s counts as missing. */
+    private void feedFuel(LiveValues v, long now) {
+        fuel.drive(LinkService.driveStartedMs());
+        if (porsche)
+            fuel.porsche(FuelUse.fresh(v, "maf", now), FuelUse.fresh(v, "lambda_r", now),
+                    FuelUse.fresh(v, "lambda_l", now), FuelUse.fresh(v, "speed", now), now);
+        else
+            fuel.jeep(FuelUse.fresh(v, "inj_ms", now), FuelUse.fresh(v, "rpm", now), FuelUse.fresh(v, "speed", now), now);
+        FuelStore.keep();
     }
 
     private static void put(LiveValues v, String id, Double value, long now) {

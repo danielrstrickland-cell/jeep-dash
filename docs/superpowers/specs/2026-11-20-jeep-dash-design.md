@@ -140,6 +140,38 @@ from the Codes screen, only with the engine speed read as zero. Sixteen more liv
 matched against the GearWrench screen (docs/protocol-notes.md). Both cars also have a gear gauge worked out
 from engine speed against road speed.
 
+### XP look at night (2026-11-22)
+
+The XP look has a Brightness setting next to its window colour: Light (the original, and the default),
+Dark, or Auto (dark from 7 pm to 7 am by the tablet's clock, rule in core `NightHours`). Dark keeps each
+scheme's character but much darker: near-black desktop, dark grey windows with light text, dark dial faces
+with light ticks, dimmed LCD and bar bodies, title bars and taskbar in darkened scheme colours. Warning
+flashes stay plainly red. Every colour comes from one palette with a light and a dark set. The dash redraws
+at least twice a minute even with nothing changing, so Auto switches on time.
+
+### A unit for each gauge (2026-11-22)
+
+Each gauge can be shown in another unit where its value has one (core `Units`): pressure psi / kPa / bar,
+temperature °F / °C, speed mph / km/h, air flow lb/h / g/s / kg/h, fuel gal / L, economy mpg / km/L and fuel
+flow gal/h / L/h. Sensor volts are not offered as a pressure. The choice is saved with the gauge as an
+optional last field of its layout line, so older layouts load unchanged and a gauge left in its own unit is
+saved exactly as before. Readings, warning limits and the drive log stay in the value's own unit; the gauge
+converts the reading and its scale just before drawing, and the settings show and take the limit in the
+chosen unit.
+
+### Fuel economy and fuel used (2026-11-22)
+
+Neither engine computer reports fuel use, so the screen works it out (core `FuelUse`, formulas in
+docs/protocol-notes.md): MPG now, MPG this drive, fuel used this drive and fuel flow, on both cars. "This
+drive" starts when the drive log would: the engine computer answering after 5 minutes or more of silence.
+A gap of more than 2 s between readings adds nothing, so a dropped link cannot invent fuel. The figures carry
+a per-car factor (default 1.0) corrected at fill-ups: the dash keeps an estimate of gallons used since the
+last fill-up (saved across restarts), and "Fuel: calibrate at fill-up" compares it with what the pump put in.
+It refuses under 2 gal counted, changes the factor by at most half or double at a time, and keeps it between
+0.3 and 3. It is only right if the dash ran for every drive in between and the tank was filled to full both
+times. The inputs are read only while a fuel gauge is on screen or a fill-up is being counted, and only
+while the dash is the screen showing.
+
 ## Open items
 
 - **Map more Jeep values** (Daniel's help needed later): another capture of the GearWrench app showing its

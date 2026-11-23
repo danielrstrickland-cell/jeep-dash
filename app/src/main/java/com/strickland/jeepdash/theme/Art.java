@@ -8,7 +8,9 @@ import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 
+import com.strickland.jeepdash.core.Catalog;
 import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.core.Units;
 
 import java.util.HashMap;
 import java.util.Locale;
@@ -130,7 +132,20 @@ final class Art {
         Double redFrom;
     }
 
+    /** True for a gauge shown in another unit than the value is read in (see Units). */
+    static boolean converted(Param p) { return !p.unit.equals(p.baseUnit); }
+
+    /** A figure written in the value's own unit (a red line, say) in the unit the gauge shows. */
+    static double fromBase(Param p, double v) { return Units.convert(v, p.baseUnit, p.unit); }
+
     static Scale scale(Param p) {
+        if (converted(p)) {
+            // the tick spacings below are for the value's own unit: work out plain ones, and move the red line
+            Double red = scale(base(p)).redFrom;
+            Scale s = plain(p);
+            if (red != null) s.redFrom = fromBase(p, red);
+            return s;
+        }
         Scale s = new Scale();
         switch (p.id) {
             case "rpm": s.major = 1000; s.minor = 250; s.labelEvery = 1000; s.labelDiv = 1000; s.redFrom = 5000.0; break;
@@ -142,11 +157,23 @@ final class Art {
             case "throttle": s.major = 25; s.minor = 12.5; s.labelEvery = 50; break;
             case "map_kpa": s.major = 20; s.minor = 10; s.labelEvery = 40; break;
             default:
-                s.major = nice((p.max - p.min) / 5);
-                s.minor = s.major / 2;
-                s.labelEvery = s.major * 2;
+                return plain(p);
         }
         return s;
+    }
+
+    private static Scale plain(Param p) {
+        Scale s = new Scale();
+        s.major = nice((p.max - p.min) / 5);
+        s.minor = s.major / 2;
+        s.labelEvery = s.major * 2;
+        return s;
+    }
+
+    /** The catalog's own Param for a gauge shown in another unit. */
+    private static Param base(Param p) {
+        Param b = Catalog.byId(p.id);
+        return b != null && b.unit.equals(p.baseUnit) ? b : Units.display(p, p.baseUnit);
     }
 
     private static double nice(double x) {

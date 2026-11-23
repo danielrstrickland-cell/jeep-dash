@@ -99,6 +99,13 @@ public class LinkService extends Service {
     /** The clock every reading is stamped with. Use this (not wall time) when asking LiveValues for a value. */
     public static long now() { return SystemClock.elapsedRealtime(); }
 
+    // When the current drive started (on the now() clock), 0 before the first: the same moment the drive log
+    // starts, when the engine computer answers after 5 minutes or more of silence. "This drive" gauges use it.
+    private static volatile long driveStartedMs;
+    private boolean driving;
+
+    public static long driveStartedMs() { return driveStartedMs; }
+
     private final LocalBinder binder = new LocalBinder();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
@@ -791,6 +798,12 @@ public class LinkService extends Service {
         // so being connected alone must not keep the log growing or the service running.
         if (status == Status.LIVE && perSec > 0) lastDataMs = t;
         boolean dataLately = lastDataMs > 0 && t - lastDataMs < DATA_GAP_MS;
+        if (dataLately && !driving) {
+            driving = true;
+            driveStartedMs = t;
+        } else if (driving && !dataLately && t - lastDataMs > LOG_CLOSE_MS) {
+            driving = false;
+        }
         if (dataLately && log == null && t >= logRetryAfterMs) openLog(t);
         if (log != null) {
             if (dataLately) writeRow(t);
