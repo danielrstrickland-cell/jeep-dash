@@ -247,7 +247,8 @@ public final class JeepTheme implements Theme {
             x = pill(c, "switch", x, top, s.nextLook == null ? "XP STYLE" : s.nextLook, true, false) - 10;
             x = pill(c, "menu", x, top, "SETUP", false, false) - 10;
             x = pill(c, "logs", x, top, "LOGS", false, false) - 10;
-            if (s.canEdit) pill(c, "edit", x, top, "EDIT", false, false);
+            if (s.canEdit) x = pill(c, "edit", x, top, "EDIT", false, false) - 10;
+            if (s.music) pill(c, "music", x, top, "\u266A MUSIC", false, s.musicOpen);
         }
 
         // link status, bottom left, as a small green readout
@@ -266,6 +267,32 @@ public final class JeepTheme implements Theme {
             Art.text(c, s.detail, w / 2, 27, size, ink, Art.COND, Paint.Align.CENTER);
             buttons.put("status2", new RectF(40, 0, w - 40, 38));
         }
+    }
+
+    @Override
+    public RectF buttonRect(String action) { return buttons.get(action); }
+
+    /** The window in the look's own black panel, condensed lettering, needle orange and green readout. */
+    @Override
+    public MusicPainter.Dress musicDress() {
+        MusicPainter.Dress d = new MusicPainter.Dress();
+        d.frame = 0xff0c0c0c;
+        d.edge = 0xff3a3a3a;
+        d.title = new int[]{0xff1d1d1d, 0xff0c0c0c};
+        d.titleInk = light;
+        d.close = new int[]{0xff2a1a12};
+        d.closeInk = NEEDLE;
+        d.body = 0xff050505;
+        d.ink = light;
+        d.soft = READOUT;
+        d.button = 0xff141414;
+        d.buttonEdge = 0xff3a3a3a;
+        d.buttonInk = light;
+        d.face = Art.COND;
+        d.titleFace = Art.COND;
+        d.spacing = 0.06f;
+        d.corner = 12;
+        return d;
     }
 
     @Override

@@ -456,7 +456,8 @@ public final class XpTheme implements Theme {
         if (s.status == LinkService.Status.LIVE && s.detail.isEmpty()) st += "  " + s.readsPerSec + "/s";
         String time = clock.format(new Date());
         float stW = Art.width(st, 14, Art.SANS), timeW = Art.width(time, 14, Art.SANS);
-        float trayW = 16 + 10 + 7 + stW + 16 + timeW + 16;
+        float noteW = s.music ? 34 : 0;                    // the music button sits in the tray, left of the clock
+        float trayW = 16 + 10 + 7 + stW + 16 + noteW + timeW + 16;
         float trayX = w - trayW;
         p = Art.paint();
         p.setShader(Art.vertical(top, h, pal.tray, null));
@@ -469,6 +470,16 @@ public final class XpTheme implements Theme {
         float tb = Art.centre(top + TASKBAR / 2, 14, Art.SANS);
         Art.text(c, st, trayX + 16 + 10 + 7, tb, 14, pal.trayInk, Art.SANS, Paint.Align.LEFT);
         Art.text(c, time, w - 16, tb, 14, pal.trayInk, Art.SANS, Paint.Align.RIGHT);
+        if (s.music) {
+            float nx = w - 16 - timeW - 10 - 24;
+            if (s.musicOpen) {
+                p = Art.paint();
+                p.setColor(0x33ffffff);
+                c.drawRoundRect(Art.rect(nx - 4, top + 5, nx + 28, h - 5), 3, 3, p);
+            }
+            MusicPainter.note(c, nx + 12, top + TASKBAR / 2, 22, pal.trayInk);
+            buttons.put("music", new RectF(nx - 8, top, nx + 32, h));     // before status, so it wins
+        }
         buttons.put("status", new RectF(trayX, top, w, h));
 
         // look switch, just left of the tray
@@ -517,6 +528,33 @@ public final class XpTheme implements Theme {
             Art.text(c, s.detail, bx1 + 12, Art.centre((bt + bb) / 2, size, Art.SANS), size, pal.balloonInk, Art.SANS, Paint.Align.LEFT);
             buttons.put("status2", new RectF(bx1, bt, bx2, bb));
         }
+    }
+
+    @Override
+    public RectF buttonRect(String action) { return buttons.get(action); }
+
+    /** A real window of this look: its title bar, frame, close box and body, light or dark as it is now. */
+    @Override
+    public MusicPainter.Dress musicDress() {
+        MusicPainter.Dress d = new MusicPainter.Dress();
+        d.shadow = pal.shadow;
+        d.frame = pal.frame;
+        d.edge = 0;
+        d.title = pal.titleColors;
+        d.titleStops = pal.titleStops;
+        d.titleInk = pal.titleInk;
+        d.close = pal.closeBox;
+        d.closeInk = pal.closeInk;
+        d.body = pal.body;
+        d.ink = pal.ink;
+        d.soft = pal.soft;
+        d.button = pal.body;
+        d.buttonEdge = pal.divider;
+        d.buttonInk = pal.ink;
+        d.face = Art.SANS;
+        d.titleFace = Art.BOLD;
+        d.corner = 8;
+        return d;
     }
 
     @Override

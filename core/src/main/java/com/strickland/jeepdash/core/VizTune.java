@@ -35,11 +35,30 @@ public final class VizTune {
     private static final Knob GLOW = slider("glow", "Background glow", 0, 1.5f, 1);
     private static final Knob FALL = slider("fall", "Fall speed", 0.4f, 3, 1);
     private static final Knob CAPS = toggle("caps", "Peak caps");
-    /** Indexed by look: blocks, smooth, boom meters, bass ring, swirl. */
+    /**
+     * The looks that can be chosen, by number: blocks, smooth, bass ring, swirl. Number 2 was the boom meters,
+     * taken out; the numbers stay as they were so every look keeps its saved settings.
+     */
+    public static final int[] CHOICES = {0, 1, 3, 4};
+    public static final int SMOOTH = 1;
+
+    /** A saved look, or Smooth when it was the boom meters or makes no sense. */
+    public static int savedLook(int saved) {
+        for (int c : CHOICES) if (c == saved) return saved;
+        return SMOOTH;
+    }
+
+    /** The look after this one, for the LOOK button. */
+    public static int nextLook(int look) {
+        for (int c : CHOICES) if (c > look) return c;
+        return CHOICES[0];
+    }
+
+    /** Indexed by look: blocks, smooth, (the boom meters' old place), bass ring, swirl. */
     private static final Knob[][] KNOBS = {
             {GAIN, GLOW, slider("width", "Bar width", 0.4f, 0.95f, 0.78f), FALL, CAPS},
             {GAIN, GLOW, slider("width", "Bar width", 0.4f, 0.95f, 0.72f), FALL, CAPS},
-            {GAIN, GLOW, slider("needle", "Needle speed", 0.3f, 3, 1), toggle("mini", "Mini bars")},
+            {GAIN, GLOW},
             {GAIN, GLOW, slider("size", "Ring size", 0.6f, 1.4f, 1), slider("pulse", "Pulse", 0, 2, 1), CAPS},
             {GAIN, GLOW, slider("trail", "Trail length", 0.15f, 1.5f, 0.55f), slider("spin", "Spin", 0, 2, 1),
                     slider("zoom", "Zoom", 0, 2, 1), toggle("drops", "Droplets")},

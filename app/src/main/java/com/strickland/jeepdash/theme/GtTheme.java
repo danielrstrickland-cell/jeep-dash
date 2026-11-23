@@ -292,7 +292,8 @@ public final class GtTheme implements Theme {
             if (s.nextLook != null) x = button(c, "switch", x, top, s.nextLook, false) - 8;
             x = button(c, "menu", x, top, "SETUP", false) - 8;
             x = button(c, "logs", x, top, "LOGS", false) - 8;
-            if (s.canEdit) button(c, "edit", x, top, "EDIT", false);
+            if (s.canEdit) x = button(c, "edit", x, top, "EDIT", false) - 8;
+            if (s.music) button(c, "music", x, top, "\u266A MUSIC", s.musicOpen);
         }
         boolean good = s.status == LinkService.Status.LIVE && s.detail.isEmpty();
         boolean bad = s.status == LinkService.Status.BUSY || s.status == LinkService.Status.NO_PERMISSION;
@@ -309,6 +310,32 @@ public final class GtTheme implements Theme {
             Art.text(c, s.detail, w / 2, Math.max(18, h * 0.035f), ds, ink, Art.SANS, Paint.Align.CENTER);
             buttons.put("status2", new RectF(30, 0, w - 30, Math.max(30, h * 0.05f)));
         }
+    }
+
+    @Override
+    public RectF buttonRect(String action) { return buttons.get(action); }
+
+    /** The window in the look's dark glass, white lettering spaced out and grey. */
+    @Override
+    public MusicPainter.Dress musicDress() {
+        MusicPainter.Dress d = new MusicPainter.Dress();
+        d.frame = GLASS_BOTTOM;
+        d.edge = 0xff3a3e46;
+        d.title = new int[]{GLASS_TOP, GLASS_BOTTOM};
+        d.titleInk = WHITE;
+        d.close = new int[]{DIM};
+        d.closeInk = WHITE;
+        d.body = 0xff0b0c0e;
+        d.ink = WHITE;
+        d.soft = GREY;
+        d.button = GLASS_TOP;
+        d.buttonEdge = 0xff4a4f58;
+        d.buttonInk = WHITE;
+        d.spacing = 0.14f;
+        d.corner = 14;
+        d.face = Art.BOLD;
+        d.titleFace = Art.BOLD;
+        return d;
     }
 
     @Override

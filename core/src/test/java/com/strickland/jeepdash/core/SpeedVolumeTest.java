@@ -73,13 +73,34 @@ public class SpeedVolumeTest {
         T.eq(7, v.base(), "base");
     }
 
-    public static void aHandChangeNeverMakesTheBaseNegative() {
+    public static void aHandLevelStandsExactlyAtTheSpeedItWasSet() {
         SpeedVolume v = at(SpeedVolume.Strength.HIGH);
         T.eq(8, v.step(5, 15, 44.0, 0), "base 5 + 3");
-        // the owner turned it right down at speed: the base cannot go under 0, so the speed steps still apply
-        T.eq(3, v.step(1, 15, 44.0, 100), "0 + 3");
-        T.eq(0, v.base(), "1 - 3 is held at 0");
-        T.eq(0, v.step(3, 15, 0.0, 200), "stopped: silent, as the owner asked");
+        T.eq(1, v.step(1, 15, 44.0, 100), "owner turned it right down at speed: 1 stands");
+        T.eq(1, v.step(1, 15, 45.0, 200), "and is not pushed back up");
+        T.eq(0, v.step(1, 15, 0.0, 300), "slowing takes the 3 steps off: never below 0");
+        T.eq(0, v.base(), "base held at 0");
+        T.eq(1, v.step(0, 15, 44.0, 400), "back up to speed: the 3 steps on again, from below 0");
+    }
+
+    public static void aHandLevelAtTheTopStandsToo() {
+        SpeedVolume v = at(SpeedVolume.Strength.LOW);
+        T.eq(6, v.step(5, 15, 20.0, 0), "one step");
+        T.eq(15, v.step(15, 15, 20.0, 100), "owner turned it right up: 15 stands");
+        T.eq(15, v.step(15, 15, 80.0, 200), "more speed: still never above the top");
+        T.eq(14, v.step(15, 15, 0.0, 300), "stopped: one step off the level he set");
+    }
+
+    public static void turnedToNothingStaysNothingUntilTheOwnerRaisesIt() {
+        SpeedVolume v = at(SpeedVolume.Strength.MEDIUM);
+        T.eq(8, v.step(5, 15, 60.0, 0), "raised");
+        T.eq(0, v.step(0, 15, 60.0, 100), "owner turned it off");
+        T.eq(0, v.step(0, 15, 90.0, 200), "faster: still silent");
+        T.eq(0, v.step(0, 15, 0.0, 300), "stopped: silent");
+        T.eq(0, v.release(0), "released: silent");
+        T.eq(0, v.step(0, 15, 60.0, 400), "starts again from silent: speed adds nothing to nothing");
+        T.eq(4, v.step(4, 15, 60.0, 500), "owner raises it: 4 stands");
+        T.eq(5, v.step(4, 15, 80.0, 600), "and speed works from there again");
     }
 
     public static void releaseGivesBackTheOwnersLevel() {

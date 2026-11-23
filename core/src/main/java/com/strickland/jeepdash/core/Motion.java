@@ -1,6 +1,11 @@
 package com.strickland.jeepdash.core;
 
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * What the tablet's own sensors add to the dash: GPS speed, G-force, pull and braking, a 0-60 timer and how
@@ -31,6 +36,29 @@ public final class Motion {
 
     private double errorPct;
     private int errorSamples;
+
+    /**
+     * Worked out by the link service from the car's readings alone, whichever screen is in front (the drive log
+     * gets them too). GPS speed, G-force and Speedo vs GPS need the tablet's sensors and stay with the screen.
+     */
+    public static final List<String> CAR_GAUGES = Collections.unmodifiableList(Arrays.asList("g_accel", "zero_sixty", "gear"));
+
+    /** True when the link service has car-made values to work out: one of them is in front or on the dash. */
+    public static boolean carWanted(Collection<String> requested, Collection<String> dashShown) {
+        for (String id : CAR_GAUGES) if (requested.contains(id) || dashShown.contains(id)) return true;
+        return false;
+    }
+
+    /**
+     * What to read: the given list, plus road speed (and engine speed for the gear) when the dash's layout has
+     * one of the car-made values, so they keep going behind another screen. The given set is not changed.
+     */
+    public static Set<String> withCarInputs(Set<String> ids, Collection<String> dashShown) {
+        Set<String> out = new LinkedHashSet<>(ids);
+        if (dashShown.contains("g_accel") || dashShown.contains("zero_sixty") || dashShown.contains("gear")) out.add("speed");
+        if (dashShown.contains("gear")) out.add("rpm");
+        return out;
+    }
 
     /** True when a value on screen is worked out from the Jeep's speed, so the speed has to be read as well. */
     public static boolean needsJeepSpeed(Collection<String> shownIds) {

@@ -25,6 +25,7 @@ import android.widget.Toast;
 
 import com.strickland.jeepdash.core.AutoStart;
 import com.strickland.jeepdash.core.Catalog;
+import com.strickland.jeepdash.core.DashMenu;
 import com.strickland.jeepdash.core.FuelUse;
 import com.strickland.jeepdash.core.NightHours;
 import com.strickland.jeepdash.core.PollRunner;
@@ -34,7 +35,9 @@ import com.strickland.jeepdash.core.Layout;
 import com.strickland.jeepdash.core.LayoutCodec;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Motion;
+import com.strickland.jeepdash.core.NowPlaying;
 import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.core.SpeedCorrection;
 import com.strickland.jeepdash.core.SpeedVolume;
 import com.strickland.jeepdash.theme.GtTheme;
 import com.strickland.jeepdash.theme.JeepTheme;
@@ -65,7 +68,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private boolean asking;                            // Android drops a permission request made during another
     private boolean askedToLook;                       // asked once for leave to search for an unpaired dongle
     private boolean askedLocation;                     // asked once; a refusal is not argued with
-    private NowPlayingBar nowPlaying;                  // null while the now-playing bar is off
+    private MusicSession music;                        // what the music app plays, for the music button's window
 
     @Override
     protected void onCreate(Bundle b) {
@@ -83,7 +86,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         view.chrome.snap = prefs.getBoolean("snap", true);
         applyLook();
         setContentView(view);
-        nowPlaying = NowPlayingBar.sync(this, null);
+        music = new MusicSession(this, this::onMusic);
+        view.chrome.music = MusicSession.buttonOn(this);
         askPermissions();
         sweepPending = b == null && getIntent().getBooleanExtra("sweep", false);
         if (b == null) UpdateChecker.check(this, buildNumber(), false);
@@ -179,12 +183,12 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         super.onStart();
         startLink();
         bound = bindService(new Intent(this, LinkService.class), this, Context.BIND_AUTO_CREATE);
-        if (nowPlaying != null) nowPlaying.start();
+        if (view.chrome.music) music.start();
     }
 
     @Override
     protected void onStop() {
-        if (nowPlaying != null) nowPlaying.stop();
+        music.stop();
         tablet.stop();
         if (service != null) service.removeListener(this);
         service = null;
@@ -268,6 +272,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                     Manifest.permission.ACCESS_COARSE_LOCATION}, 2);
         }
         tablet.setValues(service.values());
+        tablet.setLink(service);
         tablet.start(this, gps);
     }
 
@@ -350,6 +355,13 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case "add": addGauge(); break;
             case "menu": showMenu(); break;
             case "status": showStatus(); break;
+            case "music":
+                view.chrome.musicOpen = !view.chrome.musicOpen;
+                view.invalidate();
+                break;
+            case "music:prev": music.transport(-1); break;
+            case "music:play": music.transport(0); break;
+            case "music:next": music.transport(1); break;
             default: break;
         }
     }
@@ -426,105 +438,198 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         showMessage("Dongle link", d.isEmpty() ? line + ". About " + view.chrome.readsPerSec + " readings per second." : d);
     }
 
+    /** The music app changed (or access did): the window's lines and play/pause follow. */
+    private void onMusic() {
+        boolean a = music.access(), on = music.hasSession();
+        String t = music.title(), r = music.artist();
+        view.chrome.musicTitle = NowPlaying.titleLine(a, on, t, r, 60);
+        view.chrome.musicArtist = NowPlaying.artistLine(a, on, t, r, 60);
+        view.chrome.musicPlaying = music.playing();
+        view.invalidate();
+    }
+
+    // ---------------- the menu: groups, then their entries (core DashMenu) ----------------
+
+    private DashMenu.State menuState() {
+        DashMenu.State s = new DashMenu.State();
+        s.porsche = Catalog.porsche();
+        s.look = look;
+        s.nextLook = lookName(nextLook());
+        s.linked = service != null;
+        s.codes = service != null && service.codesAvailable();
+        s.fastAvailable = service != null && service.fastRefreshAvailable();
+        if (s.fastAvailable) {
+            PollRunner.Fast f = service.fastRefresh();
+            s.fast = f == PollRunner.Fast.ON ? "on" : f == PollRunner.Fast.OFF ? "off" : "backed_off";
+        }
+        s.xpScheme = prefs.getString("xp_scheme", "Blue");
+        s.xpMode = prefs.getString("xp_mode", NightHours.LIGHT);
+        s.jeepBacklight = prefs.getString("jeep_backlight", "White");
+        s.musicButton = view.chrome.music;
+        if (service != null) s.volume = service.volumeFollowsSpeed().name();
+        s.autoStart = prefs.getString(AutoStartReceiver.DEVICE, null) == null ? null
+                : prefs.getString(AutoStartReceiver.NAME, "on");
+        s.speedCorrectionPct = service != null ? service.speedCorrection()
+                : prefs.getFloat(Catalog.porsche() ? "speed_corr_p" : "speed_corr", 0);
+        s.canEdit = view.chrome.canEdit;
+        s.snap = view.chrome.snap;
+        return s;
+    }
+
     private void showMenu() {
-        final boolean porsche = Catalog.porsche();
-        final List<String> items = new ArrayList<>();
-        final List<Runnable> actions = new ArrayList<>();
-        if ("xp".equals(look)) {
-            for (String scheme : XpTheme.SCHEMES) {
-                items.add("Window colour: " + scheme);
-                actions.add(() -> {
-                    prefs.edit().putString("xp_scheme", scheme).apply();
-                    xp.setScheme(scheme);
-                    view.invalidate();
-                });
-            }
-            for (String mode : XpTheme.MODES) {
-                items.add("Brightness: " + mode + (NightHours.AUTO.equals(mode) ? " (dark from 7 pm to 7 am)" : ""));
-                actions.add(() -> {
-                    prefs.edit().putString("xp_mode", mode).apply();
-                    xp.setMode(mode);
-                    view.invalidate();
-                });
-            }
-        } else if ("jeep".equals(look)) {
-            for (String light : JeepTheme.BACKLIGHTS) {
-                items.add("Backlight: " + light);
-                actions.add(() -> {
-                    prefs.edit().putString("jeep_backlight", light).apply();
-                    jeep.setBacklight(light);
-                    view.invalidate();
-                });
-            }
-        }
-        if (service != null && service.codesAvailable()) {
-            items.add("Trouble codes (read and clear)");
-            actions.add(() -> { if (service != null) CodesDialog.show(this, service); });
-        }
-        if (service != null && service.fastRefreshAvailable()) {
-            final PollRunner.Fast fast = service.fastRefresh();
-            items.add(fast == PollRunner.Fast.OFF ? "Fast refresh (experimental): off"
-                    : fast == PollRunner.Fast.ON ? "Fast refresh (experimental): ON"
-                    : "Fast refresh: turned itself off (readings went missing). Tap to try again");
-            actions.add(() -> { if (service != null) service.setFastRefresh(fast != PollRunner.Fast.ON); });
-        }
-        items.add("Now playing bar: " + NowPlayingBar.place(this));
-        actions.add(this::chooseNowPlaying);
-        String auto = prefs.getString(AutoStartReceiver.NAME, null);
-        items.add("Auto-start with Bluetooth device: " + (prefs.getString(AutoStartReceiver.DEVICE, null) == null ? "off" : auto));
-        actions.add(this::chooseAutoStart);
-        if (service != null) {
-            items.add("Volume follows speed (experimental): " + service.volumeFollowsSpeed().name().toLowerCase(java.util.Locale.US));
-            actions.add(this::chooseVolume);
-        }
-        items.add("Fuel: calibrate at fill-up");
-        actions.add(() -> FuelDialog.show(this, this::pushActiveParams));
-        items.add("Check for update");
-        actions.add(() -> UpdateChecker.check(this, buildNumber(), true));
-        items.add("Put this look's gauges back to the original layout");
-        actions.add(this::confirmReset);
-        items.add("Share link log (for troubleshooting)");
-        actions.add(this::shareLinkLog);
-        if (!porsche) {
-            items.add("Music visualizer");
-            actions.add(this::openVisualizer);
-        }
-        items.add("Android Bluetooth settings (to pair the dongle)");
-        actions.add(this::openBluetoothSettings);
-        items.add(porsche ? "Vehicle: switch to Jeep Grand Cherokee" : "Vehicle: switch to Porsche Cayenne");
-        actions.add(this::confirmVehicle);
+        final List<DashMenu.Group> groups = DashMenu.build(menuState());
+        String[] titles = new String[groups.size()];
+        for (int i = 0; i < titles.length; i++) titles[i] = groups.get(i).title;
         new AlertDialog.Builder(this)
-                .setTitle((porsche ? "Cayenne Dash" : "Jeep Dash") + "  (build " + buildNumber() + ")")
-                .setItems(items.toArray(new String[0]), (dlg, which) -> actions.get(which).run())
+                .setTitle((Catalog.porsche() ? "Cayenne Dash" : "Jeep Dash") + "  (build " + buildNumber() + ")")
+                .setItems(titles, (dlg, which) -> showGroup(groups.get(which)))
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
+    private void showGroup(DashMenu.Group g) {
+        String[] labels = new String[g.entries.size()];
+        for (int i = 0; i < labels.length; i++) labels[i] = g.entries.get(i).label;
+        new AlertDialog.Builder(this)
+                .setTitle(g.title)
+                .setItems(labels, (dlg, which) -> runEntry(g.entries.get(which).id))
+                .setNegativeButton("Back", (dlg, which) -> showMenu())
+                .show();
+    }
+
+    private void runEntry(String id) {
+        switch (id) {
+            case DashMenu.VEHICLE: confirmVehicle(); break;
+            case DashMenu.FAST:
+                if (service != null) service.setFastRefresh(service.fastRefresh() != PollRunner.Fast.ON);
+                break;
+            case DashMenu.SPEED_CORRECTION: chooseSpeedCorrection(); break;
+            case DashMenu.BLUETOOTH: openBluetoothSettings(); break;
+            case DashMenu.LINK_LOG: shareLinkLog(); break;
+            case DashMenu.EDIT: onDashAction("edit"); break;
+            case DashMenu.ADD: addGauge(); break;
+            case DashMenu.SNAP: onDashAction("snap"); break;
+            case DashMenu.RESET: confirmReset(); break;
+            case DashMenu.SWITCH_LOOK: switchLook(); break;
+            case DashMenu.XP_SCHEME:
+                pick("Window colour", XpTheme.SCHEMES, prefs.getString("xp_scheme", "Blue"), v -> {
+                    prefs.edit().putString("xp_scheme", v).apply();
+                    xp.setScheme(v);
+                });
+                break;
+            case DashMenu.XP_MODE:
+                pick("Brightness (Auto: dark from 7 pm to 7 am)", XpTheme.MODES, prefs.getString("xp_mode", NightHours.LIGHT), v -> {
+                    prefs.edit().putString("xp_mode", v).apply();
+                    xp.setMode(v);
+                });
+                break;
+            case DashMenu.JEEP_BACKLIGHT:
+                pick("Backlight", JeepTheme.BACKLIGHTS, prefs.getString("jeep_backlight", "White"), v -> {
+                    prefs.edit().putString("jeep_backlight", v).apply();
+                    jeep.setBacklight(v);
+                });
+                break;
+            case DashMenu.MUSIC_BUTTON: chooseMusicButton(); break;
+            case DashMenu.VOLUME: chooseVolume(); break;
+            case DashMenu.VISUALIZER: openVisualizer(); break;
+            case DashMenu.FUEL: FuelDialog.show(this, this::pushActiveParams); break;
+            case DashMenu.CODES: if (service != null) CodesDialog.show(this, service); break;
+            case DashMenu.LOGS: showLogs(); break;
+            case DashMenu.AUTO_START: chooseAutoStart(); break;
+            case DashMenu.UPDATE: UpdateChecker.check(this, buildNumber(), true); break;
+            default: break;
+        }
+    }
+
+    /** One of a few named choices, the current one marked; the dash redraws after. */
+    private void pick(String title, String[] choices, String now, java.util.function.Consumer<String> then) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setSingleChoiceItems(choices, Arrays.asList(choices).indexOf(now), (dlg, which) -> {
+                    dlg.dismiss();
+                    then.accept(choices[which]);
+                    view.invalidate();
+                })
+                .setNegativeButton("Cancel", null)
                 .show();
     }
 
     // ---------------- now playing, auto-start, volume follows speed ----------------
 
-    private void chooseNowPlaying() {
-        final String[] places = NowPlayingBar.PLACES;
-        new AlertDialog.Builder(this)
-                .setTitle("Now playing bar")
-                .setSingleChoiceItems(new String[]{"Off", "Top", "Bottom"},
-                        Arrays.asList(places).indexOf(NowPlayingBar.place(this)), (dlg, which) -> {
-                    dlg.dismiss();
-                    boolean on = !NowPlayingBar.OFF.equals(places[which]);
-                    prefs.edit().putString(NowPlayingBar.PREF, places[which]).apply();
-                    MediaListener.enable(this, on);
-                    boolean wasOff = nowPlaying == null;
-                    nowPlaying = NowPlayingBar.sync(this, nowPlaying);
-                    if (nowPlaying != null && wasOff) nowPlaying.start();
-                    if (on && !NowPlayingBar.hasAccess(this)) {
-                        new AlertDialog.Builder(this)
-                                .setTitle("Notification access")
-                                .setMessage("Android only lets an app see and control another app's music (like Spotify) when it has notification access, so turn it on for Jeep Dash on the next screen.")
-                                .setPositiveButton("Open settings", (d, w) -> NowPlayingBar.openAccessSettings(this))
-                                .setNegativeButton("Not now", null)
-                                .show();
-                    }
+    private void chooseMusicButton() {
+        pick("Music button", new String[]{"Off", "On"}, view.chrome.music ? "On" : "Off", v -> {
+            boolean on = "On".equals(v);
+            MusicSession.setButtonOn(this, on);
+            view.chrome.music = on;
+            view.chrome.musicOpen = false;
+            if (on) music.start();
+            else music.stop();
+            if (on && !MusicSession.hasAccess(this)) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Notification access")
+                        .setMessage("Android only lets an app see and control another app's music (like Spotify) when it has notification access, so turn it on for Jeep Dash on the next screen.")
+                        .setPositiveButton("Open settings", (d, w) -> MusicSession.openAccessSettings(this))
+                        .setNegativeButton("Not now", null)
+                        .show();
+            }
+        });
+    }
+
+    /**
+     * Speed correction for this car, -15% to +15% in tenths. "Set from GPS" fills in what the tablet's GPS has
+     * measured, when it has a minute above 40 mph (SpeedCorrection.Gps), and says so plainly when it has not.
+     */
+    private void chooseSpeedCorrection() {
+        if (service == null) {
+            showMessage("Speed correction", "Wait for the dash to finish starting, then try again.");
+            return;
+        }
+        final android.widget.TextView shown = new android.widget.TextView(this);
+        final android.widget.SeekBar bar = new android.widget.SeekBar(this);
+        bar.setMax(300);                                       // -15.0 .. +15.0 in tenths
+        bar.setProgress((int) Math.round(service.speedCorrection() * 10) + 150);
+        shown.setTextSize(20);
+        shown.setText(DashMenu.correctionLabel((bar.getProgress() - 150) / 10.0));
+        bar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(android.widget.SeekBar b, int p, boolean user) {
+                shown.setText(DashMenu.correctionLabel((p - 150) / 10.0));
+            }
+            @Override public void onStartTrackingTouch(android.widget.SeekBar b) { }
+            @Override public void onStopTrackingTouch(android.widget.SeekBar b) { }
+        });
+        android.widget.TextView note = new android.widget.TextView(this);
+        note.setText("Raises or lowers the car's speed reading for bigger or smaller tyres. Everything made from speed uses it; Speedo vs GPS still shows the reading's own error.");
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad / 2, pad, 0);
+        box.addView(shown);
+        box.addView(bar);
+        box.addView(note);
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("Speed correction (this car)")
+                .setView(box)
+                .setPositiveButton("Save", (dlg, w) -> {
+                    if (service != null) service.setSpeedCorrection((bar.getProgress() - 150) / 10.0);
                 })
+                .setNeutralButton("Set from GPS", null)
                 .setNegativeButton("Cancel", null)
                 .show();
+        // kept open, so the owner sees the figure before saving it
+        d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            if (service == null) return;
+            SpeedCorrection.Gps g = service.speedGps();
+            Double pct = g.measuredPct();
+            if (pct == null) {
+                showMessage("Set from GPS", "Not enough GPS yet: it needs a minute of driving above 40 mph with the GPS on (so far "
+                        + g.countedMs() / 1000 + " s). The GPS runs while a GPS speed or Speedo vs GPS gauge is on the dash.");
+            } else if (!SpeedCorrection.usable(pct)) {
+                showMessage("Set from GPS", String.format(java.util.Locale.US,
+                        "GPS measured %+.1f%%, outside the -15%% to +15%% this allows, so it was not used.", pct));
+            } else {
+                bar.setProgress((int) Math.round(pct * 10) + 150);
+            }
+        });
     }
 
     /** Paired devices by name, never the dongle the link remembers, plus Off. */

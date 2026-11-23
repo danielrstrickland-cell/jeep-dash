@@ -32,6 +32,12 @@ public final class TestMain {
             NowPlayingTest.class,
             AutoStartTest.class,
             SpeedVolumeTest.class,
+            MusicLayoutTest.class,
+            SpeedCorrectionTest.class,
+            CarMotionTest.class,
+            GravityTest.class,
+            DashMenuTest.class,
+            VizLooksTest.class,
     };
 
     public static void main(String[] args) {

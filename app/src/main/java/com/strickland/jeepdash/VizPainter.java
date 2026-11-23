@@ -17,7 +17,8 @@ import com.strickland.jeepdash.core.VizTune;
 public final class VizPainter {
     public static final int BANDS = 96;                              // how finely the sound is analysed
     public static final int[] COUNTS = {16, 24, 32, 48, 64, 96};    // how many bars are drawn
-    public static final String[] LOOKS = {"Blocks", "Smooth", "Boom meters", "Bass ring", "Swirl"};
+    /** By look number; number 2 (the boom meters) was taken out, see VizTune.CHOICES. */
+    public static final String[] LOOKS = {"Blocks", "Smooth", "", "Bass ring", "Swirl"};
     public static final String[] COLORS = {"RPM", "Vice", "Factory", "XP", "Fire", "Ice", "Classic"};
     /** low, middle, high, accent. The first profile follows the engine instead. */
     private static final int[][] PROFILES = {
@@ -30,10 +31,6 @@ public final class VizPainter {
             {0xFF19C23A, 0xFFE8D21A, 0xFFFF2A1A, 0xFFFFFFFF},      // Classic stereo
     };
     private static final Typeface BOLD = Typeface.create(Typeface.DEFAULT, Typeface.BOLD);
-    private static final String[] MARKS = {"-20", "-10", "-7", "-5", "-3", "0", "+3"};
-    private static final float[] MARK_AT = {0f, 0.22f, 0.36f, 0.48f, 0.60f, 0.72f, 1f};
-    private static final int[] GLASS = {0xFF1B1D22, 0xFF050506};
-    private static final float[] FACE_STOPS = {0f, 1f};
     private static final float[] SWEEP_STOPS = {0f, 0.5f, 1f};
 
     /** A look drawn by another class (the swirl needs off-screen pictures this class does not use). */
@@ -53,6 +50,8 @@ public final class VizPainter {
     public VizTune tune = new VizTune(); // per-look settings from the TUNE panel
     public boolean tuneOpen;
     public final RectF tuneButton = new RectF(), panel = new RectF(), resetButton = new RectF();
+    public final RectF lookButton = new RectF(), musicButton = new RectF();
+    public boolean music, musicOpen;     // the music button (set on the dash's menu) and its window
     private final RectF[] rows = new RectF[8];
     private float trackLeft, trackRight;
 
@@ -60,7 +59,7 @@ public final class VizPainter {
     private final RectF rect = new RectF();
     private final int[] pal = new int[4], sweep = new int[3];
     private final float[] disp = new float[BANDS], dpeak = new float[BANDS];
-    private float needleL, needleR, hue = 200;
+    private float hue = 200;
 
     public void draw(Canvas c, int w, int h, float dt, float seconds) {
         float gain = tune.get(look, "gain");
@@ -77,7 +76,6 @@ public final class VizPainter {
         group(dt, gain);
         boolean caps = tune.on(look, "caps");
         if (look == 4 && swirl != null) swirl.draw(c, w, h, dt, seconds, this);
-        else if (look == 2) meters(c, w, h, dt);
         else if (look == 3) ring(c, w, h, caps);
         else if (look == 1) smooth(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, tune.get(1, "width"), caps);
         else bars(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, 30, tune.get(0, "width"), caps);
@@ -86,6 +84,10 @@ public final class VizPainter {
         pill(c, dashButton, 18 * u, 16 * u, "DASH", u);
         pill(c, colorButton, dashButton.right + 12 * u, 16 * u, "COLORS: " + COLORS[color].toUpperCase(), u);
         pill(c, tuneButton, colorButton.right + 12 * u, 16 * u, tuneOpen ? "TUNE \u25B4" : "TUNE \u25BE", u);
+        // looks change only here, on purpose: a tap or swipe on the picture does nothing (brightness swipes)
+        pill(c, lookButton, tuneButton.right + 12 * u, 16 * u, "LOOK: " + LOOKS[look].toUpperCase(), u);
+        if (music) pill(c, musicButton, lookButton.right + 12 * u, 16 * u, musicOpen ? "\u266A MUSIC \u25B4" : "\u266A MUSIC", u);
+        else musicButton.setEmpty();
         slider(c, w, u);
         text(c, LOOKS[look].toUpperCase(), w - 22 * u, 46 * u, 24 * u, 0x99FFFFFF, Paint.Align.RIGHT);
         if (rpm != null)
@@ -167,73 +169,6 @@ public final class VizPainter {
                 c.drawRoundRect(set(x, y - round * 0.5f, x + bw, y + round * 0.5f), round * 0.5f, round * 0.5f, paint);
             }
         }
-    }
-
-    // ---- look 3: two dark glass needle meters, bass on the left, overall level on the right ----
-
-    private void meters(Canvas c, int w, int h, float dt) {
-        float speed = Math.min(1, dt * 10 * tune.get(2, "needle"));
-        needleL += (bass - needleL) * speed;
-        needleR += (vu - needleR) * speed;
-        boolean mini = tune.on(2, "mini");
-        float mw = w * 0.40f, mh = h * 0.56f, y = h * (mini ? 0.15f : 0.22f);
-        meter(c, w * 0.07f, y, mw, mh, needleL, "BASS");
-        meter(c, w * 0.53f, y, mw, mh, needleR, "LEVEL");
-        if (mini) bars(c, w * 0.07f, w * 0.93f, h * 0.80f, h * 0.95f, 7, 0.78f, true);
-    }
-
-    private void meter(Canvas c, float x, float y, float mw, float mh, float v, String name) {
-        float corner = mh * 0.06f, edge = mh * 0.075f;
-        v = clamp(v);
-        fill(0);
-        paint.setShader(new LinearGradient(0, y, 0, y + mh, GLASS, FACE_STOPS, Shader.TileMode.CLAMP));
-        c.drawRoundRect(set(x, y, x + mw, y + mh), corner, corner, paint);
-        stroke(0x30FFFFFF, Math.max(1.5f, mh * 0.004f));
-        c.drawRoundRect(set(x, y, x + mw, y + mh), corner, corner, paint);
-
-        // the scale: a faint track with a red end, lit up to the needle in the profile's colours
-        float cx = x + mw / 2, cy = y + mh * 1.08f, r = mh * 0.74f, sweep = 76, from = 270 - sweep / 2;
-        RectF arc = set(cx - r, cy - r, cx + r, cy + r);
-        stroke(0x24FFFFFF, mh * 0.024f);
-        c.drawArc(arc, from, sweep * 0.72f, false, paint);
-        stroke(0x99FF3B30, mh * 0.024f);
-        c.drawArc(arc, from + sweep * 0.72f, sweep * 0.28f, false, paint);
-        int steps = 30;
-        for (int i = 0; i < steps && (float) i / steps < v; i++) {
-            float t0 = (float) i / steps, t1 = Math.min(v, (float) (i + 1) / steps);
-            stroke(t0 > 0.72f ? 0xFFFF3B30 : mix(t0 / 0.72f), mh * 0.024f);
-            c.drawArc(arc, from + sweep * t0, sweep * (t1 - t0) + 0.3f, false, paint);
-        }
-        for (int i = 0; i < MARKS.length; i++) {
-            double a = Math.toRadians(-sweep / 2 + sweep * MARK_AT[i]);
-            float sx = (float) Math.sin(a), sy = (float) -Math.cos(a);
-            int ink = MARK_AT[i] > 0.72f ? 0xFFFF5A50 : 0xAAFFFFFF;
-            stroke(ink, mh * 0.008f);
-            c.drawLine(cx + sx * r * 1.035f, cy + sy * r * 1.035f, cx + sx * r * 1.07f, cy + sy * r * 1.07f, paint);
-            text(c, MARKS[i], cx + sx * r * 1.14f, cy + sy * r * 1.14f + mh * 0.02f, mh * 0.05f, ink, Paint.Align.CENTER);
-        }
-        text(c, name, x + edge, y + mh * 0.14f, mh * 0.062f, 0xAAFFFFFF, Paint.Align.LEFT);
-        text(c, String.valueOf(Math.round(v * 100)), x + edge, y + mh * 0.92f, mh * 0.13f, 0xFFFFFFFF, Paint.Align.LEFT);
-
-        boolean hot = v > 0.9f;
-        float lx = x + mw - edge - mh * 0.02f, ly = y + mh * 0.115f;
-        if (hot) {
-            fill(0);
-            paint.setShader(new RadialGradient(lx, ly, mh * 0.11f, 0xAAFF3B30, 0x00FF3B30, Shader.TileMode.CLAMP));
-            c.drawCircle(lx, ly, mh * 0.11f, paint);
-        }
-        fill(hot ? 0xFFFF3B30 : 0xFF3A1512);
-        c.drawCircle(lx, ly, mh * 0.026f, paint);
-
-        // the needle rises out of the bottom edge: a soft glow in the profile's colour under a thin white line
-        double a = Math.toRadians(-sweep / 2 + sweep * v);
-        float sx = (float) Math.sin(a), sy = (float) -Math.cos(a);
-        float r0 = (cy - (y + mh)) / -sy;
-        stroke(mix(v) & 0x66FFFFFF, mh * 0.04f);
-        paint.setStrokeCap(Paint.Cap.ROUND);
-        c.drawLine(cx + sx * (r0 + mh * 0.03f), cy + sy * (r0 + mh * 0.03f), cx + sx * r * 0.97f, cy + sy * r * 0.97f, paint);
-        stroke(0xFFFFFFFF, mh * 0.010f);
-        c.drawLine(cx + sx * r0, cy + sy * r0, cx + sx * r * 0.985f, cy + sy * r * 0.985f, paint);
     }
 
     // ---- look 4: the spectrum wrapped round a circle that swells with the bass ----

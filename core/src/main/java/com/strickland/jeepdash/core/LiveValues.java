@@ -9,10 +9,33 @@ public final class LiveValues {
 
     private final Map<String, double[]> latest = new ConcurrentHashMap<>();
     private final Map<String, Long> staleMs = new ConcurrentHashMap<>();
+    private final Map<String, Double> scales = new ConcurrentHashMap<>();
+    private static final String RAW = "raw:";
     private long holdFrom, holdUntil = -1;
     private boolean holding;
 
-    public void put(String id, double value, long nowMs) { latest.put(id, new double[]{value, nowMs}); }
+    public void put(String id, double value, long nowMs) {
+        Double k = scales.get(id);
+        if (k != null) {
+            latest.put(RAW + id, new double[]{value, nowMs});
+            value *= k;
+        }
+        latest.put(id, new double[]{value, nowMs});
+    }
+
+    /**
+     * Multiplies every later reading of this value by k as it comes in (the speed correction, see
+     * SpeedCorrection); the reading as it came stays available from raw. 1 removes it.
+     */
+    public void setScale(String id, double k) {
+        if (k == 1) scales.remove(id);
+        else scales.put(id, k);
+    }
+
+    /** The reading as it came in, before any scale; the same as get for a value without one. */
+    public Double raw(String id, long nowMs) {
+        return scales.containsKey(id) && latest.containsKey(RAW + id) ? get(RAW + id, nowMs) : get(id, nowMs);
+    }
 
     /** When the latest reading of this value was put, or null if there is none. */
     public Long timeOf(String id) {
@@ -53,7 +76,7 @@ public final class LiveValues {
         double[] e = latest.get(id);
         if (e == null) return null;
         long t = (long) e[1];
-        Long own = staleMs.get(id);
+        Long own = staleMs.get(id.startsWith(RAW) ? id.substring(RAW.length()) : id);
         long stale = own != null ? own : STALE_MS;
         if (nowMs - t <= stale) return e[0];
         if (holdUntil >= 0 && nowMs <= holdUntil && holdFrom - t <= stale) return e[0];

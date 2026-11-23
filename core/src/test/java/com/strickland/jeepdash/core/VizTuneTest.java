@@ -16,7 +16,8 @@ public class VizTuneTest {
 
     public static void eachLookHasItsOwnKnobs() {
         T.ok(has(4, "trail") && !has(0, "trail"), "trail length belongs to the swirl");
-        T.ok(has(2, "needle") && has(3, "pulse"), "meters and ring have theirs");
+        T.ok(has(3, "pulse"), "the ring has its own");
+        T.ok(!has(2, "needle"), "the boom meters are gone: their place keeps only the shared knobs");
         for (int look = 0; look < 5; look++) T.ok(has(look, "gain") && has(look, "glow"), "shared knobs on look " + look);
     }
 
@@ -58,10 +59,10 @@ public class VizTuneTest {
     public static void settingsSurviveSavingAndLoading() {
         VizTune t = new VizTune();
         t.set(4, "trail", 1.2f);
-        t.set(2, "mini", 0);
+        t.set(0, "caps", 0);
         VizTune u = VizTune.load(t.save());
         T.near(1.2, u.get(4, "trail"), 1e-6, "trail length");
-        T.ok(!u.on(2, "mini"), "mini bars off");
+        T.ok(!u.on(0, "caps"), "peak caps off");
         T.near(1, u.get(0, "gain"), 1e-6, "the rest at defaults");
     }
 

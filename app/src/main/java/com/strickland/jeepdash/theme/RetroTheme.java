@@ -321,7 +321,8 @@ public final class RetroTheme implements Theme {
             if (s.nextLook != null) x = button(c, "switch", x, top, s.nextLook, false) - 8;
             x = button(c, "menu", x, top, "SETUP", false) - 8;
             x = button(c, "logs", x, top, "LOGS", false) - 8;
-            if (s.canEdit) button(c, "edit", x, top, "EDIT", false);
+            if (s.canEdit) x = button(c, "edit", x, top, "EDIT", false) - 8;
+            if (s.music) button(c, "music", x, top, "\u266A MUSIC", s.musicOpen);
         }
         boolean good = s.status == LinkService.Status.LIVE && s.detail.isEmpty();
         boolean bad = s.status == LinkService.Status.BUSY || s.status == LinkService.Status.NO_PERMISSION;
@@ -334,6 +335,33 @@ public final class RetroTheme implements Theme {
             label(c, s.detail, w / 2, Math.max(18, h * 0.035f), 15, ink, w - 60, Paint.Align.CENTER);
             buttons.put("status2", new RectF(30, 0, w - 30, Math.max(30, h * 0.05f)));
         }
+    }
+
+    @Override
+    public RectF buttonRect(String action) { return buttons.get(action); }
+
+    /** The window on the look's dark panel in its glow colour and lettering. */
+    @Override
+    public MusicPainter.Dress musicDress() {
+        MusicPainter.Dress d = new MusicPainter.Dress();
+        d.frame = 0xff000000;
+        d.edge = dim(MAIN, 0x90);
+        d.title = new int[]{FRAME};
+        d.titleInk = MAIN;
+        d.close = new int[]{0xff000000};
+        d.closeInk = AMBER;
+        d.body = 0xff06211c;
+        d.ink = MAIN;
+        d.soft = AMBER;
+        d.button = 0xff000000;
+        d.buttonEdge = dim(MAIN, 0x90);
+        d.buttonInk = MAIN;
+        d.glow = MAIN;
+        d.spacing = 0.08f;
+        d.corner = 6;
+        d.face = Art.ITALIC_BOLD;
+        d.titleFace = Art.ITALIC_BOLD;
+        return d;
     }
 
     @Override

@@ -31,13 +31,16 @@ import com.strickland.jeepdash.core.Catalog;
 import com.strickland.jeepdash.core.DongleSession;
 import com.strickland.jeepdash.core.DriveLogWriter;
 import com.strickland.jeepdash.core.FuelUse;
+import com.strickland.jeepdash.core.Gears;
 import com.strickland.jeepdash.core.LiveValues;
+import com.strickland.jeepdash.core.Motion;
 import com.strickland.jeepdash.core.Param;
 import com.strickland.jeepdash.core.KwpRunner;
 import com.strickland.jeepdash.core.PollRunner;
 import com.strickland.jeepdash.core.Poller;
 import com.strickland.jeepdash.core.PollScheduler;
 import com.strickland.jeepdash.core.SciCodes;
+import com.strickland.jeepdash.core.SpeedCorrection;
 import com.strickland.jeepdash.core.SpeedVolume;
 import com.strickland.jeepdash.core.Trace;
 
@@ -120,6 +123,17 @@ public class LinkService extends Service {
     private volatile Set<String> dashShown = new LinkedHashSet<>();     // the dash's gauges, in front or not
     private FuelUse fuel;                   // the one fuel counter (see FuelStore); fed here, every tick
     private volatile SpeedVolume.Strength volumeStrength = SpeedVolume.Strength.OFF;   // volume follows speed
+    // Gear, pull/braking and the 0-60 timer come from the car's readings alone, so they are worked out here and
+    // keep going (and reach the drive log) whichever screen is in front. The screen's sensors add to carMotion:
+    // the first shove of a launch and GPS speed standing in (see TabletSensors).
+    private final Motion carMotion = new Motion();
+    private final Gears gears = Catalog.porsche() ? Gears.porsche() : Gears.jeep();
+    private static final String GEARING_KEY = Catalog.porsche() ? "gearing_p" : "gearing";
+    private static final long RPM_WITHIN_MS = 1500;        // engine and road speed this close in time make a pair
+    private double savedGearing;                            // ticker thread: the learned gearing as last saved
+    private long lastSpeedAt = Long.MIN_VALUE;              // ticker thread: the speed reading carMotion had last
+    private final SpeedCorrection.Gps speedGps = new SpeedCorrection.Gps();
+    private volatile double speedCorrection;                // percent, this car's
     private volatile boolean activeDirty;
     private volatile Status status = Status.SEARCHING;
     private volatile String detail = "";
@@ -172,9 +186,77 @@ public class LinkService extends Service {
     public void refreshActive() {
         FuelUse f = fuel;
         Set<String> ids = FuelUse.withInputs(requested, dashShown, Catalog.porsche(), f != null && f.fillStarted());
+        ids = Motion.withCarInputs(ids, dashShown);              // gear, pull and 0-60 behind another screen
         active = SpeedVolume.withSpeed(ids, volumeStrength);      // speed is read while volume follows it
         activeDirty = true;
     }
+
+    // ---------------- gear, pull/braking, 0-60 ----------------
+
+    /** For the screen's sensors to add the first shove of a launch and GPS speed (see TabletSensors). */
+    public Motion carMotion() { return carMotion; }
+
+    /** Ticker thread: hands carMotion and the gear indicator each new speed reading once, then puts their figures. */
+    private void workOutMotion() {
+        if (!Motion.carWanted(requested, dashShown)) return;
+        Long at = values.timeOf("speed");
+        if (at != null && at != lastSpeedAt) {
+            Double mph = values.get("speed", at);              // corrected (see SpeedCorrection)
+            if (mph != null && at.equals(values.timeOf("speed"))) {
+                lastSpeedAt = at;
+                carMotion.dash(mph, at);
+                Long rpmAt = values.timeOf("rpm");
+                Double rpm = rpmAt == null ? null : values.get("rpm", rpmAt);
+                if (rpm != null && Math.abs(at - rpmAt) <= RPM_WITHIN_MS) {
+                    gears.sample(rpm, mph, at);
+                    keepGearing();
+                }
+            }
+        }
+        long now = now();
+        putIf("g_accel", carMotion.gAccel(now), now);
+        putIf("zero_sixty", carMotion.zeroSixty(now), now);
+        putIf("gear", gears.gear(now), now);
+    }
+
+    /** Saves the learned gearing when it has moved by more than half a percent since it was last saved. */
+    private void keepGearing() {
+        double top = gears.topRpmPerMph();
+        if (savedGearing > 0 && Math.abs(top / savedGearing - 1) < 0.005) return;
+        if (savedGearing == 0 && !gears.learned()) return;      // nothing learned yet: do not store the stock guess
+        savedGearing = top;
+        getSharedPreferences(DashApp.PREFS, MODE_PRIVATE).edit().putFloat(GEARING_KEY, (float) top).apply();
+    }
+
+    // ---------------- speed correction ----------------
+
+    private static String correctionKey() { return Catalog.porsche() ? "speed_corr_p" : "speed_corr"; }
+
+    /** This car's speed correction in percent (0 when none). */
+    public double speedCorrection() { return speedCorrection; }
+
+    /** GPS against the car's raw speed, collected while the screen's GPS runs, for "Set from GPS". */
+    public SpeedCorrection.Gps speedGps() { return speedGps; }
+
+    /**
+     * Sets this car's correction, kept for the next start. Every speed reading from now on is corrected as it
+     * comes in; the gear indicator's learned rpm per mph is rescaled to match, so it does not go wrong meanwhile.
+     */
+    public void setSpeedCorrection(double pct) {
+        final double old = speedCorrection, now = SpeedCorrection.clamp(pct);
+        speedCorrection = now;
+        getSharedPreferences(DashApp.PREFS, MODE_PRIVATE).edit().putFloat(correctionKey(), (float) now).apply();
+        values.setScale("speed", SpeedCorrection.factor(now));
+        if (ticker != null) ticker.execute(() -> {
+            if (!gears.learned()) return;
+            gears.restore(SpeedCorrection.rescaleTop(gears.topRpmPerMph(), old, now));
+            savedGearing = 0;
+            keepGearing();
+        });
+    }
+
+    /** A line from a screen for the link log (which motion sensor the tablet has, for one). */
+    public void noteFromScreen(String line) { note(line); }
 
     // ---------------- volume follows speed (experimental) ----------------
 
@@ -371,6 +453,11 @@ public class LinkService extends Service {
         }
         fuel = FuelStore.get(this);
         volumeStrength = SpeedVolume.Strength.of(getSharedPreferences("link", MODE_PRIVATE).getString(VOLUME_PREF, null));
+        SharedPreferences dash = getSharedPreferences(DashApp.PREFS, MODE_PRIVATE);
+        savedGearing = dash.getFloat(GEARING_KEY, 0);
+        gears.restore(savedGearing);                // what earlier drives taught it about this car
+        speedCorrection = SpeedCorrection.clamp(dash.getFloat(correctionKey(), 0));
+        values.setScale("speed", SpeedCorrection.factor(speedCorrection));
         ticker = Executors.newSingleThreadScheduledExecutor();
         ticker.scheduleWithFixedDelay(this::safeTick, 100, 100, TimeUnit.MILLISECONDS);
     }
@@ -891,6 +978,7 @@ public class LinkService extends Service {
                 for (Listener l : listeners) l.onValues(values);
             });
         }
+        workOutMotion();
         countFuel();
         if (++tickCount % 5 == 0) followSpeed();
         if (tickCount % 10 != 0) return;

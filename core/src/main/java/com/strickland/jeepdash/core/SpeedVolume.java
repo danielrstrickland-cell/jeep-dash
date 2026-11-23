@@ -10,8 +10,11 @@ import java.util.Set;
  * 12 mph (low, medium, high), up to 4, 5 or 6 steps and never past full.
  *
  * The owner's own level is the base. If the volume found is not the one set here last time, the owner changed
- * it by hand: that becomes the new base, less the steps added for speed (never below silent). Not thread-safe:
- * one caller (the link service's ticker) at a time.
+ * it by hand, and the level he set stands exactly as it is at the speed he set it: the base becomes his level
+ * less the steps speed adds right now (it may go below silent, so that slowing never takes it under 0), and
+ * only later speed changes add or take off steps from there, never past full or under silent. Turned to 0
+ * (or found at 0 when it starts) it stays silent until he raises it himself. Not thread-safe: one caller (the
+ * link service's ticker) at a time.
  */
 public final class SpeedVolume {
 
@@ -41,8 +44,9 @@ public final class SpeedVolume {
     private static final long NEVER = Long.MIN_VALUE / 2;          // halved so "now - NEVER" cannot overflow
 
     private final Strength strength;
-    private int base;
+    private int base;                       // may be below 0 after a hand change at speed (see above)
     private int lastSet = -1;               // -1: nothing set since it started or was released
+    private boolean silenced;               // turned to 0 by the owner: stays 0 until he raises it
     private int level;                      // speed steps wanted now (before the stream's top is applied)
     private long lastSpeedMs = NEVER;
 
@@ -63,8 +67,10 @@ public final class SpeedVolume {
      *                NO_SPEED_MS goes back to the base)
      */
     public int step(int current, int max, Double mph, long nowMs) {
-        if (lastSet < 0) base = current;
-        else if (current != lastSet) base = Math.max(0, current - (lastSet - base));      // changed by hand
+        if (lastSet < 0) {                                  // starting: the level found is his
+            base = current;
+            silenced = current == 0;
+        }
         if (mph != null) {
             lastSpeedMs = nowMs;
             int up = extra(strength, mph);
@@ -73,7 +79,13 @@ public final class SpeedVolume {
         } else if (nowMs - lastSpeedMs >= NO_SPEED_MS) {
             level = 0;
         }
-        lastSet = Math.max(0, Math.min(max, base + level));
+        if (lastSet >= 0 && current != lastSet) {          // changed by hand: his level stands at this speed
+            base = current - level;
+            silenced = current == 0;
+            lastSet = current;
+            return current;
+        }
+        lastSet = silenced ? 0 : Math.max(0, Math.min(max, base + level));
         return lastSet;
     }
 
@@ -83,15 +95,20 @@ public final class SpeedVolume {
      */
     public Integer release(int current) {
         if (lastSet < 0) return null;
-        if (current != lastSet) base = Math.max(0, current - (lastSet - base));
+        if (current != lastSet) {
+            base = current - level;
+            silenced = current == 0;
+        }
+        int back = silenced ? 0 : Math.max(0, base);
         lastSet = -1;
         level = 0;
         lastSpeedMs = NEVER;
-        return base;
+        silenced = false;
+        return back;
     }
 
     /** The owner's level as it stands. */
-    public int base() { return base; }
+    public int base() { return silenced ? 0 : Math.max(0, base); }
 
     /** What to read from the car: the given list, plus road speed while the feature is on. Not changed in place. */
     public static Set<String> withSpeed(Set<String> ids, Strength s) {

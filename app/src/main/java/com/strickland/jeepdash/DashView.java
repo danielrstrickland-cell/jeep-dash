@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.DashPathEffect;
 import android.graphics.Paint;
+import android.graphics.RectF;
 import android.view.MotionEvent;
 import android.view.View;
 
@@ -11,8 +12,10 @@ import com.strickland.jeepdash.core.Catalog;
 import com.strickland.jeepdash.core.GaugeSpec;
 import com.strickland.jeepdash.core.Layout;
 import com.strickland.jeepdash.core.LiveValues;
+import com.strickland.jeepdash.core.MusicLayout;
 import com.strickland.jeepdash.core.Param;
 import com.strickland.jeepdash.core.Units;
+import com.strickland.jeepdash.theme.MusicPainter;
 import com.strickland.jeepdash.theme.Theme;
 
 import java.util.HashMap;
@@ -51,6 +54,8 @@ public class DashView extends View {
     private long lastFrameMs;
     private float wDp, hDp;
     private String downAction;
+    private MusicLayout music;                         // the music window where it was last drawn; null when closed
+    private String musicDown;                          // the part of it a finger went down on
     private String dragKey;
     private boolean resizing, moved;
     private float downX, downY, lastX, lastY;
@@ -124,12 +129,49 @@ public class DashView extends View {
         }
         if (chrome.editing && layout != null && "gauges".equals(chrome.tab)) drawEditMarks(c);
         theme.drawChrome(c, wDp, hDp, chrome);
+        drawMusic(c);
         c.restore();
         if (moving) postInvalidateOnAnimation();
         else if (flashing) postInvalidateDelayed(100);
         // one pending at a time, so it never adds frames of its own while readings are coming in
         removeCallbacks(idleRedraw);
         postDelayed(idleRedraw, IDLE_REDRAW_MS);
+    }
+
+    /** The music window, beside the look's music button, over everything else. */
+    private void drawMusic(Canvas c) {
+        RectF b = chrome.music && chrome.musicOpen ? theme.buttonRect("music") : null;
+        if (b == null) {
+            music = null;
+            return;
+        }
+        music = MusicLayout.place(wDp, hDp, b.left, b.top, b.right, b.bottom);
+        MusicPainter.draw(c, music, chrome, theme.musicDress());
+    }
+
+    /**
+     * A finger on the music window: the close box closes it, the three buttons go to the music app, and the rest
+     * of the window swallows the touch. Anywhere outside is the dash's as usual, so it can stay open.
+     */
+    private boolean musicTouch(MotionEvent e, float x, float y) {
+        int a = e.getActionMasked();
+        if (a == MotionEvent.ACTION_DOWN) {
+            musicDown = music == null ? null : music.hit(x, y);
+            return musicDown != null;
+        }
+        if (musicDown == null) return false;
+        if (a == MotionEvent.ACTION_UP) {
+            String part = music == null ? null : music.hit(x, y);
+            if (musicDown.equals(part)) {
+                performClick();
+                if ("close".equals(part)) host.onDashAction("music");
+                else if (!"window".equals(part)) host.onDashAction("music:" + part);
+            }
+            musicDown = null;
+        } else if (a == MotionEvent.ACTION_CANCEL) {
+            musicDown = null;
+        }
+        return true;
     }
 
     /** The value as its gauge shows it: converted to the gauge's chosen unit, made once and kept. */
@@ -227,6 +269,7 @@ public class DashView extends View {
     public boolean onTouchEvent(MotionEvent e) {
         if (theme == null) return false;
         float x = e.getX() / density, y = e.getY() / density;
+        if (musicTouch(e, x, y)) return true;
         boolean editingGauges = chrome.editing && layout != null && "gauges".equals(chrome.tab);
         if (editingGauges && (dragKey != null || theme.hit(x, y) == null) && editTouch(e, x, y)) return true;
         switch (e.getActionMasked()) {

@@ -177,18 +177,26 @@ and "MPG this drive" go blank, and an incomplete fill-up estimate cannot be cali
 generic line has no injector time, so there its totals stay blank. Fuel flow reads 0-30 gal/h on the Jeep
 and 0-50 on the Cayenne.
 
-### Now playing bar, auto-start and volume follows speed (2026-11-23)
+### Music button, auto-start, volume follows speed, speed correction (2026-11-23)
 
-All three are off until turned on in the dash's menu; with all three off nothing is added to the screens,
-the manifest's new service and receiver stay switched off, and nothing more is read from the car.
+The new settings are off (or 0) until changed in the dash's menu; with them off nothing is added to the
+screens, the manifest's new service and receiver stay switched off, and nothing more is read from the car.
 
-- **Now playing bar** (off / top / bottom): a slim dark bar (44dp) laid over the dash and the visualizer with
-  the track, the artist and previous / play-pause / next. It follows the music app's media session, which
-  Android only shows to an app with notification access, so turning the bar on switches on an empty
-  notification listener (`MediaListener`) and, when access is missing, says why and opens the system screen
-  for it. It follows the playing session that changed most lately; with none playing, the system's first one,
-  so a paused song still shows. No access or no music app shows a short message, never old text (core
-  `NowPlaying`). With no music app open, play sends a media play key, which wakes the app that played last.
+- **Menu**: a short top list of groups (Car and connection, Gauges, Look, Music, Fuel, Diagnostics, App), each
+  opening its own entries with the current setting beside them. Entries for one car, one look or needing the
+  link are left out as before (core `DashMenu`).
+- **Music button** (off / on; an old "now playing bar" setting that was on turns it on): a music-note button,
+  in the XP taskbar tray beside the clock, in the button row on the other looks, and a plain MUSIC button on
+  the visualizer. It opens a window with the track, the artist and previous / play-pause / next, and a close
+  box; the button closes it too. One layout for every look (core `MusicLayout`), dressed by the look showing:
+  XP a real window of the chosen scheme that follows Light / Dark / Auto, 80s digital its glow colour and
+  lettering, Jeep and GT their own panel colours and typeface. A tap outside the window goes to the dash as
+  usual, so it can stay open. It follows the music app's media session, which Android only shows to an app with
+  notification access: turning the button on switches on an empty notification listener (`MediaListener`) and,
+  when access is missing, says why and opens the system screen for it. It follows the playing session that
+  changed most lately; with none playing, the system's first one, so a paused song still shows. No access or
+  no music app shows a short message, never old text (core `NowPlaying`). With no music app open, play sends a
+  media play key, which wakes the app that played last.
 - **Auto-start with Bluetooth device**: the owner picks one paired device (the stereo); the dongle the link
   remembers is never offered. When it connects and no Jeep Dash screen is on view, the app opens if it may
   display over other apps, which Android requires for opening a screen from the background; otherwise it posts
@@ -197,9 +205,28 @@ the manifest's new service and receiver stay switched off, and nothing more is r
   whichever screen is in front, and adds road speed to the read list while on. From 20 mph one media-volume
   step, then one more every 30 / 20 / 12 mph, at most 4 / 5 / 6 and never past full; a step comes off only 4
   mph under where it went on. A missing speed holds the level, and after 5 s goes back to the owner's level, as
-  does a dropped link or turning it off. A volume change by hand becomes the owner's new level (core
-  `SpeedVolume`). Media volume steps are coarse, and whether the Kenwood follows the tablet's volume over
-  Bluetooth depends on the stereo; to be tried in the Jeep.
+  does a dropped link or turning it off. A volume the owner sets by hand stands exactly at the speed he set it;
+  only later speed changes add or take off steps from there, never past full or under silent, and turned to 0
+  it stays silent until he raises it (core `SpeedVolume`). Media volume steps are coarse, and whether the
+  Kenwood follows the tablet's volume over Bluetooth depends on the stereo; to be tried in the Jeep.
+- **Speed correction** (per car, -15% to +15%, default 0): the Jeep's speed reads about 3.6% under GPS on its
+  bigger tyres. The correction is applied where readings enter `LiveValues` (a per-value scale; the runners are
+  unchanged), so the speed gauge, MPG miles, the gear, the 0-60 timer, pull/braking, volume follows speed and
+  the drive log's speed column all get the corrected figure. Speedo vs GPS alone keeps comparing the raw
+  reading, so the speedometer's own error stays visible. The gear's learned rpm per mph is rescaled when the
+  correction changes. "Set from GPS" fills in the measured difference once the tablet has a minute of GPS above
+  40 mph against the car's raw speed (fixes no more than 2 s apart, the two within a quarter of each other),
+  and says so plainly when it has not, or when the figure is outside the range (core `SpeedCorrection`).
+- **Gear, pull/braking and 0-60 behind other screens**: these come from the car's readings alone, so the link
+  service works them out (as it does fuel) and reads speed and rpm for them whenever they are on the dash's
+  layout, whichever screen is in front; the gear's learned figure is still saved. While the dash is showing,
+  its sensors still give them the first shove of a launch and GPS speed standing in. GPS speed, G-force and
+  Speedo vs GPS need the tablet's sensors and stay with the screen; there is no background location.
+- **G-force without a gyroscope**: when the tablet has no linear-acceleration sensor, the plain accelerometer is
+  used and gravity taken out in software (a 2 s moving average, core `Gravity`). Which sensor is in use, or that
+  none was found, is a line in the link log.
+- **Visualizer**: looks change only with the LOOK button; a tap or swipe on the picture does nothing. The boom
+  meters look is gone; a saved choice of it becomes Smooth (core `VizTune.CHOICES`).
 
 ## Open items
 

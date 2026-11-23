@@ -20,7 +20,9 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 
 import com.strickland.jeepdash.core.LiveValues;
+import com.strickland.jeepdash.core.NowPlaying;
 import com.strickland.jeepdash.core.Spectrum;
+import com.strickland.jeepdash.theme.Theme;
 
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -39,7 +41,7 @@ public class VisualizerActivity extends Activity
     private LinkService service;
     private boolean bound;
     private volatile Thread mic;
-    private NowPlayingBar nowPlaying;          // null while the now-playing bar is off (set on the dash's menu)
+    private MusicSession music;                // the music button's window (the button is set on the dash's menu)
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -74,8 +76,10 @@ public class VisualizerActivity extends Activity
     protected void onStart() {
         super.onStart();
         view.setRunning(true);
-        nowPlaying = NowPlayingBar.sync(this, nowPlaying);
-        if (nowPlaying != null) nowPlaying.start();
+        if (music == null) music = new MusicSession(this, this::onMusicChanged);
+        view.painter.music = MusicSession.buttonOn(this);
+        if (!view.painter.music) view.painter.musicOpen = false;
+        else music.start();
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startMic();
         else requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1);
         try {
@@ -88,7 +92,7 @@ public class VisualizerActivity extends Activity
 
     @Override
     protected void onStop() {
-        if (nowPlaying != null) nowPlaying.stop();
+        if (music != null) music.stop();
         view.setRunning(false);
         Thread t = mic;
         mic = null;
@@ -267,6 +271,20 @@ public class VisualizerActivity extends Activity
 
     @Override
     public void onStatus(LinkService.Status s, String detail) { }
+
+    private void onMusicChanged() {
+        Theme.Chrome m = view.musicState;
+        boolean a = music.access(), on = music.hasSession();
+        m.musicTitle = NowPlaying.titleLine(a, on, music.title(), music.artist(), 60);
+        m.musicArtist = NowPlaying.artistLine(a, on, music.title(), music.artist(), 60);
+        m.musicPlaying = music.playing();
+        view.invalidate();
+    }
+
+    @Override
+    public void onMusic(String part) {
+        if (music != null) music.transport("prev".equals(part) ? -1 : "next".equals(part) ? 1 : 0);
+    }
 
     @Override
     public void onDashButton() {
