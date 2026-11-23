@@ -177,6 +177,30 @@ and "MPG this drive" go blank, and an incomplete fill-up estimate cannot be cali
 generic line has no injector time, so there its totals stay blank. Fuel flow reads 0-30 gal/h on the Jeep
 and 0-50 on the Cayenne.
 
+### Now playing bar, auto-start and volume follows speed (2026-11-23)
+
+All three are off until turned on in the dash's menu; with all three off nothing is added to the screens,
+the manifest's new service and receiver stay switched off, and nothing more is read from the car.
+
+- **Now playing bar** (off / top / bottom): a slim dark bar (44dp) laid over the dash and the visualizer with
+  the track, the artist and previous / play-pause / next. It follows the music app's media session, which
+  Android only shows to an app with notification access, so turning the bar on switches on an empty
+  notification listener (`MediaListener`) and, when access is missing, says why and opens the system screen
+  for it. It follows the playing session that changed most lately; with none playing, the system's first one,
+  so a paused song still shows. No access or no music app shows a short message, never old text (core
+  `NowPlaying`). With no music app open, play sends a media play key, which wakes the app that played last.
+- **Auto-start with Bluetooth device**: the owner picks one paired device (the stereo); the dongle the link
+  remembers is never offered. When it connects and no Jeep Dash screen is on view, the app opens if it may
+  display over other apps, which Android requires for opening a screen from the background; otherwise it posts
+  "Tap to open the dash" (core `AutoStart`). The chosen device is kept only in the app's own preferences.
+- **Volume follows speed (experimental)** (off / low / medium / high): runs in the link service, so it works
+  whichever screen is in front, and adds road speed to the read list while on. From 20 mph one media-volume
+  step, then one more every 30 / 20 / 12 mph, at most 4 / 5 / 6 and never past full; a step comes off only 4
+  mph under where it went on. A missing speed holds the level, and after 5 s goes back to the owner's level, as
+  does a dropped link or turning it off. A volume change by hand becomes the owner's new level (core
+  `SpeedVolume`). Media volume steps are coarse, and whether the Kenwood follows the tablet's volume over
+  Bluetooth depends on the stereo; to be tried in the Jeep.
+
 ## Open items
 
 - **Map more Jeep values** (Daniel's help needed later): another capture of the GearWrench app showing its

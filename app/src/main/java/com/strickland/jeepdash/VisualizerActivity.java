@@ -39,6 +39,7 @@ public class VisualizerActivity extends Activity
     private LinkService service;
     private boolean bound;
     private volatile Thread mic;
+    private NowPlayingBar nowPlaying;          // null while the now-playing bar is off (set on the dash's menu)
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -73,6 +74,8 @@ public class VisualizerActivity extends Activity
     protected void onStart() {
         super.onStart();
         view.setRunning(true);
+        nowPlaying = NowPlayingBar.sync(this, nowPlaying);
+        if (nowPlaying != null) nowPlaying.start();
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startMic();
         else requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1);
         try {
@@ -85,6 +88,7 @@ public class VisualizerActivity extends Activity
 
     @Override
     protected void onStop() {
+        if (nowPlaying != null) nowPlaying.stop();
         view.setRunning(false);
         Thread t = mic;
         mic = null;

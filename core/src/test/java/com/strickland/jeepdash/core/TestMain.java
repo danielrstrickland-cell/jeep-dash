@@ -29,6 +29,9 @@ public final class TestMain {
             UnitsTest.class,
             NightHoursTest.class,
             FuelUseTest.class,
+            NowPlayingTest.class,
+            AutoStartTest.class,
+            SpeedVolumeTest.class,
     };
 
     public static void main(String[] args) {

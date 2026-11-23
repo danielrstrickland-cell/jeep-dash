@@ -3,6 +3,9 @@ package com.strickland.jeepdash;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -20,6 +23,7 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.Toast;
 
+import com.strickland.jeepdash.core.AutoStart;
 import com.strickland.jeepdash.core.Catalog;
 import com.strickland.jeepdash.core.FuelUse;
 import com.strickland.jeepdash.core.NightHours;
@@ -31,6 +35,7 @@ import com.strickland.jeepdash.core.LayoutCodec;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Motion;
 import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.core.SpeedVolume;
 import com.strickland.jeepdash.theme.GtTheme;
 import com.strickland.jeepdash.theme.JeepTheme;
 import com.strickland.jeepdash.theme.RetroTheme;
@@ -60,6 +65,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private boolean asking;                            // Android drops a permission request made during another
     private boolean askedToLook;                       // asked once for leave to search for an unpaired dongle
     private boolean askedLocation;                     // asked once; a refusal is not argued with
+    private NowPlayingBar nowPlaying;                  // null while the now-playing bar is off
 
     @Override
     protected void onCreate(Bundle b) {
@@ -77,6 +83,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         view.chrome.snap = prefs.getBoolean("snap", true);
         applyLook();
         setContentView(view);
+        nowPlaying = NowPlayingBar.sync(this, null);
         askPermissions();
         sweepPending = b == null && getIntent().getBooleanExtra("sweep", false);
         if (b == null) UpdateChecker.check(this, buildNumber(), false);
@@ -172,10 +179,12 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         super.onStart();
         startLink();
         bound = bindService(new Intent(this, LinkService.class), this, Context.BIND_AUTO_CREATE);
+        if (nowPlaying != null) nowPlaying.start();
     }
 
     @Override
     protected void onStop() {
+        if (nowPlaying != null) nowPlaying.stop();
         tablet.stop();
         if (service != null) service.removeListener(this);
         service = null;
@@ -459,6 +468,15 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                     : "Fast refresh: turned itself off (readings went missing). Tap to try again");
             actions.add(() -> { if (service != null) service.setFastRefresh(fast != PollRunner.Fast.ON); });
         }
+        items.add("Now playing bar: " + NowPlayingBar.place(this));
+        actions.add(this::chooseNowPlaying);
+        String auto = prefs.getString(AutoStartReceiver.NAME, null);
+        items.add("Auto-start with Bluetooth device: " + (prefs.getString(AutoStartReceiver.DEVICE, null) == null ? "off" : auto));
+        actions.add(this::chooseAutoStart);
+        if (service != null) {
+            items.add("Volume follows speed (experimental): " + service.volumeFollowsSpeed().name().toLowerCase(java.util.Locale.US));
+            actions.add(this::chooseVolume);
+        }
         items.add("Fuel: calibrate at fill-up");
         actions.add(() -> FuelDialog.show(this, this::pushActiveParams));
         items.add("Check for update");
@@ -478,6 +496,118 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         new AlertDialog.Builder(this)
                 .setTitle((porsche ? "Cayenne Dash" : "Jeep Dash") + "  (build " + buildNumber() + ")")
                 .setItems(items.toArray(new String[0]), (dlg, which) -> actions.get(which).run())
+                .show();
+    }
+
+    // ---------------- now playing, auto-start, volume follows speed ----------------
+
+    private void chooseNowPlaying() {
+        final String[] places = NowPlayingBar.PLACES;
+        new AlertDialog.Builder(this)
+                .setTitle("Now playing bar")
+                .setSingleChoiceItems(new String[]{"Off", "Top", "Bottom"},
+                        Arrays.asList(places).indexOf(NowPlayingBar.place(this)), (dlg, which) -> {
+                    dlg.dismiss();
+                    boolean on = !NowPlayingBar.OFF.equals(places[which]);
+                    prefs.edit().putString(NowPlayingBar.PREF, places[which]).apply();
+                    MediaListener.enable(this, on);
+                    boolean wasOff = nowPlaying == null;
+                    nowPlaying = NowPlayingBar.sync(this, nowPlaying);
+                    if (nowPlaying != null && wasOff) nowPlaying.start();
+                    if (on && !NowPlayingBar.hasAccess(this)) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("Notification access")
+                                .setMessage("Android only lets an app see and control another app's music (like Spotify) when it has notification access, so turn it on for Jeep Dash on the next screen.")
+                                .setPositiveButton("Open settings", (d, w) -> NowPlayingBar.openAccessSettings(this))
+                                .setNegativeButton("Not now", null)
+                                .show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** Paired devices by name, never the dongle the link remembers, plus Off. */
+    private void chooseAutoStart() {
+        final List<String> names = new ArrayList<>();
+        final List<String> keys = new ArrayList<>();
+        names.add("Off");
+        keys.add(null);
+        String dongle = getSharedPreferences("link", MODE_PRIVATE).getString("address", null);
+        try {
+            BluetoothManager bm = getSystemService(BluetoothManager.class);
+            BluetoothAdapter ad = bm == null ? null : bm.getAdapter();
+            if (ad != null) {
+                for (BluetoothDevice d : ad.getBondedDevices()) {
+                    String key = d.getAddress();
+                    if (!AutoStart.offer(key, dongle)) continue;
+                    String name = d.getName();
+                    names.add(name == null || name.isEmpty() ? "Unnamed device" : name);
+                    keys.add(key);
+                }
+            }
+        } catch (SecurityException e) {
+            showMessage("Auto-start", "Allow Nearby devices for Jeep Dash first, so it can list the paired Bluetooth devices.");
+            return;
+        }
+        String chosen = prefs.getString(AutoStartReceiver.DEVICE, null);
+        int at = 0;
+        for (int i = 1; i < keys.size(); i++) if (keys.get(i).equalsIgnoreCase(chosen == null ? "" : chosen)) at = i;
+        new AlertDialog.Builder(this)
+                .setTitle("Open the dash when the tablet connects to")
+                .setSingleChoiceItems(names.toArray(new String[0]), at, (dlg, which) -> {
+                    dlg.dismiss();
+                    String key = keys.get(which);
+                    if (key == null) {
+                        prefs.edit().remove(AutoStartReceiver.DEVICE).remove(AutoStartReceiver.NAME).apply();
+                        AutoStartReceiver.enable(this, false);
+                        return;
+                    }
+                    prefs.edit().putString(AutoStartReceiver.DEVICE, key).putString(AutoStartReceiver.NAME, names.get(which)).apply();
+                    AutoStartReceiver.enable(this, true);
+                    autoStartAllowances();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** The notification is the fallback, so ask for it; then offer "display over other apps". */
+    private void autoStartAllowances() {
+        if (Build.VERSION.SDK_INT >= 33 && !asking
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            asking = true;
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 4);
+        }
+        if (Settings.canDrawOverlays(this)) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Open by itself")
+                .setMessage("Android only lets the dash open by itself when Jeep Dash may display over other apps; without that you get a \"Tap to open the dash\" notification instead.")
+                .setPositiveButton("Open settings", (d, w) -> {
+                    try {
+                        startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
+                    } catch (RuntimeException e) {
+                        showMessage("Display over other apps", "This device has no screen for that setting.");
+                    }
+                })
+                .setNegativeButton("Not now", null)
+                .show();
+    }
+
+    private void chooseVolume() {
+        if (service == null) return;
+        final SpeedVolume.Strength[] all = SpeedVolume.Strength.values();
+        new AlertDialog.Builder(this)
+                .setTitle("Volume follows speed (experimental)")
+                .setSingleChoiceItems(new String[]{"Off", "Low (up to 4 steps)", "Medium (up to 5 steps)", "High (up to 6 steps)"},
+                        service.volumeFollowsSpeed().ordinal(), (dlg, which) -> {
+                    dlg.dismiss();
+                    if (service == null) return;
+                    boolean wasOff = service.volumeFollowsSpeed() == SpeedVolume.Strength.OFF;
+                    service.setVolumeFollowsSpeed(all[which]);      // it adds speed to what is read itself
+                    if (wasOff && all[which] != SpeedVolume.Strength.OFF)
+                        showMessage("Volume follows speed", "From 20 mph it raises the tablet's media volume a few of its coarse steps (often 15 from silent to full), and whether the stereo follows them over Bluetooth depends on the stereo.");
+                })
+                .setNegativeButton("Cancel", null)
                 .show();
     }
 

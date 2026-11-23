@@ -19,6 +19,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
+import android.media.AudioManager;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Handler;
@@ -37,6 +38,7 @@ import com.strickland.jeepdash.core.PollRunner;
 import com.strickland.jeepdash.core.Poller;
 import com.strickland.jeepdash.core.PollScheduler;
 import com.strickland.jeepdash.core.SciCodes;
+import com.strickland.jeepdash.core.SpeedVolume;
 import com.strickland.jeepdash.core.Trace;
 
 import java.io.IOException;
@@ -117,6 +119,7 @@ public class LinkService extends Service {
     private volatile Set<String> requested = new LinkedHashSet<>();     // what the screen in front asked for
     private volatile Set<String> dashShown = new LinkedHashSet<>();     // the dash's gauges, in front or not
     private FuelUse fuel;                   // the one fuel counter (see FuelStore); fed here, every tick
+    private volatile SpeedVolume.Strength volumeStrength = SpeedVolume.Strength.OFF;   // volume follows speed
     private volatile boolean activeDirty;
     private volatile Status status = Status.SEARCHING;
     private volatile String detail = "";
@@ -138,6 +141,8 @@ public class LinkService extends Service {
     private DriveLogWriter log;
     private long logStartMs, lastDataMs, logRetryAfterMs;
     private int rowsSinceFlush;
+    private SpeedVolume volume;             // set while it is raising the volume; null otherwise
+    private SpeedVolume.Strength volumeFor; // the strength that one was made for
 
     // ---------------- what the dash uses ----------------
 
@@ -166,8 +171,65 @@ public class LinkService extends Service {
     /** Works the read list out again (also after a fill-up was marked). */
     public void refreshActive() {
         FuelUse f = fuel;
-        active = FuelUse.withInputs(requested, dashShown, Catalog.porsche(), f != null && f.fillStarted());
+        Set<String> ids = FuelUse.withInputs(requested, dashShown, Catalog.porsche(), f != null && f.fillStarted());
+        active = SpeedVolume.withSpeed(ids, volumeStrength);      // speed is read while volume follows it
         activeDirty = true;
+    }
+
+    // ---------------- volume follows speed (experimental) ----------------
+
+    private static final String VOLUME_PREF = "volume_speed";
+
+    public SpeedVolume.Strength volumeFollowsSpeed() { return volumeStrength; }
+
+    /** Off, low, medium or high; kept for the next start. Turning it off puts the owner's level back. */
+    public void setVolumeFollowsSpeed(SpeedVolume.Strength s) {
+        getSharedPreferences("link", MODE_PRIVATE).edit().putString(VOLUME_PREF, s.name()).apply();
+        volumeStrength = s;
+        refreshActive();
+    }
+
+    /**
+     * Ticker thread, twice a second: while the link is up and the setting is on, sets the media volume
+     * SpeedVolume asks for; otherwise gives back the owner's own level once.
+     */
+    private void followSpeed() {
+        SpeedVolume.Strength s = volumeStrength;
+        if (s == SpeedVolume.Strength.OFF || status != Status.LIVE || runner == null) {
+            releaseVolume();
+            return;
+        }
+        AudioManager am = getSystemService(AudioManager.class);
+        if (am == null) return;
+        if (volume != null && volumeFor != s) releaseVolume();      // strength changed: start from the owner's level
+        if (volume == null) {
+            volume = new SpeedVolume(s);
+            volumeFor = s;
+        }
+        long now = now();
+        int current = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+        int want = volume.step(current, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), values.get("speed", now), now);
+        if (want != current) setMusicVolume(am, want);
+    }
+
+    /** Puts the owner's own level back (link dropped, setting changed or off, service stopping). */
+    private void releaseVolume() {
+        SpeedVolume v = volume;
+        if (v == null) return;
+        volume = null;
+        AudioManager am = getSystemService(AudioManager.class);
+        if (am == null) return;
+        int current = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+        Integer back = v.release(current);
+        if (back != null && back != current) setMusicVolume(am, back);
+    }
+
+    private void setMusicVolume(AudioManager am, int step) {
+        try {
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, step, 0);
+        } catch (SecurityException e) {
+            note("volume not changed: " + e.getMessage());      // Do Not Disturb, for one
+        }
     }
 
     private boolean fuelWanted() {
@@ -308,6 +370,7 @@ public class LinkService extends Service {
             note("cannot watch for pairing requests: " + e);
         }
         fuel = FuelStore.get(this);
+        volumeStrength = SpeedVolume.Strength.of(getSharedPreferences("link", MODE_PRIVATE).getString(VOLUME_PREF, null));
         ticker = Executors.newSingleThreadScheduledExecutor();
         ticker.scheduleWithFixedDelay(this::safeTick, 100, 100, TimeUnit.MILLISECONDS);
     }
@@ -352,6 +415,7 @@ public class LinkService extends Service {
         }
         if (ticker != null) {
             ticker.execute(this::closeLog);
+            ticker.execute(this::releaseVolume);
             ticker.execute(FuelStore::save);
             ticker.shutdown();
         }
@@ -828,7 +892,8 @@ public class LinkService extends Service {
             });
         }
         countFuel();
-        if (++tickCount % 10 != 0) return;
+        if (++tickCount % 5 == 0) followSpeed();
+        if (tickCount % 10 != 0) return;
 
         // once a second
         long t = now();
