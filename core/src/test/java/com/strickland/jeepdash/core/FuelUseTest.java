@@ -135,8 +135,10 @@ public class FuelUseTest {
         T.near(0.1, f.sinceFill(), 0.001, "counted from the fill-up");
         f.startFill();
         T.near(0, f.sinceFill(), 0, "the next fill-up starts again");
-        f.restore(1.4, 7.5, true);
+        f.restore(1.4, 7.5, true, 600_000, 30_000);
         T.near(1.4, f.factor(), 0, "saved factor");
+        T.eq(600_000L, f.fillMovingMs(), "saved moving time");
+        T.eq(30_000L, f.fillMissingMs(), "saved time without fuel readings");
         T.near(7.5, f.sinceFill(), 0, "saved estimate");
         T.ok(f.fillStarted(), "saved mark");
     }
@@ -166,12 +168,90 @@ public class FuelUseTest {
             T.ok(j != null && j.tablet, id + " on the Jeep, worked out by the screen");
             T.ok(p != null && p.tablet, id + " on the Cayenne, worked out by the screen");
             T.eq(j.unit, p.unit, id + " same unit");
-            T.eq(j.max, p.max, id + " same scale");
+            if (!id.equals("fuel_gph")) T.eq(j.max, p.max, id + " same scale");
         }
         T.eq("mpg", Catalog.jeep("mpg").unit, "economy unit");
         T.eq("gal", Catalog.jeep("fuel_used").unit, "fuel used unit");
         T.eq("gal/h", Catalog.jeep("fuel_gph").unit, "flow unit");
         T.near(40, Catalog.jeep("mpg_avg").max, 0, "economy scale");
-        T.near(30, Catalog.jeep("fuel_gph").max, 0, "flow scale");
+        T.near(30, Catalog.jeep("fuel_gph").max, 0, "the Jeep's flow scale");
+        T.near(50, PorscheCatalog.byId("fuel_gph").max, 0, "the turbo goes past 30 gal/h at full throttle");
+    }
+
+    public static void aDriveWithFuelReadingsMissingWhileMovingGoesBlank() {
+        FuelUse f = new FuelUse();
+        f.drive(1);
+        long t = 0;
+        for (int i = 0; i < 1200; i++) {          // two minutes at 50 mph, the injector time there every other minute
+            t += 100;
+            f.jeep(i < 600 ? 5.0 : null, 2400.0, 50.0, t);
+        }
+        T.ok(f.driveMissingShare() > 0.4, "half the moving time had no fuel reading: " + f.driveMissingShare());
+        T.eq(null, f.driveGallons(), "fuel used goes blank rather than under-count");
+        T.eq(null, f.driveMpg(), "and so does the drive's economy");
+        T.ok(f.mpgNow(t) == null, "economy now is blank too while the reading is missing");
+    }
+
+    public static void aFewSecondsMissingDoNotBlankTheDrive() {
+        FuelUse f = new FuelUse();
+        f.drive(1);
+        long t = 0;
+        for (int i = 0; i < 6000; i++) {          // ten minutes at 50 mph with 8 s missing near the start
+            t += 100;
+            f.jeep(i >= 20 && i < 100 ? null : 5.0, 2400.0, 50.0, t);
+        }
+        T.ok(f.driveGallons() != null && f.driveGallons() > 0.4, "still shown");
+        T.ok(f.driveMpg() != null, "average still shown");
+    }
+
+    public static void standingStillWithoutReadingsDoesNotCount() {
+        FuelUse f = new FuelUse();
+        f.drive(1);
+        long t = jeep(f, 5.0, 2400.0, 40.0, 60_000, 0);
+        t = jeep(f, 5.0, 700.0, 0.0, 1000, t);
+        for (int i = 0; i < 3000; i++) { t += 100; f.jeep(null, null, null, t); }     // key off, link gone
+        T.ok(f.driveGallons() != null, "parked without readings is not missing fuel");
+        T.eq(0L, f.driveMissingMs(), "nothing missing");
+    }
+
+    public static void aLinkLostAtSpeedCountsAsMissingButOnlyForAWhile() {
+        FuelUse f = new FuelUse();
+        f.startFill();
+        long t = jeep(f, 5.0, 2400.0, 60.0, 60_000, 0);
+        for (int i = 0; i < 36_000; i++) { t += 100; f.jeep(null, null, null, t); }  // an hour with nothing
+        T.near(FuelUse.MOVING_MEMORY_MS, f.fillMissingMs(), 200, "the last speed is trusted for a minute, no longer");
+        f.jeep(5.0, 2400.0, 60.0, t + 600_000);                                     // ten minutes with no samples at all
+        T.near(FuelUse.MOVING_MEMORY_MS, f.fillMissingMs(), 200, "a long silence after that adds nothing more");
+    }
+
+    public static void anIncompleteFillUpCannotBeCalibrated() {
+        FuelUse f = new FuelUse();
+        f.startFill();
+        long t = cayenne(f, 147.0 * 6.17 * 3, 1.0, 1.0, 60.0, 3_600_000, 0);          // 30 gal counted
+        T.ok(f.fillComplete(), "every moving minute had readings");
+        T.near(1.1, f.calibrateFromFill(33), 1e-3, "calibrates as before");
+        for (int i = 0; i < 6000; i++) { t += 100; f.porsche(null, null, null, 60.0, t); }   // 10 min without air flow
+        T.ok(!f.fillComplete(), "over a tenth of the moving time had no fuel reading");
+        T.eq(null, f.calibrateFromFill(33), "refused: the estimate is low by an unknown amount");
+        f.startFill();
+        T.ok(f.fillComplete() && f.fillMissingMs() == 0 && f.fillMovingMs() == 0, "the next fill-up starts clean");
+    }
+
+    public static void theIncompleteRule() {
+        T.ok(!FuelUse.incomplete(100_000, 9_000), "under a tenth");
+        T.ok(FuelUse.incomplete(100_000, 11_000), "over a tenth");
+        T.ok(!FuelUse.incomplete(30_000, 9_000), "a few seconds at the start of a short drive are let go");
+        T.ok(!FuelUse.incomplete(0, 0), "nothing yet");
+    }
+
+    public static void theCounterAddsTheFuelInputsToWhatIsRead() {
+        java.util.Set<String> viz = new java.util.LinkedHashSet<>(Arrays.asList("rpm", "throttle"));
+        T.eq(viz, FuelUse.withInputs(viz, Collections.emptySet(), false, false), "no fuel gauge on the dash, no fill-up");
+        java.util.Set<String> out = FuelUse.withInputs(viz, Collections.singleton("mpg_avg"), false, false);
+        T.ok(out.containsAll(viz) && out.containsAll(FuelUse.inputs(false)),
+                "the visualizer in front still reads what the dash's fuel gauge needs");
+        T.ok(FuelUse.withInputs(viz, Collections.emptySet(), true, true).containsAll(FuelUse.inputs(true)),
+                "a fill-up being counted reads them too");
+        T.eq(Arrays.asList("rpm", "throttle"), new java.util.ArrayList<>(viz), "the screen's own list is left alone");
     }
 }

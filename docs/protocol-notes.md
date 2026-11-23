@@ -259,3 +259,6 @@ Neither engine computer reports fuel use; the dash works it out from values it a
   MPG this drive = miles / gallons once 0.01 gal has been used.
 - Calibration at a fill-up: new factor = factor x pumped / counted, refused under 2 gal counted, one step
   limited to 0.5x..2x, factor kept within 0.3..3.
+- Incomplete: while moving (the last speed reading at 1 mph or more, trusted for up to 60 s when readings
+  stop), time with no fresh fuel reading is counted. Over a tenth of the moving time and over 10 s, the drive's
+  totals go blank and the fill-up estimate is refused for calibration.

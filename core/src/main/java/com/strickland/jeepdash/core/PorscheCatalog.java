@@ -112,7 +112,7 @@ public final class PorscheCatalog {
         screen("mpg", "MPG now", "mpg", 0, 40);
         screen("mpg_avg", "MPG this drive", "mpg", 0, 40);
         screen("fuel_used", "Fuel used this drive", "gal", 0, 10);
-        screen("fuel_gph", "Fuel flow", "gal/h", 0, 30);
+        screen("fuel_gph", "Fuel flow", "gal/h", 0, 50);        // the turbo goes past 30 at full throttle
     }
 
     private static void screen(String id, String name, String unit, double min, double max) {

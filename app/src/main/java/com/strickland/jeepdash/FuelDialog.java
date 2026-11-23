@@ -30,9 +30,14 @@ final class FuelDialog {
         box.setPadding(pad, pad / 2, pad, 0);
 
         TextView estimate = new TextView(a);
-        estimate.setText(fuel.fillStarted()
+        estimate.setText(!fuel.fillStarted()
+                ? "No fill-up has been marked yet. Fill the tank to full and tap \"Start from this fill-up\"."
+                : fuel.fillComplete()
                 ? String.format(Locale.US, "The dash counted %.2f gal since the last fill-up.", fuel.sinceFill())
-                : "No fill-up has been marked yet. Fill the tank to full and tap \"Start from this fill-up\".");
+                : String.format(Locale.US, "The dash counted %.2f gal since the last fill-up, but that is incomplete: "
+                        + "fuel readings were missing for %.0f%% of the time the car was moving, so the real figure "
+                        + "is higher by an unknown amount. It cannot be used to calibrate; start again from this "
+                        + "fill-up.", fuel.sinceFill(), fuel.fillMissingShare() * 100));
         estimate.setTextSize(16);
         box.addView(estimate);
 
@@ -47,7 +52,8 @@ final class FuelDialog {
 
         TextView note = new TextView(a);
         note.setText("This is only right if the dash was running for every drive since the last fill-up, and the "
-                + "tank was filled to full both times. Calibrate needs at least "
+                + "tank was filled to full both times. The dash counts fuel whichever screen is in front, as long as the "
+                + "app is running and linked to the car. Calibrate needs at least "
                 + (int) FuelUse.MIN_CALIBRATE_GAL + " gal counted, and one calibration changes the figures by "
                 + "no more than half or double.\n\nFuel figures are multiplied by "
                 + String.format(Locale.US, "%.2f", fuel.factor()) + " now.");
@@ -62,9 +68,13 @@ final class FuelDialog {
                 .setView(scroll)
                 .setPositiveButton("Calibrate", (dlg, w) -> {
                     double was = fuel.factor();
-                    Double now = FuelUse.calibrate(was, fuel.sinceFill(), parse(pumped.getText().toString()));
+                    Double now = fuel.calibrateFromFill(parse(pumped.getText().toString()));
                     if (now == null) {
-                        message(a, "Not calibrated", fuel.sinceFill() < FuelUse.MIN_CALIBRATE_GAL
+                        message(a, "Not calibrated", !fuel.fillComplete()
+                                ? "The estimate since the last fill-up is incomplete (fuel readings were missing for "
+                                        + "part of the drives), so it would make the figures wrong. Nothing was changed. "
+                                        + "Tap \"Start from this fill-up\" to count afresh."
+                                : fuel.sinceFill() < FuelUse.MIN_CALIBRATE_GAL
                                 ? String.format(Locale.US, "The dash has only counted %.2f gal since the last fill-up; "
                                         + "it needs at least %d gal to go on. Nothing was changed.",
                                         fuel.sinceFill(), (int) FuelUse.MIN_CALIBRATE_GAL)

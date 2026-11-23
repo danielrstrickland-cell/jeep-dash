@@ -223,8 +223,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             // Pull, 0-60 and the speedo check are worked out from the Jeep's speed, speed gauge or not.
             if (Motion.needsJeepSpeed(ids)) ids.add("speed");
             if (Motion.needsRpm(ids)) ids.add("rpm");            // the gear indicator
-            // the fuel gauges, and the fill-up estimate while one is being counted
-            if (FuelUse.needsInputs(ids, FuelStore.get(this).fillStarted())) ids.addAll(FuelUse.inputs(Catalog.porsche()));
+            // the service adds what the fuel counter needs, and keeps it read while another screen is in front
+            service.setDashGauges(l.activeParamIds());
             service.setActiveParams(ids);
         }
         syncTabletSensors();
@@ -240,10 +240,10 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         Layout l = view.layout();
         if (service == null || l == null) return;
         Set<String> ids = l.activeParamIds();
-        boolean any = FuelStore.get(this).fillStarted();       // the fill-up estimate is counted here too
+        boolean any = false;
         for (String id : ids) {
             Param p = Catalog.byId(id);
-            if (p != null && p.tablet) any = true;
+            if (p != null && p.tablet && !FuelUse.GAUGES.contains(id)) any = true;      // fuel: LinkService
         }
         if (!any) {
             tablet.stop();

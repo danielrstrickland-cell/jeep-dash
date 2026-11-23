@@ -29,6 +29,7 @@ import android.os.SystemClock;
 import com.strickland.jeepdash.core.Catalog;
 import com.strickland.jeepdash.core.DongleSession;
 import com.strickland.jeepdash.core.DriveLogWriter;
+import com.strickland.jeepdash.core.FuelUse;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Param;
 import com.strickland.jeepdash.core.KwpRunner;
@@ -113,6 +114,9 @@ public class LinkService extends Service {
     private final Trace trace = new Trace(2000);
 
     private volatile Set<String> active = new LinkedHashSet<>();
+    private volatile Set<String> requested = new LinkedHashSet<>();     // what the screen in front asked for
+    private volatile Set<String> dashShown = new LinkedHashSet<>();     // the dash's gauges, in front or not
+    private FuelUse fuel;                   // the one fuel counter (see FuelStore); fed here, every tick
     private volatile boolean activeDirty;
     private volatile Status status = Status.SEARCHING;
     private volatile String detail = "";
@@ -144,11 +148,52 @@ public class LinkService extends Service {
 
     public void removeListener(Listener l) { listeners.remove(l); }
 
-    /** The values on screen right now; only these are read from the Jeep. */
+    /**
+     * The values on screen right now; only these are read from the Jeep, plus what the fuel counter needs
+     * (see FuelUse.withInputs), so fuel is counted for the whole drive whichever screen is in front.
+     */
     public void setActiveParams(Set<String> ids) {
-        active = new LinkedHashSet<>(ids);
+        requested = new LinkedHashSet<>(ids);
+        refreshActive();
+    }
+
+    /** The gauges on the dash: its fuel gauges keep the fuel counter going while another screen is in front. */
+    public void setDashGauges(Set<String> ids) {
+        dashShown = new LinkedHashSet<>(ids);
+        refreshActive();
+    }
+
+    /** Works the read list out again (also after a fill-up was marked). */
+    public void refreshActive() {
+        FuelUse f = fuel;
+        active = FuelUse.withInputs(requested, dashShown, Catalog.porsche(), f != null && f.fillStarted());
         activeDirty = true;
     }
+
+    private boolean fuelWanted() {
+        return fuel != null && (FuelUse.needsInputs(requested, fuel.fillStarted()) || FuelUse.needsInputs(dashShown, false));
+    }
+
+    /** Ticker thread: hands the fuel counter the latest readings, and puts its figures with the others. */
+    private void countFuel() {
+        if (!fuelWanted()) return;
+        long now = now();
+        FuelUse f = fuel;
+        f.drive(driveStartedMs);
+        if (Catalog.porsche())
+            f.porsche(FuelUse.fresh(values, "maf", now), FuelUse.fresh(values, "lambda_r", now),
+                    FuelUse.fresh(values, "lambda_l", now), FuelUse.fresh(values, "speed", now), now);
+        else
+            f.jeep(FuelUse.fresh(values, "inj_ms", now), FuelUse.fresh(values, "rpm", now),
+                    FuelUse.fresh(values, "speed", now), now);
+        putIf("mpg", f.mpgNow(now), now);
+        putIf("mpg_avg", f.driveMpg(), now);
+        putIf("fuel_used", f.driveGallons(), now);
+        putIf("fuel_gph", f.gph(now), now);
+        FuelStore.keep(now);
+    }
+
+    private void putIf(String id, Double v, long now) { if (v != null) values.put(id, v, now); }
 
     public int readsPerSecond() { return readsPerSec; }
 
@@ -262,6 +307,7 @@ public class LinkService extends Service {
         } catch (RuntimeException e) {
             note("cannot watch for pairing requests: " + e);
         }
+        fuel = FuelStore.get(this);
         ticker = Executors.newSingleThreadScheduledExecutor();
         ticker.scheduleWithFixedDelay(this::safeTick, 100, 100, TimeUnit.MILLISECONDS);
     }
@@ -306,6 +352,7 @@ public class LinkService extends Service {
         }
         if (ticker != null) {
             ticker.execute(this::closeLog);
+            ticker.execute(FuelStore::save);
             ticker.shutdown();
         }
         super.onDestroy();
@@ -780,6 +827,7 @@ public class LinkService extends Service {
                 for (Listener l : listeners) l.onValues(values);
             });
         }
+        countFuel();
         if (++tickCount % 10 != 0) return;
 
         // once a second

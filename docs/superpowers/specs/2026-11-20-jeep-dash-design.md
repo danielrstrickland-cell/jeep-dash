@@ -169,8 +169,13 @@ a per-car factor (default 1.0) corrected at fill-ups: the dash keeps an estimate
 last fill-up (saved across restarts), and "Fuel: calibrate at fill-up" compares it with what the pump put in.
 It refuses under 2 gal counted, changes the factor by at most half or double at a time, and keeps it between
 0.3 and 3. It is only right if the dash ran for every drive in between and the tank was filled to full both
-times. The inputs are read only while a fuel gauge is on screen or a fill-up is being counted, and only
-while the dash is the screen showing.
+times. The counting runs in the link service, so it goes on while the visualizer or another app is in
+front; the dash's gauges read the same counter. The inputs are read only while the dash's layout has a fuel
+gauge or a fill-up is being counted, added to whatever list the screen in front asks for. A total is never
+shown low: if fuel readings were missing for more than a tenth of the moving time (and over 10 s), "fuel used"
+and "MPG this drive" go blank, and an incomplete fill-up estimate cannot be calibrated from. The Jeep on the
+generic line has no injector time, so there its totals stay blank. Fuel flow reads 0-30 gal/h on the Jeep
+and 0-50 on the Cayenne.
 
 ## Open items
 
