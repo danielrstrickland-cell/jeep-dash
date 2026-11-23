@@ -201,3 +201,46 @@ Where the dash's values sit (group, slot from 0):
 
 The dash's boost gauge is manifold pressure minus outside air pressure (both in group 16). It has not been
 seen under boost yet.
+
+### Stored codes on the Cayenne (capture of 2026-11-22)
+
+The GearWrench app's Read DTC and Clear DTC on the engine computer, on the same line and session as live data:
+
+| What | Sent (inside the dongle frame) | Answer |
+|---|---|---|
+| Read DTC | `61 04 00 08 84 10 f1 18 00 ff 00 9c ff` | `85 f1 10 58 01 15 25 34 4d`: 58, one code, `15 25` = P1525, status `34` |
+| Clear DTC | `61 04 00 07 83 10 f1 14 ff 00 97 01` | `83 f1 10 54 ff 00 d7` after about 0.9 s |
+
+The app showed P152500 "Cylinder bank 1, camshaft adjustment, electrical circuit fault", then "Clear Code
+Successfully". Its first tries got no answer because the session had lapsed; it woke the line again (the same
+5-baud wake-up and keep-alive the dash uses) and the read then answered in 0.2 s.
+
+The dash sends these two frames and nothing else for codes. The clear is the one permitted write on this car:
+only from the Codes screen, only after engine speed (group 0a) reads zero, followed by a fresh read of the list.
+The status byte is not interpreted.
+
+### More Cayenne values (capture of 2026-11-22, warm idle)
+
+Each was matched to the figure on the GearWrench screen at that moment. Kinds: 21 = 100 x b / a percent,
+14 = a x (b - 128) / 128 percent, 1b = (b - 128) x a / 100 degrees, 0b = 1 + a x (b - 128) / 10000,
+0f = a x b / 100 ms, 19 = (256 x b + a) x 0.044 lb/h (the one scale that fits both air-flow lines: 68.64 and
+56.98), 36 = a x 256 + b.
+
+| Value | Group/slot | Vendor screen |
+|---|---|---|
+| Exhaust after / before cat | 0a/4, 0a/6 (kind 05) | 716.00 / 662.00 F |
+| Engine load | 0a/7 | 21.05 % |
+| Throttle | 0b/0 | 1.96 % |
+| Ignition angle | 0b/3 | 2.25 deg |
+| Engine torque | 0b/5 | 8.63 % |
+| Pedal value | 0e/1 | 4.31 % |
+| Lambda right, fuel trim bank 1 | 0f/0, 0f/3 | 1.000, -3.12 % |
+| Lambda left, fuel trim bank 2 | 12/0, 12/3 | 1.000, 0.00 % |
+| Injection time, total air flow | 16/0, 16/1 | 1.23 ms, 68.64 lb/h |
+| Ambient temperature | 17/4 | 71.60 F |
+| Brake booster pressure | 34/2 (kind 12) | 7.03 psi |
+| Selected gear | 14/0 | 0 in park; 1 and 7 seen while the lever was moved |
+
+Seen but not used, because nothing but zero was on screen to check the scale against: boost control deviation
+(1b/7, kind 32), per-cylinder ignition retard and the misfire counters.
+

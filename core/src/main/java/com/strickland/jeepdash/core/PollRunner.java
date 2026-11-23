@@ -234,6 +234,7 @@ public final class PollRunner implements Poller {
      * Null when the engine computer gave no sound answer. When live data is on the generic line, the Jeep
      * line is set up for the read and live data sets its own line up again afterwards.
      */
+    @Override
     public synchronized List<Integer> readCodes() throws IOException {
         if (onLine != Source.SCI) {
             note("-- set up the Jeep line (SCI) to read codes");
@@ -254,6 +255,7 @@ public final class PollRunner implements Poller {
      * speed has been read as zero, as the two frames the GearWrench app sends, and followed by a fresh read
      * of the list.
      */
+    @Override
     public synchronized SciCodes.Cleared clearCodes() throws IOException {
         List<Integer> before = readCodes();                 // also puts the dongle on the Jeep line
         if (before == null) return new SciCodes.Cleared(SciCodes.Outcome.NOT_ANSWERING, null);

@@ -2,6 +2,7 @@ package com.strickland.jeepdash.core;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.List;
 
 /** Whatever reads a vehicle through the dongle: the Jeep's runner or the Porsche's. */
 public interface Poller {
@@ -19,6 +20,12 @@ public interface Poller {
 
     /** True while the dongle is sending a keep-alive that leave() should get the time to stop. */
     boolean keepAliveRunning();
+
+    /** The engine computer's stored codes; null when it gave no sound list. */
+    List<Integer> readCodes() throws IOException;
+
+    /** Clears the stored codes (engine stopped only) and reads the list back. */
+    SciCodes.Cleared clearCodes() throws IOException;
 
     /** Orderly stop, best effort. */
     void leave();

@@ -52,7 +52,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Keeps the dongle connection alive in the background: connects, runs the read loop, reconnects on its own,
- * and writes the drive log. Read-only toward the Jeep, except for clearing stored codes when the owner asks
+ * and writes the drive log. Read-only toward either car, except for clearing stored codes when the owner asks
  * (see PollRunner / Protocols).
  */
 public class LinkService extends Service {
@@ -158,6 +158,7 @@ public class LinkService extends Service {
     public PollRunner.Fast fastRefresh() {
         Poller r = runner;
         if (r instanceof PollRunner) return ((PollRunner) r).fastRefresh();
+        if (Catalog.porsche()) return PollRunner.Fast.OFF;       // the Jeep line only
         return getSharedPreferences("link", MODE_PRIVATE).getBoolean("fast", false) ? PollRunner.Fast.ON : PollRunner.Fast.OFF;
     }
 
@@ -168,8 +169,8 @@ public class LinkService extends Service {
         if (r instanceof PollRunner) ((PollRunner) r).setFastRefresh(on);
     }
 
-    /** True when stored codes can be read on this vehicle (the Jeep for now). */
-    public boolean codesAvailable() { return !Catalog.porsche(); }
+    /** True when stored codes can be read on this vehicle (both cars now). */
+    public boolean codesAvailable() { return true; }
 
     /** Reads the stored codes between two live-data reads. The answer comes on the main thread. */
     public void readCodes(CodesListener l) { askCodes(new CodesJob(false, l)); }
@@ -194,17 +195,12 @@ public class LinkService extends Service {
         CodesJob job = codesJob;
         if (job == null) return;
         codesJob = null;
-        if (!(r instanceof PollRunner)) {
-            answerCodes(job, null, job.clear ? SciCodes.Outcome.NOT_ANSWERING : null);
-            return;
-        }
-        PollRunner jeep = (PollRunner) r;
         try {
             if (job.clear) {
-                SciCodes.Cleared c = jeep.clearCodes();
+                SciCodes.Cleared c = r.clearCodes();
                 answerCodes(job, c.left, c.outcome);
             } else {
-                answerCodes(job, jeep.readCodes(), null);
+                answerCodes(job, r.readCodes(), null);
             }
         } catch (IOException e) {
             answerCodes(job, null, job.clear ? SciCodes.Outcome.FAILED : null);

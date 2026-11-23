@@ -11,8 +11,8 @@ import java.util.function.LongSupplier;
 
 /**
  * Reads the Porsche: wakes the engine computer's line the way the GearWrench app does, then asks for the
- * groups that hold the values on screen, the busiest gauges most often. Read-only: it sends only what
- * {@link Protocols} lists. Throws IOException when the dongle link is gone so the caller can reconnect.
+ * groups that hold the values on screen, the busiest gauges most often. Read-only apart from clearing the
+ * stored codes when the owner asks: it sends only what {@link Protocols} lists. Throws IOException when the dongle link is gone so the caller can reconnect.
  */
 public final class KwpRunner implements Poller {
     public enum Kind { SETUP, READ, IDLE }
@@ -145,6 +145,41 @@ public final class KwpRunner implements Poller {
         return Kind.READ;
     }
 
+    /**
+     * Reads the stored-code list with the request the GearWrench app sends, on the line live data already
+     * holds open (woken first when it is not). Null when the engine computer gave no sound list.
+     */
+    @Override
+    public synchronized List<Integer> readCodes() throws IOException {
+        if (!up) wake();
+        if (!up) return null;
+        note("-- read stored codes");
+        return KwpCodes.parse(exchange(Hex.bytes(KwpCodes.READ), true, wakeMs).data);
+    }
+
+    /**
+     * Clears the stored codes: the dash's one write to this engine computer. Sent only after the engine
+     * speed has been read as zero, as the one frame the GearWrench app sends, and followed by a fresh read
+     * of the list.
+     */
+    @Override
+    public synchronized SciCodes.Cleared clearCodes() throws IOException {
+        List<Integer> before = readCodes();
+        if (before == null) return new SciCodes.Cleared(SciCodes.Outcome.NOT_ANSWERING, null);
+        PorscheCatalog.Value rpm = PorscheCatalog.value("rpm");
+        KwpBlocks.Block block = KwpBlocks.parse(rpm.group, exchange(KwpBlocks.request(rpm.group), true, readMs).data);
+        Double turning = block == null ? null : rpm.read(block);
+        if (turning == null) return new SciCodes.Cleared(SciCodes.Outcome.NOT_ANSWERING, before);
+        if (turning > 0) return new SciCodes.Cleared(SciCodes.Outcome.ENGINE_RUNNING, before);
+        note("-- clear stored codes (asked for on the Codes screen)");
+        byte[] inner = Hex.bytes(KwpCodes.CLEAR);
+        if (!Protocols.allowedWrite(inner)) throw new IllegalStateException("not a permitted write: " + KwpCodes.CLEAR);
+        byte[] answer = transact(inner, true, wakeMs).data;
+        SciCodes.Outcome outcome = KwpCodes.cleared(answer) ? SciCodes.Outcome.CLEARED
+                : KwpCodes.refused(answer) ? SciCodes.Outcome.DENIED : SciCodes.Outcome.FAILED;
+        return new SciCodes.Cleared(outcome, readCodes());
+    }
+
     private void wake() throws IOException {
         note("-- wake the Porsche line (KWP2000)");
         send(Protocols.STOP_KEEPALIVE);                  // one left running would talk over the wake-up
@@ -181,6 +216,10 @@ public final class KwpRunner implements Poller {
 
     private DongleSession.Result exchange(byte[] inner, boolean wantReply, int timeoutMs) throws IOException {
         if (!Protocols.allowed(inner)) throw new IllegalStateException("not on the read-only list: " + Hex.str(inner));
+        return transact(inner, wantReply, timeoutMs);
+    }
+
+    private DongleSession.Result transact(byte[] inner, boolean wantReply, int timeoutMs) throws IOException {
         long t0 = clock.getAsLong();
         DongleSession.Result r = session.send(inner, wantReply, timeoutMs);
         if (trace != null) {

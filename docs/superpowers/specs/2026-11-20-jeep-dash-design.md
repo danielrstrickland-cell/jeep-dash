@@ -132,6 +132,14 @@ Release APKs are signed with a fixed key committed to the repo, so updates insta
    warnings when a value drifts. Needs weeks of logs first.
 - Separate project, not this app: launch control / 2-step.
 
+### Porsche codes and more values (2026-11-22)
+
+The Codes screen works on the Cayenne too: Read DTC and Clear DTC exactly as the GearWrench app sent them to
+this car. The rule of one permitted write holds per car: on the Cayenne it is that single clear frame, only
+from the Codes screen, only with the engine speed read as zero. Sixteen more live values were added, each
+matched against the GearWrench screen (docs/protocol-notes.md). Both cars also have a gear gauge worked out
+from engine speed against road speed.
+
 ## Open items
 
 - **Map more Jeep values** (Daniel's help needed later): another capture of the GearWrench app showing its

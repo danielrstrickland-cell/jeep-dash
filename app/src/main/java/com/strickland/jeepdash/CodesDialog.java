@@ -10,6 +10,7 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import com.strickland.jeepdash.core.CodeText;
 import com.strickland.jeepdash.core.SciCodes;
 
 import java.util.ArrayList;
@@ -81,7 +82,7 @@ final class CodesDialog {
     /** Opens a Google search for the tapped code in the browser. */
     private void lookUp(int position) {
         if (codes == null || position < 0 || position >= codes.size()) return;
-        String query = SciCodes.searchQuery(codes.get(position));
+        String query = CodeText.searchQuery(codes.get(position));
         try {
             activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(SciCodes.searchUrl(query))));
         } catch (RuntimeException e) {      // no browser on this device
@@ -94,7 +95,7 @@ final class CodesDialog {
         int n = codes.size();
         new AlertDialog.Builder(activity)
                 .setTitle(n == 1 ? "Clear this code?" : "Clear these " + n + " codes?")
-                .setMessage(SciCodes.listing(codes) + "\n\nThis erases them from the engine computer. The engine must be"
+                .setMessage(CodeText.listing(codes) + "\n\nThis erases them from the engine computer. The engine must be"
                         + " stopped with the key on. A fault that is still there will set its code again.")
                 .setPositiveButton("Clear", (d, w) -> clear())
                 .setNegativeButton("Cancel", null)
@@ -112,11 +113,11 @@ final class CodesDialog {
         codes = list;
         if (!dialog.isShowing()) return;
         boolean any = list != null && !list.isEmpty();
-        String text = any ? "Tap a code to look it up on Google." : SciCodes.listing(list);
+        String text = any ? "Tap a code to look it up on Google." : CodeText.listing(list);
         if (cleared != null) text = SciCodes.say(cleared) + (any ? "\n\nStored now. " : "\n\n") + text;
         status.setText(text);
         rows.clear();
-        if (any) for (int raw : list) rows.add(SciCodes.listing(java.util.Collections.singletonList(raw)));
+        if (any) for (int raw : list) rows.add(CodeText.listing(java.util.Collections.singletonList(raw)));
         dialog.getButton(DialogInterface.BUTTON_NEUTRAL).setEnabled(true);
         dialog.getButton(DialogInterface.BUTTON_NEGATIVE).setEnabled(any);
     }

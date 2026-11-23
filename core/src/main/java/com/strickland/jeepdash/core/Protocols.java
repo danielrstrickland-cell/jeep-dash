@@ -71,7 +71,7 @@ public final class Protocols {
     static {
         String[][] groups = {GENERIC_SETUP_PRE, {GENERIC_INIT, GENERIC_FIRST_QUERY}, GENERIC_SETUP_POST,
                 {STOP_KEEPALIVE, SCI_FAST, SCI_SLOW, SCI_TIMING_FAST}, GENERIC_LEAVE, SCI_SETUP,
-                KWP_SETUP_PRE, {KWP_INIT}, KWP_SETUP_POST};
+                KWP_SETUP_PRE, {KWP_INIT}, KWP_SETUP_POST, {KwpCodes.READ}};
         for (String[] g : groups) for (String c : g) FIXED.add(c);
     }
 
@@ -100,14 +100,14 @@ public final class Protocols {
     }
 
     /**
-     * The one thing the dash may change in the engine computer: clearing its stored codes, as the two
-     * frames the GearWrench app sends for Clear DTC and nothing else. Kept apart from {@link #allowed} so
+     * The one thing the dash may change in the engine computer: clearing its stored codes, as the frames
+     * the GearWrench app sends for Clear DTC (two on the Jeep, one on the Porsche) and nothing else. Kept apart from {@link #allowed} so
      * that live data can never send them; only the clear itself asks this.
      */
     public static boolean allowedWrite(byte[] inner) {
         if (inner == null) return false;
         String hex = Hex.str(inner);
-        return hex.equals(SciCodes.CLEAR) || hex.equals(SciCodes.CLEAR_ALL);
+        return hex.equals(SciCodes.CLEAR) || hex.equals(SciCodes.CLEAR_ALL) || hex.equals(KwpCodes.CLEAR);
     }
 
     public static byte[] genericRequest(int pid) {

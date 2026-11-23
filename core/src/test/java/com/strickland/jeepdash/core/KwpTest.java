@@ -25,6 +25,8 @@ public class KwpTest {
         final List<String> sent = new ArrayList<>();
         final Map<Integer, String> replies = new HashMap<>(IDLE);
         boolean keyOn = true, dongleAnswers = true;
+        String codes = "85 f1 10 58 01 15 25 34 4d";    // Read DTC as captured: one code, P1525
+        String clearReply = "83 f1 10 54 ff 00 d7";     // Clear DTC as captured
 
         @Override public void write(byte[] f) {
             int seq = ((f[2] & 0xff) << 8) | (f[3] & 0xff);
@@ -36,8 +38,15 @@ public class KwpTest {
             reply(seq, "00 00 02 00 00");
             if (!Protocols.wantsReply(inner)) return;
             if (hex.startsWith("61 05")) { reply(seq, keyOn ? "01 00 02 ef 8f" : "01 ff ff"); return; }
-            String r = hex.startsWith("61 04 00 06 82 10 f1 21") && keyOn ? replies.get(inner[8] & 0xff) : null;
-            reply(seq, r == null ? "01 ff ff" : "01 00 1e " + r);
+            String r = null;
+            if (!keyOn) r = null;
+            else if (hex.startsWith("61 04 00 06 82 10 f1 21")) r = replies.get(inner[8] & 0xff);
+            else if (hex.equals("61 04 00 08 84 10 f1 18 00 ff 00 9c ff")) r = codes;
+            else if (hex.equals("61 04 00 07 83 10 f1 14 ff 00 97 01")) {
+                r = clearReply;
+                if (r != null && r.contains(" 54 ff 00")) codes = "82 f1 10 58 00 db";
+            }
+            reply(seq, r == null ? "01 ff ff" : String.format("01 00 %02x %s", Hex.bytes(r).length, r));
         }
         void reply(int seq, String payload) {
             byte[] r = DongleSessionTest.rx(seq, payload);
@@ -223,8 +232,9 @@ public class KwpTest {
     }
 
     public static void everyPorscheValueHasAGaugeRange() {
-        T.eq(18, PorscheCatalog.all().size(), "the nine recorded values, the boost sensor, battery volts, peak boost"
-                + " and the six worked out by the screen itself");
+        T.eq(34, PorscheCatalog.all().size(), "the nine recorded values, the boost sensor, battery volts, peak boost,"
+                + " the sixteen from the warm-idle capture and the six worked out by the screen itself");
+        for (Param p : PorscheCatalog.all()) T.ok(!p.unit.isEmpty(), p.id + " has a unit to show in the gauge picker");
         for (Param p : PorscheCatalog.all()) {
             T.ok(p.max > p.min, p.id + " has a scale");
             T.ok(PorscheCatalog.byId(p.id) == p, p.id + " can be looked up");
@@ -311,5 +321,55 @@ public class KwpTest {
             for (GaugeSpec g : l.gauges)
                 T.ok(g.x >= 0 && g.y >= 0 && g.x + g.w <= 1024 && g.y + g.h <= 600, look + " " + g.key + " fits the head unit");
         }
+    }
+
+    /** Replies from the second capture (2026-11-22, warm idle), each one where the vendor app's screen showed the value named. */
+    static final Map<Integer, String> WARM = new HashMap<>();
+    static {
+        WARM.put(0x0a, "9a f1 10 61 0a 01 c8 11 15 46 c2 07 7d 00 14 64 7e 05 32 b0 19 0a 05 05 32 aa 21 85 1c 29");
+        WARM.put(0x0b, "9a f1 10 61 0b 21 ff 05 05 0a b4 05 0a 7d 1b 4b 83 14 40 85 21 ff 16 3c ff ff 3e 64 1d 6c");
+        WARM.put(0x0e, "9a f1 10 61 0e 21 ff 0b 21 ff 0b 21 ff 0c 21 ff 00 21 ff 00 25 00 00 25 00 00 25 00 00 3b");
+        WARM.put(0x0f, "9a f1 10 61 0f 0b 4e 80 58 0a 01 3d ff 7f 14 64 7c 0b 4e c0 0b 4e 80 36 00 00 21 ff 00 3e");
+        WARM.put(0x12, "9a f1 10 61 12 0b 4e 80 58 0a 01 3d ff 80 14 64 80 0b 4e c0 0b 4e 80 36 00 00 25 00 00 4b");
+        WARM.put(0x14, "9a f1 10 61 14 36 00 07 22 64 7a 22 64 7a 14 19 7e 14 19 88 14 19 7e 25 00 00 25 00 00 a2");
+        WARM.put(0x16, "9a f1 10 61 16 0f 29 03 19 18 06 01 32 59 12 fa 25 12 7d c8 19 11 03 1a 3c 88 21 85 1a 63");
+        WARM.put(0x17, "9a f1 10 61 17 21 ff 05 22 64 80 22 64 80 36 00 80 05 0a 7a 36 01 34 36 01 e8 36 02 9a df");
+        WARM.put(0x34, "9a f1 10 61 34 25 00 c1 25 00 70 12 7d 61 25 00 e4 36 26 84 36 00 05 12 7d 00 12 19 03 7c");
+    }
+    static final String[] MORE = {"egt_pre", "egt_post", "load", "throttle", "timing", "torque", "pedal", "lambda_r",
+            "lambda_l", "trim_1", "trim_2", "inj_ms", "maf", "outside_temp", "brake_vac", "gear_ecu"};
+
+    public static void theWarmIdleCaptureMatchesTheVendorApp() throws Exception {
+        Rig r = new Rig(MORE);
+        r.car.replies.putAll(WARM);
+        r.steps(1 + 40);
+        T.near(662, r.get("egt_pre"), 1e-6, "Exhaust Gas Temperature Before Catalytic Converter 662.00");
+        T.near(716, r.get("egt_post"), 1e-6, "Exhaust Temperature After Three-Way Catalytic Converter 716.00");
+        T.near(21.05, r.get("load"), 0.005, "Engine Load 21.05");
+        T.near(1.96, r.get("throttle"), 0.005, "Throttle Angle, Exact Value 1.96");
+        T.near(2.25, r.get("timing"), 1e-6, "Ignition Angle 2.25");
+        T.near(8.63, r.get("torque"), 0.005, "Actual Engine Torque 8.63");
+        T.near(4.31, r.get("pedal"), 0.005, "Pedal Value 4.31");
+        T.near(1.000, r.get("lambda_r"), 1e-6, "Actual Lambda Value Right 1.000");
+        T.near(1.000, r.get("lambda_l"), 1e-6, "Actual Lambda Value Left 1.000");
+        T.near(-3.12, r.get("trim_1"), 0.006, "Fuel Trimmed Average Bank 1 -3.12");
+        T.near(0, r.get("trim_2"), 1e-6, "Fuel Trimmed Average Bank 2 0.00");
+        T.near(1.23, r.get("inj_ms"), 1e-6, "Injection Time 1.23");
+        T.near(68.64, r.get("maf"), 1e-6, "Total Mass Air Flow (MAF) 68.64 lb/h");
+        T.near(71.6, r.get("outside_temp"), 1e-6, "Ambient Temperature 71.60");
+        T.near(7.03, r.get("brake_vac"), 0.005, "Pressure, Brake Booster Pressure Sensor 7.03 psi");
+        T.near(7, r.get("gear_ecu"), 1e-9, "Selected Gear, as the computer numbers it (0 in park, as on the vendor screen)");
+    }
+
+    public static void theOtherAirFlowReadingUsesTheSameScale() {
+        // "Mass Air Flow (Hot Mode MAF And Tank Vents) 56.98 lb/h" in group 0a: the one scale that fits both screens
+        KwpBlocks.Block b = KwpBlocks.parse(0x0a, Hex.bytes("9a f1 10 61 0a 01 c8 10 15 46 c2 07 7d 00 14 64 7e 05 32 ae 19 0f 05 05 32 a8 21 85 1d 2a"));
+        T.near(56.98, b.v(5, KwpBlocks.AIR_LB_H), 1e-6, "1295 counts");
+    }
+
+    public static void aShareOfNothingStaysBlank() {
+        KwpBlocks.Block b = KwpBlocks.parse(0x0e, Hex.bytes(withSum("9a f1 10 61 0e 21 00 0b 21 ff 0b 21 ff 0c 21 ff 00 21 ff 00 25 00 00 25 00 00 25 00 00")));
+        T.ok(Double.isNaN(b.v(0, KwpBlocks.SHARE)), "no full-scale figure: no reading, not a division by zero");
+        T.near(4.31, b.v(1, KwpBlocks.SHARE), 0.005, "the next slot still reads");
     }
 }

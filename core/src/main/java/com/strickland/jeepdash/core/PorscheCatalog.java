@@ -8,8 +8,8 @@ import java.util.Map;
 
 /**
  * What the dash can show on the 2003 Cayenne Turbo: which group each value comes in and how it is worked
- * out. Groups and slots are from the capture of the GearWrench app on this car; every value read from the
- * car matched that app's own screen at idle, except the three marked "not on the vendor screen". Peak boost
+ * out. Groups and slots are from the two captures of the GearWrench app on this car; every value read from
+ * the car matched that app's own screen at idle, except the three marked "not on the vendor screen". Peak boost
  * is the boost reading held at its highest; the last five are worked out by the screen, not read.
  */
 public final class PorscheCatalog {
@@ -77,6 +77,27 @@ public final class PorscheCatalog {
         add("boost_act", "Boost sensor", "psi", 0, 30, 1, 0x3b, b -> b.v(6, KwpBlocks.MBAR) * PSI_PER_MBAR);
         // 13.6 to 13.8 V with the engine running in the capture (not on the vendor screen)
         add("batt_v", "Battery", "V", 10, 16, 1, 0x0a, b -> b.v(1, KwpBlocks.VOLT));
+
+        // From the warm-idle capture of 2026-11-22: each matched the vendor screen's figure at that moment.
+        add("throttle", "Throttle", "%", 0, 100, 2, 0x0b, b -> b.v(0, KwpBlocks.SHARE));
+        add("pedal", "Pedal", "%", 0, 100, 2, 0x0e, b -> b.v(1, KwpBlocks.SHARE));
+        add("load", "Engine load", "%", 0, 200, 2, 0x0a, b -> b.v(7, KwpBlocks.SHARE));
+        add("torque", "Engine torque", "%", 0, 100, 1, 0x0b, b -> b.v(5, KwpBlocks.SHARE));
+        add("timing", "Ignition timing", "deg", -20, 60, 1, 0x0b, b -> b.v(3, KwpBlocks.ADVANCE));
+        add("maf", "Air flow", "lb/h", 0, 3000, 1, 0x16, b -> b.v(1, KwpBlocks.AIR_LB_H));
+        add("inj_ms", "Injection time", "ms", 0, 25, 1, 0x16, b -> b.v(0, KwpBlocks.MILLISECONDS));
+        add("lambda_r", "Lambda right", "ratio", 0.7, 1.3, 1, 0x0f, b -> b.v(0, KwpBlocks.LAMBDA));
+        add("lambda_l", "Lambda left", "ratio", 0.7, 1.3, 1, 0x12, b -> b.v(0, KwpBlocks.LAMBDA));
+        add("trim_1", "Fuel trim bank 1", "%", -25, 25, 1, 0x0f, b -> b.v(3, KwpBlocks.TRIM));
+        add("trim_2", "Fuel trim bank 2", "%", -25, 25, 1, 0x12, b -> b.v(3, KwpBlocks.TRIM));
+        // the computer's own worked-out exhaust temperatures either side of the catalytic converter
+        add("egt_pre", "Exhaust before cat", "°F", 200, 1900, 1, 0x0a, b -> f(b.v(6, KwpBlocks.TEMP_C)));
+        add("egt_post", "Exhaust after cat", "°F", 200, 1900, 1, 0x0a, b -> f(b.v(4, KwpBlocks.TEMP_C)));
+        add("outside_temp", "Outside temp", "°F", -20, 130, 1, 0x17, b -> f(b.v(4, KwpBlocks.TEMP_C)));
+        add("brake_vac", "Brake booster", "psi", 0, 15, 1, 0x34, b -> b.v(2, KwpBlocks.MBAR) * PSI_PER_MBAR);
+        // the gearbox position as the engine computer numbers it: 0 in park (as on the vendor screen); 1 and
+        // 7 were seen while the lever was moved, so 7 is probably reverse. Not yet seen while driving.
+        add("gear_ecu", "Selected gear", "0-7", 0, 7, 1, 0x14, b -> b.v(0, KwpBlocks.COUNT));
 
         // The timer and pull come from how the car's own road speed changes; the other three need the
         // screen's GPS or motion sensor and stay blank on a radio that has none.

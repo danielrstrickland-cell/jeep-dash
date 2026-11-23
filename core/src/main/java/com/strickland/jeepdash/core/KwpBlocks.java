@@ -5,11 +5,13 @@ package com.strickland.jeepdash.core;
  * bytes: a kind, and two numbers a and b. The kind says how a and b turn into a reading, so the computer
  * itself states the unit. Only kinds checked against the GearWrench app's own display (or, for volts, a
  * plainly sensible reading) are understood here; anything else stays blank rather than risk a wrong number.
+ * Air flow is in the app's own lb/h: 0.044 per count is the one scale that fits both of its air-flow lines.
  */
 public final class KwpBlocks {
     private KwpBlocks() { }
 
     public static final int RPM = 1, TEMP_C = 5, KMH = 7, MBAR = 18, VOLT = 21, TEMP_DIFF_C = 26, DEGREES = 34;
+    public static final int LAMBDA = 11, MILLISECONDS = 15, TRIM = 20, AIR_LB_H = 25, ADVANCE = 27, SHARE = 33, COUNT = 54;
 
     /** One group's answer. */
     public static final class Block {
@@ -30,6 +32,13 @@ public final class KwpBlocks {
                 case VOLT: return a * b * 0.001;
                 case TEMP_DIFF_C: return b - a;
                 case DEGREES: return (b - 128) * 0.01 * a;
+                case LAMBDA: return 0.0001 * a * (b - 128) + 1;
+                case MILLISECONDS: return 0.01 * a * b;
+                case TRIM: return a * (b - 128) / 128.0;
+                case AIR_LB_H: return (256 * b + a) * 0.044;
+                case ADVANCE: return (b - 128) * 0.01 * a;
+                case SHARE: return a == 0 ? Double.NaN : 100.0 * b / a;
+                case COUNT: return a * 256 + b;
                 default: return Double.NaN;
             }
         }

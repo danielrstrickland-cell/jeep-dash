@@ -25,6 +25,7 @@ public final class TestMain {
             SciCodesTest.class,
             FastRefreshTest.class,
             GearsTest.class,
+            KwpCodesTest.class,
     };
 
     public static void main(String[] args) {

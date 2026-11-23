@@ -99,8 +99,8 @@ final class Art {
 
     // ---------------- readings ----------------
 
-    /** True for a value that is only ever a whole number (the gear). */
-    static boolean whole(Param p) { return "gear".equals(p.id); }
+    /** True for a value that is only ever a whole number (the worked-out gear and the computer's own). */
+    static boolean whole(Param p) { return p.id.startsWith("gear"); }
 
     static String format(Param p, double v) {
         if (whole(p)) return String.valueOf(Math.round(v));
