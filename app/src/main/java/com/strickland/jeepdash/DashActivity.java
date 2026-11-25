@@ -40,6 +40,8 @@ import com.strickland.jeepdash.core.NowPlaying;
 import com.strickland.jeepdash.core.Param;
 import com.strickland.jeepdash.core.SpeedCorrection;
 import com.strickland.jeepdash.core.SpeedVolume;
+import com.strickland.jeepdash.core.TimingPulled;
+import com.strickland.jeepdash.core.ValueScan;
 import com.strickland.jeepdash.theme.GtTheme;
 import com.strickland.jeepdash.theme.JeepTheme;
 import com.strickland.jeepdash.theme.RetroTheme;
@@ -48,7 +50,9 @@ import com.strickland.jeepdash.theme.XpTheme;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** The dash screen: binds the link service, owns the look and its saved layout. */
@@ -249,6 +253,46 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     public void onValues(LiveValues v) {
         if (service != null) view.chrome.readsPerSec = service.readsPerSecond();
         if (sweepStart == 0) view.setValues(v);
+        if (LinkService.now() - noticeAt >= 1000) refreshNotice();
+    }
+
+    // ---------------- learning alerts: one line on the dash (see NormalReadings) ----------------
+
+    private long noticeAt;
+
+    /** The unit each gauge on the layout is shown in, by value id, so the notice speaks the same units. */
+    private Map<String, String> gaugeUnits() {
+        Map<String, String> out = new HashMap<>();
+        Layout l = view.layout();
+        if (l != null) for (GaugeSpec g : l.gauges) if (g.unit != null) out.put(g.paramId, g.unit);
+        return out;
+    }
+
+    private void refreshNotice() {
+        noticeAt = LinkService.now();
+        String n = NormalStore.get(this).notice(gaugeUnits());
+        String line = n == null ? "" : n;
+        if (!line.equals(view.chrome.notice)) {
+            view.chrome.notice = line;
+            view.invalidate();
+        }
+    }
+
+    /** The notice was tapped: dismiss it until the next drive, or open the list. */
+    private void showNotice() {
+        String n = view.chrome.notice;
+        if (n.isEmpty()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Reading out of the usual")
+                .setMessage(n + "\n\nIt was outside its normal range on two drives in a row. Dismiss hides this until the "
+                        + "next drive. Normal readings lists every reading and can accept the new figure as normal.")
+                .setPositiveButton("Dismiss", (d, w) -> {
+                    NormalStore.get(this).dismiss();
+                    refreshNotice();
+                })
+                .setNeutralButton("Normal readings", (d, w) -> NormalDialog.show(this, gaugeUnits(), this::refreshNotice))
+                .setNegativeButton("Close", null)
+                .show();
     }
 
     private void pushActiveParams() {
@@ -378,6 +422,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case "add": addGauge(); break;
             case "menu": showMenu(); break;
             case "status": showStatus(); break;
+            case "notice": showNotice(); break;
             case "music":
                 view.chrome.musicOpen = !view.chrome.musicOpen;
                 view.invalidate();
@@ -497,6 +542,9 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                 : prefs.getFloat(Catalog.porsche() ? "speed_corr_p" : "speed_corr", 0);
         s.canEdit = view.chrome.canEdit;
         s.snap = view.chrome.snap;
+        s.normalProgress = NormalStore.get(this).progress(System.currentTimeMillis());
+        ValueScan scan = service != null && service.scanRunning() ? service.scan() : null;
+        s.scanProgress = scan == null ? null : scan.progress();
         return s;
     }
 
@@ -563,6 +611,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case DashMenu.FUEL: FuelDialog.show(this, this::pushActiveParams); break;
             case DashMenu.CODES: if (service != null) CodesDialog.show(this, service); break;
             case DashMenu.LOGS: showLogs(); break;
+            case DashMenu.NORMAL: NormalDialog.show(this, gaugeUnits(), this::refreshNotice); break;
+            case DashMenu.SCAN: if (service != null) ScanDialog.show(this, service); break;
             case DashMenu.LISTEN: startActivity(new Intent(this, ListenActivity.class)); break;
             case DashMenu.TUNE_LOG:
                 if (LinkService.tunePaused()) showMessage("Tune log", LinkService.PAUSED_DETAIL);

@@ -78,7 +78,8 @@ public final class Protocols {
     /**
      * The read-only list. True only for the captured line-setup commands above, a generic "show current
      * data" request (mode 01), a Jeep-line read of the F4 live-data table and a Porsche "read measured
-     * values" request (service 21) to the engine computer. Nothing that clears codes, runs a test or writes
+     * values" request (service 21) to the engine computer. A Jeep-line read may only ask ids 00 to ef
+     * ({@link #LAST_F4_ID}). Nothing that clears codes, runs a test or writes
      * anything can pass, whatever the rest of the app asks for; clearing codes has its own list below.
      */
     public static boolean allowed(byte[] inner) {
@@ -96,7 +97,35 @@ public final class Protocols {
                     && (inner[7] & 0xff) == 0x01
                     && (inner[9] & 0xff) == ((0x68 + 0x6a + 0xf1 + 0x01 + (inner[8] & 0xff)) & 0xff);
         }
-        return (n == 2 || n == 3) && (inner[4] & 0xff) == 0xf4;      // f4 <id> [<id>]
+        if ((n != 2 && n != 3) || (inner[4] & 0xff) != 0xf4) return false;     // f4 <id> [<id>]
+        for (int i = 5; i < 4 + n; i++) if ((inner[i] & 0xff) > LAST_F4_ID) return false;
+        return true;
+    }
+
+    /**
+     * The last id of the F4 live-data table. In the engine computer's fast mode a byte from f0 to ff picks
+     * another table instead of reading one (fe also drops it back to slow speed), so no read may carry one.
+     * ChryslerScanner reads the whole table as the 240 ids 00 to ef (docs/protocol-notes.md).
+     */
+    public static final int LAST_F4_ID = 0xef;
+
+    /**
+     * The "Scan all values" request: exactly the Jeep-line read live data sends for one value
+     * ({@code 61 04 00 02 f4 <id> 01}), for any id of the table. Refuses an id outside 00 to ef.
+     */
+    public static byte[] scanRequest(int id) {
+        if (id < 0 || id > LAST_F4_ID) throw new IllegalArgumentException("not an id of the live-data table: " + id);
+        return sciRequest(id);
+    }
+
+    /**
+     * The scan's own list, checked on top of {@link #allowed}: a one-id F4 read with an id from 00 to ef, and
+     * nothing else. Two-id reads, other tables, the stored-code requests and every set-up command are refused.
+     */
+    public static boolean allowedScan(byte[] inner) {
+        return inner != null && inner.length == 7 && (inner[0] & 0xff) == 0x61 && (inner[1] & 0xff) == 0x04
+                && inner[2] == 0 && inner[3] == 0x02 && (inner[4] & 0xff) == 0xf4
+                && (inner[5] & 0xff) <= LAST_F4_ID && inner[6] == 0x01;
     }
 
     /**

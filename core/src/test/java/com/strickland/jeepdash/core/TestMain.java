@@ -46,6 +46,8 @@ public final class TestMain {
             TuneLogTest.class,
             SpeedCalibrationTest.class,
             AutoNightTest.class,
+            ValueScanTest.class,
+            NormalReadingsTest.class,
     };
 
     public static void main(String[] args) {

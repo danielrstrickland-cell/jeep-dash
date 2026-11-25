@@ -236,18 +236,42 @@ public final class PollRunner implements Poller {
      */
     @Override
     public synchronized List<Integer> readCodes() throws IOException {
-        if (onLine != Source.SCI) {
-            note("-- set up the Jeep line (SCI) to read codes");
-            if (onLine == Source.GENERIC) for (String c : Protocols.GENERIC_LEAVE) setup(c);
-            else setup(Protocols.STOP_KEEPALIVE);
-            onLine = null;
-            for (String c : Protocols.SCI_SETUP) setup(c);
-            fastOn = false;
-            sched.resetBus();
-        }
+        onJeepLine("to read codes");
         normalWait();                               // codes are read and cleared exactly as captured
         setup(Protocols.SCI_SLOW);
         return SciCodes.parse(exchange(Hex.bytes(SciCodes.READ), true, setupMs).data);
+    }
+
+    /**
+     * Puts the dongle on the Jeep line for a read outside live data, if it is not there already; live data
+     * then sets its own line up again.
+     */
+    private void onJeepLine(String why) throws IOException {
+        if (onLine == Source.SCI) return;
+        note("-- set up the Jeep line (SCI) " + why);
+        if (onLine == Source.GENERIC) for (String c : Protocols.GENERIC_LEAVE) setup(c);
+        else setup(Protocols.STOP_KEEPALIVE);
+        onLine = null;
+        for (String c : Protocols.SCI_SETUP) setup(c);
+        fastOn = false;
+        sched.resetBus();
+    }
+
+    /**
+     * One read for "Scan all values" (see ValueScan): the same fast-speed switch and one-id F4 read live data
+     * sends, with the id from 00 to ef and nothing else, at the captured timing and the same timeout. The raw
+     * answer, or null when the engine computer gave none; a silent id is not taken as the key going off.
+     * The caller stops live data while it scans.
+     */
+    public synchronized byte[] scanRead(int id) throws IOException {
+        byte[] request = Protocols.scanRequest(id);
+        if (!Protocols.allowedScan(request)) throw new IllegalStateException("not a scan read: " + Hex.str(request));
+        onJeepLine("for the value scan");
+        normalWait();
+        exchange(Hex.bytes(Protocols.SCI_FAST), false, ackMs);
+        byte[] answer = exchange(request, true, readMs).data;
+        if (answer != null) goodReads++;
+        return answer;
     }
 
     /**

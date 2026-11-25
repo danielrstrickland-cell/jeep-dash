@@ -267,6 +267,10 @@ public final class JeepTheme implements Theme {
             float size = Art.fit(s.detail, 16, w - 80, Art.COND);
             Art.text(c, s.detail, w / 2, 27, size, ink, Art.COND, Paint.Align.CENTER);
             buttons.put("status2", new RectF(40, 0, w - 40, 38));
+        } else if (!s.notice.isEmpty()) {
+            float size = Art.fit(s.notice, 16, w - 80, Art.COND);
+            Art.text(c, s.notice, w / 2, 27, size, 0xffffc04a, Art.COND, Paint.Align.CENTER);
+            buttons.put("notice", new RectF(40, 0, w - 40, 38));
         }
     }
 

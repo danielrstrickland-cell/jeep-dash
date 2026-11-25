@@ -42,4 +42,56 @@ public class ProtocolsTest {
         };
         for (String c : bad) T.ok(!Protocols.allowed(Hex.bytes(c)), "must refuse " + c);
     }
+
+    // ---------------- the value scan (Jeep line) ----------------
+
+    public static void scanRequestIsTheLiveDataReadWithOneId() {
+        T.eq("61 04 00 02 f4 00 01", Hex.str(Protocols.scanRequest(0x00)), "first id");
+        T.eq("61 04 00 02 f4 18 01", Hex.str(Protocols.scanRequest(0x18)), "manifold pressure's id");
+        T.eq(Hex.str(Protocols.sciRequest(0x18)), Hex.str(Protocols.scanRequest(0x18)), "the same bytes live data sends");
+        T.eq("61 04 00 02 f4 ef 01", Hex.str(Protocols.scanRequest(0xef)), "last id");
+    }
+
+    public static void scanRequestRefusesIdsOutsideTheTable() {
+        for (int id : new int[]{-1, 0xf0, 0xf4, 0xfe, 0xff, 0x100}) {
+            try {
+                Protocols.scanRequest(id);
+                T.ok(false, "must refuse id " + id);
+            } catch (IllegalArgumentException expected) {
+                // f0 to ff pick another table (fe also drops the engine computer out of its fast mode)
+            }
+        }
+    }
+
+    public static void scanListTakesOnlyOneIdReadsOfTheTable() {
+        for (int id = 0; id <= 0xef; id++) T.ok(Protocols.allowedScan(Protocols.scanRequest(id)), "id " + id);
+        String[] bad = {
+                "61 04 00 03 f4 0a 0b 01",                 // two ids: live data, not the scan
+                "61 04 00 02 f4 f0 01", "61 04 00 02 f4 fe 01", "61 04 00 02 f4 ff 01",
+                "61 04 00 02 f5 0a 01",                    // another table
+                "61 04 00 01 10 01",                       // stored-code list
+                "61 04 00 01 17 01", "61 04 00 02 23 01 01",       // the two erase frames
+                "61 04 00 02 13 01 01",                    // actuator test
+                "61 04 00 02 f4 18 02",                    // not the captured flag
+                "61 04 00 02 f4 18", "61 04 00 02 f4 18 01 00",    // cut short, or something tacked on
+                "61 04 00 03 f4 18 01",                    // length says two
+                Protocols.SCI_FAST, Protocols.SCI_SLOW, Protocols.SCI_TIMING,
+                "61 04 00 06 68 6a f1 01 0c d0 01",        // generic read
+        };
+        for (String c : bad) T.ok(!Protocols.allowedScan(Hex.bytes(c)), "must refuse " + c);
+        T.ok(!Protocols.allowedScan(null), "nothing");
+    }
+
+    public static void liveDataReadsStayInsideTheTable() {
+        T.ok(!Protocols.allowed(Hex.bytes("61 04 00 02 f4 fe 01")), "fe would drop the engine computer out of its fast mode");
+        T.ok(!Protocols.allowed(Hex.bytes("61 04 00 02 f4 f2 01")), "f0 to ff pick another table");
+        T.ok(!Protocols.allowed(Hex.bytes("61 04 00 03 f4 0a f4 01")), "nor as the second id");
+        try {
+            Catalog.useVehicle("jeep");
+            for (Param p : Catalog.all())
+                if (p.sciIds != null) T.ok(Protocols.allowed(Protocols.sciRequest(p.sciIds)), "the dash's own " + p.id);
+        } finally {
+            Catalog.useVehicle("jeep");
+        }
+    }
 }

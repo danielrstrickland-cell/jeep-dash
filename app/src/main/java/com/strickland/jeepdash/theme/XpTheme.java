@@ -522,21 +522,24 @@ public final class XpTheme implements Theme {
             if (s.canEdit) button(c, "edit", x + 3 * (bw + 6), by, bw, bh, "Edit gauges", pal.task, pal.taskEdge, false);
         }
 
-        // a balloon above the tray when there is something to tell the driver
-        if (!s.detail.isEmpty()) {
-            float size = Art.fit(s.detail, 14, w - 60, Art.SANS);
-            float tw = Art.width(s.detail, size, Art.SANS);
-            float bx2 = w - 10, bx1 = bx2 - tw - 24, bb = top - 8, bt = bb - 34;
-            p = Art.paint();
-            p.setColor(pal.balloon);
-            c.drawRoundRect(Art.rect(bx1, bt, bx2, bb), 6, 6, p);
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(1);
-            p.setColor(pal.balloonEdge);
-            c.drawRoundRect(Art.rect(bx1, bt, bx2, bb), 6, 6, p);
-            Art.text(c, s.detail, bx1 + 12, Art.centre((bt + bb) / 2, size, Art.SANS), size, pal.balloonInk, Art.SANS, Paint.Align.LEFT);
-            buttons.put("status2", new RectF(bx1, bt, bx2, bb));
-        }
+        // a balloon above the tray when there is something to tell the driver (a learning alert when nothing else)
+        if (!s.detail.isEmpty()) balloon(c, s.detail, w, top, "status2");
+        else if (!s.notice.isEmpty()) balloon(c, s.notice, w, top, "notice");
+    }
+
+    private void balloon(Canvas c, String text, float w, float top, String key) {
+        float size = Art.fit(text, 14, w - 60, Art.SANS);
+        float tw = Art.width(text, size, Art.SANS);
+        float bx2 = w - 10, bx1 = bx2 - tw - 24, bb = top - 8, bt = bb - 34;
+        Paint p = Art.paint();
+        p.setColor(pal.balloon);
+        c.drawRoundRect(Art.rect(bx1, bt, bx2, bb), 6, 6, p);
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(1);
+        p.setColor(pal.balloonEdge);
+        c.drawRoundRect(Art.rect(bx1, bt, bx2, bb), 6, 6, p);
+        Art.text(c, text, bx1 + 12, Art.centre((bt + bb) / 2, size, Art.SANS), size, pal.balloonInk, Art.SANS, Paint.Align.LEFT);
+        buttons.put(key, new RectF(bx1, bt, bx2, bb));
     }
 
     @Override

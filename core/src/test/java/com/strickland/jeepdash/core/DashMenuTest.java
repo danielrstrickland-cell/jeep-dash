@@ -140,4 +140,31 @@ public class DashMenuTest {
         s.canEdit = false;
         T.eq(null, find(DashMenu.build(s), DashMenu.EDIT), "no edit");
     }
+
+    public static void normalReadingsSitInDiagnosticsWithTheLearningProgress() {
+        DashMenu.State s = jeepXp();
+        s.normalProgress = "Learning normal: drive 3 of 5, day 4 of 7";
+        List<DashMenu.Group> gs = DashMenu.build(s);
+        T.eq("Diagnostics", groupOf(gs, DashMenu.NORMAL), "group");
+        T.eq("Normal readings (learning: drive 3 of 5, day 4 of 7)", find(gs, DashMenu.NORMAL).label, "progress beside it");
+        s.normalProgress = null;
+        T.eq("Normal readings", find(DashMenu.build(s), DashMenu.NORMAL).label, "learned");
+        s.porsche = true;
+        s.linked = false;
+        T.ok(find(DashMenu.build(s), DashMenu.NORMAL) != null, "both cars, link or not");
+    }
+
+    public static void scanAllValuesIsForTheJeepOnTheLinkOnly() {
+        DashMenu.State s = jeepXp();
+        List<DashMenu.Group> gs = DashMenu.build(s);
+        T.eq("Diagnostics", groupOf(gs, DashMenu.SCAN), "group");
+        T.eq("Scan all values (engine idling warm, in Park)", find(gs, DashMenu.SCAN).label, "label");
+        s.scanProgress = "Pass 2 of 3: id 78 of ef (50%)";
+        T.eq("Scan all values: Pass 2 of 3: id 78 of ef (50%)", find(DashMenu.build(s), DashMenu.SCAN).label, "while running");
+        s.linked = false;
+        T.eq(null, find(DashMenu.build(s), DashMenu.SCAN), "not without the link");
+        s.linked = true;
+        s.porsche = true;
+        T.eq(null, find(DashMenu.build(s), DashMenu.SCAN), "not on the Porsche");
+    }
 }

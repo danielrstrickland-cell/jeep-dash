@@ -228,6 +228,62 @@ screens, the manifest's new service and receiver stay switched off, and nothing 
 - **Visualizer**: looks change only with the LOOK button; a tap or swipe on the picture does nothing. The boom
   meters look is gone; a saved choice of it becomes Smooth (core `VizTune.CHOICES`).
 
+### Learning alerts (2026-11-25)
+
+The dash learns what normal looks like for each car and says so when a reading drifts away from it, trouble
+code or not (core `NormalReadings`, `WarmIdle`; kept by `NormalStore`, fed by the link service once a second
+whichever screen is in front).
+
+- **What it watches, first version.** Warm idle only: stopped (speed reads 0), 450 to 1200 rpm, coolant at
+  least 180 °F on the Jeep and 80 °C on the Porsche, all of it for 10 s. Jeep: manifold pressure, idle speed,
+  idle air motor steps, both fuel trims, injector time, battery volts, and the front O2 as the share of
+  readings that are rich (over 0.45 V). The O2 is read only every few seconds among the others, far too slowly
+  to count its switching, but a slow random sample still gives the share of time rich fairly; a lean leak pulls
+  it down, a rich fault up. Porsche: idle speed, battery volts, air flow, both fuel trims, injection time, load.
+  Both: the coolant once settled on the move (warm for 5 minutes, 10 mph or more).
+- **Reading list.** It adds engine speed to whatever the screen reads (nothing when the screen reads nothing),
+  road speed and coolant only while the engine speed has been in the idle band in the last 10 s, and the idle
+  values only while stopped and warm, so gauges on the move are not slowed. The coolant on the move is learned
+  from what the screen reads (the dash's coolant gauge), never added for it.
+- **Learning.** Silent until 7 days have passed since its first reading and 5 drives each had at least 30 s of
+  warm idle. Progress shows beside the menu entry: "Normal readings (learning: drive 3 of 5, day 4 of 7)".
+  Each drive's figure is the median of its readings (at least 5; 10 for the O2 share, 20 for the coolant).
+  At the start of the next drive after learning, each reading's normal is frozen: the median of the drives'
+  figures, and their spread (the median distance from it x 1.4826, which matches a standard deviation), so one
+  odd drive barely counts. A reading with fewer than 3 drives keeps learning and freezes once it has them.
+  Frozen means a slow drift is caught rather than taken in.
+- **Flagging.** Outside normal means further from the median than both 3 spreads and the reading's minimum:
+  manifold pressure 3 kPa, idle speed 50 rpm, idle air motor 10 steps, fuel trims 3% (each bank on the
+  Porsche), injector or injection time 0.3 ms, battery 0.3 V, O2 time rich 15 points, air flow 10 lb/h, load 5%,
+  coolant 8 °F. A reading is flagged when two drives in a row that had it were outside on the same side; the
+  drive under way counts once it has its half minute of idle. A drive without the reading neither confirms nor
+  clears; a normal drive between clears.
+- **Notice.** One line where the look shows its status message (only when there is none), in the look's own
+  attention colour: "Idle manifold pressure is higher than usual: 58 kPa now, normally 52", plus "(and 1 more
+  in Normal readings)". Figures follow the unit the dash's gauge for that value is set to (kPa to psi, °F to
+  °C, lb/h to g/s). Tapping it offers Dismiss (until the next drive) or the list.
+- **Normal readings** (Diagnostics): each reading's normal range, latest figure and status; tapping one offers
+  "Accept current as normal" (its latest figure becomes the median, spread kept). "Start learning again" asks
+  first.
+- **Memory.** One text entry per car in the app's own preferences on the tablet ("normal_readings",
+  "normal_readings_p"), tagged with the car so one is never read as the other; saved at most once a minute and
+  when the service closes. A restart in the middle of a drive counts the rest of it as a new drive.
+
+### Scan all values (2026-11-25)
+
+Diagnostics, Jeep only, with the link up: run with the engine idling warm in Park. It asks the engine computer
+for every id of its F4 live-data table, 00 to ef, one at a time, three passes (core `ValueScan`, through
+`PollRunner.scanRead`). Each read is exactly what live data sends for one value: `60 02 00 00 f4 24 00 08 ff`
+then `61 04 00 02 f4 <id> 01`, at the captured dongle timing (fast refresh is set aside for it) and the
+runner's own 1 s timeout. `Protocols.allowedScan` passes only that frame with an id from 00 to ef; f0 to ff
+pick other tables in the engine computer's fast mode (fe drops it to slow speed), so `Protocols.allowed` now
+refuses them in any F4 read too. Live data waits while it runs (the gauges are blank; learning pauses) and
+picks up again after. An id with no answer is written "no answer" and the scan moves on; 24 in a row means the
+key went off and it stops. Progress shows in its window and the status line; Cancel stops it and keeps what was
+read. The CSV (`value-scan-YYYYMMDD-HHMMSS.csv` in Downloads/JeepDash, shared from the window) has one row per id:
+`id,known_as,pass_1,pass_2,pass_3`, the id as `0x18`, what the dash calls it (`map_kpa`, `rpm (high byte)`),
+and each pass's raw answer bytes as sent back (`18 7e`). 720 reads take about three minutes.
+
 ### Timing pulled (2026-11-25, Jeep only)
 
 A gauge, "Timing pulled", 0 to 15 degrees: the stock main spark table's timing for the engine speed and

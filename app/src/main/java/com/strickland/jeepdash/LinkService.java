@@ -21,6 +21,7 @@ import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.media.AudioManager;
 import android.os.Binder;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -35,6 +36,7 @@ import com.strickland.jeepdash.core.Gears;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Motion;
 import com.strickland.jeepdash.core.MisfireCodes;
+import com.strickland.jeepdash.core.NormalReadings;
 import com.strickland.jeepdash.core.Param;
 import com.strickland.jeepdash.core.PauseGate;
 import com.strickland.jeepdash.core.RollingCapture;
@@ -47,6 +49,7 @@ import com.strickland.jeepdash.core.SpeedCorrection;
 import com.strickland.jeepdash.core.SpeedVolume;
 import com.strickland.jeepdash.core.TimingPulled;
 import com.strickland.jeepdash.core.Trace;
+import com.strickland.jeepdash.core.ValueScan;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -149,7 +152,13 @@ public class LinkService extends Service {
     private volatile Set<String> requested = new LinkedHashSet<>();     // what the screen in front asked for
     private volatile Set<String> dashShown = new LinkedHashSet<>();     // the dash's gauges, in front or not
     private FuelUse fuel;                   // the one fuel counter (see FuelStore); fed here, every tick
+    private NormalReadings normal;          // the learning alerts (see NormalStore); fed here once a second
+    private volatile boolean learnNearIdle, learnStoppedWarm;      // what it needs read right now (refreshActive)
     private final TimingPulled timing = new TimingPulled();        // the Jeep's "Timing pulled" gauge
+    private volatile ValueScan scan;        // "Scan all values": the one under way, or the last one
+    private volatile boolean scanOpen;      // a scan is under way: live data waits for it
+    private volatile Uri scanUri;           // where the last scan was saved (null if it could not be)
+    private volatile String scanName, scanCsv;
     private volatile SpeedVolume.Strength volumeStrength = SpeedVolume.Strength.OFF;   // volume follows speed
     // Gear, pull/braking and the 0-60 timer come from the car's readings alone, so they are worked out here and
     // keep going (and reach the drive log) whichever screen is in front. The screen's sensors add to carMotion:
@@ -216,6 +225,8 @@ public class LinkService extends Service {
         Set<String> ids = FuelUse.withInputs(requested, dashShown, Catalog.porsche(), f != null && f.fillStarted());
         ids = Motion.withCarInputs(ids, dashShown);              // gear, pull and 0-60 behind another screen
         ids = TimingPulled.withInputs(ids, dashShown, Catalog.porsche());     // timing pulled, likewise
+        // the learning alerts: engine speed, then road speed and coolant near idle, the idle values at warm idle
+        if (normal != null) ids = NormalReadings.withInputs(ids, Catalog.porsche(), learnNearIdle, learnStoppedWarm);
         active = SpeedVolume.withSpeed(ids, volumeStrength);      // speed is read while volume follows it
         activeDirty = true;
     }
@@ -379,6 +390,96 @@ public class LinkService extends Service {
         else values.remove(TimingPulled.GAUGE);
     }
 
+    // ---------------- learning alerts ----------------
+
+    /**
+     * Ticker thread, once a second: hands the learning alerts this drive and the latest readings, and changes
+     * the read list when it needs road speed and coolant (near idle) or the idle values (stopped and warm).
+     */
+    private void learnNormal(long t) {
+        NormalReadings n = normal;
+        if (n == null || scanOpen) return;          // a scan leaves the gauges blank: nothing to learn meanwhile
+        long wall = System.currentTimeMillis();
+        n.drive(driveStartedMs, wall);
+        n.update(values, t, wall);
+        boolean near = n.nearIdle(t), warm = n.stoppedWarm();
+        if (near != learnNearIdle || warm != learnStoppedWarm) {
+            learnNearIdle = near;
+            learnStoppedWarm = warm;
+            refreshActive();
+        }
+        NormalStore.keep(t);
+    }
+
+    // ---------------- scan all values (Jeep) ----------------
+
+    /** True when the value scan can run: the Jeep, with the dongle linked. */
+    public boolean scanAvailable() { return runner instanceof PollRunner; }
+
+    /** Starts a value scan between two live-data reads; false when it cannot run now. */
+    public boolean startScan() {
+        if (!scanAvailable() || scanOpen) return false;
+        scanUri = null;
+        scanName = null;
+        scanCsv = null;
+        scan = new ValueScan();
+        scanOpen = true;
+        return true;
+    }
+
+    /** Stops the scan under way; what was read is still saved. */
+    public void cancelScan() {
+        ValueScan s = scan;
+        if (s != null) s.cancel();
+    }
+
+    /** The scan under way or the last one (null before the first). */
+    public ValueScan scan() { return scan; }
+
+    /** True while a scan is under way (live data waits). */
+    public boolean scanRunning() { return scanOpen; }
+
+    /** Where the last scan was saved, its file name and its text (for sharing); null until it has ended. */
+    public Uri scanUri() { return scanUri; }
+
+    public String scanName() { return scanName; }
+
+    public String scanCsv() { return scanCsv; }
+
+    /**
+     * Link thread: one read of the scan under way, in place of a live-data read; false when there is none.
+     * Live data picks up again where it left off once the scan has ended.
+     */
+    private boolean scanStep(Poller r) throws IOException {
+        ValueScan s = scan;
+        if (!scanOpen || s == null) return false;
+        int id = s.next();
+        if (id < 0 || !(r instanceof PollRunner)) {
+            endScan(s);
+            return true;
+        }
+        if (s.done() == 0) note("-- value scan: every live-data id, " + ValueScan.PASSES + " passes");
+        s.record(id, ((PollRunner) r).scanRead(id));
+        setStatus(Status.LIVE, "Scanning all values: pass " + s.pass() + " of " + ValueScan.PASSES + ", "
+                + (100 * s.done() / s.total()) + "%");
+        return true;
+    }
+
+    /** The scan has ended (finished, cancelled, or the link went): saves the CSV and lets live data go on. */
+    private void endScan(ValueScan s) {
+        if (!scanOpen) return;
+        s.cancel();                                 // does nothing to a finished scan
+        String csv = s.csv(ValueScan.knownAs(Catalog.all()));
+        String name = "value-scan-" + new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(new java.util.Date()) + ".csv";
+        Uri uri = DriveLogStore.saveText(this, name, csv, "text/comma-separated-values");
+        note("-- value scan ended: " + s.progress() + (uri == null ? "; could not save the file" : "; saved as " + name));
+        scanCsv = csv;
+        scanName = name;
+        scanUri = uri;
+        scanOpen = false;
+        activeDirty = true;
+    }
+
     public int readsPerSecond() { return readsPerSec; }
 
     public LiveValues values() { return values; }
@@ -499,6 +600,7 @@ public class LinkService extends Service {
             note("cannot watch for pairing requests: " + e);
         }
         fuel = FuelStore.get(this);
+        normal = NormalStore.get(this);
         volumeStrength = SpeedVolume.Strength.of(getSharedPreferences("link", MODE_PRIVATE).getString(VOLUME_PREF, null));
         SharedPreferences dash = getSharedPreferences(DashApp.PREFS, MODE_PRIVATE);
         savedGearing = dash.getFloat(GEARING_KEY, 0);
@@ -553,6 +655,7 @@ public class LinkService extends Service {
             ticker.execute(this::closeLog);
             ticker.execute(this::releaseVolume);
             ticker.execute(FuelStore::save);
+            ticker.execute(NormalStore::save);
             ticker.shutdown();
         }
         super.onDestroy();
@@ -999,6 +1102,10 @@ public class LinkService extends Service {
                     r.setActive(active);
                 }
                 doCodes(r);
+                if (scanStep(r)) {
+                    live = true;
+                    continue;
+                }
                 boolean busy = r.poll();
                 live = true;
                 setStatus(Status.LIVE, r.vehicleAnswering() ? "" : KEY_OFF_DETAIL);
@@ -1009,6 +1116,8 @@ public class LinkService extends Service {
             note("link lost: " + e.getMessage());
         } finally {
             if (runner == r) runner = null;
+            ValueScan s2 = scan;
+            if (scanOpen && s2 != null) endScan(s2);     // the link went mid-scan: keep what was read
             CodesJob waiting = codesJob;            // asked just as the link went away
             if (waiting != null) {
                 codesJob = null;
@@ -1068,6 +1177,7 @@ public class LinkService extends Service {
         } else if (driving && !dataLately && t - lastDataMs > LOG_CLOSE_MS) {
             driving = false;
         }
+        learnNormal(t);
         if (dataLately && log == null && t >= logRetryAfterMs) openLog(t);
         if (log != null) {
             if (dataLately) writeRow(t);

@@ -19,7 +19,7 @@ public final class DashMenu {
             SWITCH_LOOK = "switch_look", XP_SCHEME = "xp_scheme", XP_MODE = "xp_mode", JEEP_BACKLIGHT = "jeep_backlight",
             MUSIC_BUTTON = "music_button", VOLUME = "volume", VISUALIZER = "visualizer",
             FUEL = "fuel",
-            CODES = "codes", LOGS = "logs",
+            CODES = "codes", LOGS = "logs", NORMAL = "normal", SCAN = "scan",
             AUTO_START = "auto_start", UPDATE = "update", LISTEN = "listen", TUNE_LOG = "tune_log";
 
     /** What the menu needs to know, filled in by the dash each time it opens. */
@@ -36,6 +36,8 @@ public final class DashMenu {
         public String autoStart;               // the chosen device's name; null when off
         public double speedCorrectionPct;
         public boolean canEdit, snap;
+        public String normalProgress;          // the learning alerts' progress line; null once learned
+        public String scanProgress;            // a value scan under way; null when none
     }
 
     public static final class Entry {
@@ -92,6 +94,11 @@ public final class DashMenu {
         List<Entry> diag = new ArrayList<>();
         if (s.linked && s.codes) diag.add(new Entry(CODES, "Trouble codes (read and clear)"));
         if (s.linked) diag.add(new Entry(TUNE_LOG, "Tune log"));
+        diag.add(new Entry(NORMAL, s.normalProgress == null ? "Normal readings"
+                : "Normal readings (" + s.normalProgress.replaceFirst("^Learning normal: ", "learning: ") + ")"));
+        if (s.linked && !s.porsche)
+            diag.add(new Entry(SCAN, s.scanProgress == null ? "Scan all values (engine idling warm, in Park)"
+                    : "Scan all values: " + s.scanProgress));
         diag.add(new Entry(LOGS, "Drive logs"));
         diag.add(new Entry(LISTEN, "Listen mode (Kenwood stereo Bluetooth)"));
         add(out, "Diagnostics", diag);

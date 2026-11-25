@@ -14,6 +14,7 @@ public interface Theme {
     final class Chrome {
         public LinkService.Status status = LinkService.Status.SEARCHING;
         public String detail = "";
+        public String notice = "";         // a learning alert (see NormalReadings); shown when there is no detail
         public int readsPerSec;
         public String tab = "gauges";      // gauges | viz
         public boolean canEdit;

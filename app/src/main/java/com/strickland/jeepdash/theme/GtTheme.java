@@ -309,6 +309,10 @@ public final class GtTheme implements Theme {
             float ds = Art.fit(s.detail, 15, w - 60, Art.SANS);
             Art.text(c, s.detail, w / 2, Math.max(18, h * 0.035f), ds, ink, Art.SANS, Paint.Align.CENTER);
             buttons.put("status2", new RectF(30, 0, w - 30, Math.max(30, h * 0.05f)));
+        } else if (!s.notice.isEmpty()) {
+            float ds = Art.fit(s.notice, 15, w - 60, Art.SANS);
+            Art.text(c, s.notice, w / 2, Math.max(18, h * 0.035f), ds, WAIT, Art.SANS, Paint.Align.CENTER);
+            buttons.put("notice", new RectF(30, 0, w - 30, Math.max(30, h * 0.05f)));
         }
     }
 

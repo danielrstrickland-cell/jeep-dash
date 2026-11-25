@@ -133,11 +133,32 @@ starts it only after three good reads, goes back to the captured value after two
 miss in ten, leaves it off if readings then return, and always reads and clears codes at the captured value.
 It is a setting in the dongle; nothing extra is sent to the engine computer.
 
+## Jeep line: value scan (2026-11-25)
+
+"Scan all values" sends, for each id from 00 to ef, three passes, exactly the live-data read for one value:
+`60 02 00 00 f4 24 00 08 ff` (to the dongle: 62500 baud) then `61 04 00 02 f4 <id> 01`; the answer is
+`<id> <value>`. F4 is a RAM table and the id is the address in it: the ChryslerScanner firmware builds its
+"whole table" request as the 240 addresses 00 to ef, and treats f0 to ff as table selectors (fe also switches
+the line back to 7812.5 baud). So no Jeep-line read may carry an id from f0 to ff (`Protocols.allowed`), and the
+scan has its own list that passes only the one-id form (`Protocols.allowedScan`). Nothing else is sent apart
+from the Jeep-line set-up above when the dongle is not on that line already.
+
+## Jeep engine computer: stock spark table
+
+The "Timing pulled" gauge compares the timing read over F4 id 2f with the main spark table of the owner's own
+engine computer: part 56041519AE, flash read of 2026-11-24, table at 0x286B, 17 engine-speed rows by 9
+manifold-pressure columns, degrees = raw / 2 (`SparkTable`). Rows: 608, 704, 800, 896, 992, 1196, 1401, 1606,
+1811, 2016, 2413, 2811, 3209, 3606, 4004, 4402, 4800 rpm. Columns: manifold counts (kPa x 2.428) through the
+pressure axis 36, 58, 76, 96, 128, 160, 192, 224, 255 -> 0, 32, 64, ... 224, 255, divided by 32; cells blended
+in both directions. Checked against the logged drive of 2026-11-24 18:44: logged timing minus the table has a
+median of -0.2 degrees, and 61% of 442 warm readings above 900 rpm are within 2 degrees.
+
 ## What the dash may send
 
 Reading: `Protocols.allowed()` is the complete list of what live data may send: the set-up commands above,
-generic mode 01 reads, Jeep-line F4 reads, the stored-code request and the Porsche's measured-value reads.
-`PollRunner` and `KwpRunner` refuse anything else.
+generic mode 01 reads, Jeep-line F4 reads (ids 00 to ef), the stored-code request and the Porsche's
+measured-value reads. `PollRunner` and `KwpRunner` refuse anything else. The value scan's reads must pass
+`Protocols.allowedScan` as well.
 
 Writing: the dash was read-only until 2026-11-22, when the owner asked for clearing codes. That is the one
 write. `Protocols.allowedWrite()` passes exactly the two erase frames in the table above, and only
@@ -262,17 +283,3 @@ Neither engine computer reports fuel use; the dash works it out from values it a
 - Incomplete: while moving (the last speed reading at 1 mph or more, trusted for up to 60 s when readings
   stop), time with no fresh fuel reading is counted. Over a tenth of the moving time and over 10 s, the drive's
   totals go blank and the fill-up estimate is refused for calibration.
-
-## Jeep engine computer: stock spark table
-
-The "Timing pulled" gauge compares the timing read over F4 id 2f with the main spark table of the owner's own
-engine computer: part 56041519AE, flash read of 2026-11-24, table at 0x286B, 17 engine-speed rows by 9
-manifold-pressure columns, degrees = raw / 2 (`SparkTable`). Rows: 608, 704, 800, 896, 992, 1196, 1401, 1606,
-1811, 2016, 2413, 2811, 3209, 3606, 4004, 4402, 4800 rpm. Columns: manifold counts (kPa x 2.428) through the
-pressure axis 36, 58, 76, 96, 128, 160, 192, 224, 255 -> 0, 32, 64, ... 224, 255, divided by 32; cells blended
-in both directions. Checked against the logged drive of 2026-11-24 18:44: logged timing minus the table has a
-median of -0.2 degrees, and 61% of 442 warm readings above 900 rpm are within 2 degrees.
-
-generic mode 01 reads, Jeep-line F4 reads (ids 00 to ef), the stored-code request and the Porsche's
-measured-value reads. `PollRunner` and `KwpRunner` refuse anything else. The value scan's reads must pass
-`Protocols.allowedScan` as well.

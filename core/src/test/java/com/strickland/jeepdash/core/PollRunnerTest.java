@@ -359,4 +359,62 @@ public class PollRunnerTest {
         T.eq(null, r.values.get("spark", 0), "for either value");
         T.ok(!r.runner.vehicleAnswering(), "three such replies count as no answer");
     }
+
+    // ---------------- the value scan ----------------
+
+    public static void scanReadSendsOnlyTheFastSpeedAndTheOneIdRead() throws Exception {
+        Rig r = new Rig("rpm");
+        r.steps(2);
+        r.car.sent.clear();
+        byte[] answer = r.runner.scanRead(0x3c);
+        T.eq(Arrays.asList(Protocols.SCI_FAST, "61 04 00 02 f4 3c 01"), r.car.sent, "exactly what live data sends for one id");
+        T.eq("3c 80", Hex.str(answer), "the raw answer");
+    }
+
+    public static void scanReadSetsTheJeepLineUpFirst() throws Exception {
+        Rig r = new Rig();
+        r.runner.scanRead(0x10);
+        List<String> want = plus(Protocols.STOP_KEEPALIVE, Protocols.SCI_SETUP);
+        want.add(Protocols.SCI_FAST);
+        want.add("61 04 00 02 f4 10 01");
+        T.eq(want, r.car.sent, "line setup, then the read");
+    }
+
+    public static void anUnansweredScanIdIsJustNoAnswer() throws Exception {
+        Rig r = new Rig("rpm");
+        r.steps(2);
+        r.car.engineAnswers = false;
+        for (int i = 0; i < 6; i++) T.eq(null, r.runner.scanRead(0x20 + i), "no answer");
+        T.ok(r.runner.vehicleAnswering(), "a silent id is not the key going off");
+        T.ok(r.values.get("rpm", 0) != null, "and clears nothing");
+    }
+
+    public static void scanReadRefusesAnIdOutsideTheTable() throws Exception {
+        Rig r = new Rig("rpm");
+        r.steps(2);
+        try {
+            r.runner.scanRead(0xfe);
+            T.ok(false, "must refuse fe");
+        } catch (IllegalArgumentException expected) {
+            // refused before anything is sent
+        }
+        for (String c : r.car.sent) T.ok(!c.contains("f4 fe"), "nothing sent for it");
+    }
+
+    public static void aWholeScanSendsNothingButTheLineSetupAndOneIdReads() throws Exception {
+        Rig r = new Rig();
+        ValueScan scan = new ValueScan();
+        for (int id = scan.next(); id >= 0; id = scan.next()) scan.record(id, r.runner.scanRead(id));
+        T.ok(scan.finished() && !scan.cancelled(), "ran to the end");
+        java.util.Set<String> setup = new java.util.HashSet<>(Arrays.asList(Protocols.SCI_SETUP));
+        setup.add(Protocols.STOP_KEEPALIVE);
+        setup.add(Protocols.SCI_FAST);
+        int reads = 0;
+        for (String c : r.car.sent) {
+            boolean read = Protocols.allowedScan(Hex.bytes(c));
+            if (read) reads++;
+            T.ok(read || setup.contains(c), "only line setup and one-id reads: " + c);
+        }
+        T.eq(ValueScan.PASSES * 240, reads, "every id of the table, three times");
+    }
 }

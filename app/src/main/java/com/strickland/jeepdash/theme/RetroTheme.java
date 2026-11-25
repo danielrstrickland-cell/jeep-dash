@@ -334,6 +334,9 @@ public final class RetroTheme implements Theme {
         if (!s.detail.isEmpty()) {
             label(c, s.detail, w / 2, Math.max(18, h * 0.035f), 15, ink, w - 60, Paint.Align.CENTER);
             buttons.put("status2", new RectF(30, 0, w - 30, Math.max(30, h * 0.05f)));
+        } else if (!s.notice.isEmpty()) {
+            label(c, s.notice, w / 2, Math.max(18, h * 0.035f), 15, AMBER, w - 60, Paint.Align.CENTER);
+            buttons.put("notice", new RectF(30, 0, w - 30, Math.max(30, h * 0.05f)));
         }
     }
 

@@ -102,12 +102,15 @@ final class DriveLogStore {
     }
 
     /** Saves a text file next to the drive logs; null on Android 9 and older or on failure. */
-    static Uri saveText(Context c, String name, String text) {
+    static Uri saveText(Context c, String name, String text) { return saveText(c, name, text, "text/plain"); }
+
+    /** The same with its own type ("text/comma-separated-values" for a CSV, as the drive logs have). */
+    static Uri saveText(Context c, String name, String text, String mime) {
         if (Build.VERSION.SDK_INT < 29) return null;
         try {
             ContentValues cv = new ContentValues();
             cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
-            cv.put(MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+            cv.put(MediaStore.MediaColumns.MIME_TYPE, mime);
             cv.put(MediaStore.MediaColumns.RELATIVE_PATH, FOLDER);
             ContentResolver r = c.getContentResolver();
             Uri uri = r.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
@@ -133,6 +136,7 @@ final class DriveLogStore {
 
     static void share(Activity a, Uri uri) { share(a, uri, "Share drive log"); }
 
+    /** Shares a CSV saved here (a drive log or a value scan). */
     static void share(Activity a, Uri uri, String title) {
         Intent i = new Intent(Intent.ACTION_SEND);
         i.setType("text/csv");
