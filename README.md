@@ -25,3 +25,15 @@ The Cruise tune log also records `GPS speed` and `GPS accuracy` from the tablet'
 ## Auto brightness
 
 The XP look's Brightness setting is Auto (default), Always light or Always dark. Auto uses the ambient light sensor: dark after 10 s under 15 lux, light after 10 s over 60 lux. Without a light sensor it uses sunset and sunrise at the tablet's last known GPS position; with neither it leaves the screen as it is.
+
+## Help
+
+**Pause for Jeep Tune.** When the Jeep Tune app is reading the engine computer, Jeep Dash lets go of the dongle so both apps don't fight over it. The dash shows "Paused — Jeep Tune reading". It reconnects by itself when the read ends, or after 90 seconds of silence, so you don't need to do anything.
+
+**Tune log (Diagnostics menu).** Pick one of four profiles: Idle, Cruise, Cold start, or Pull. Follow the on-screen steps, tap Next step as you go, then tap Stop and save. To share the file, tap Send to Claude, which opens the share sheet. Pick Google Drive and the tuning folder.
+
+**Speedometer check.** After a Cruise log, a card shows how far off the speedometer is compared with GPS, along with a suggested correction. The card is for information only. Nothing is written to the Jeep.
+
+**Misfire catcher.** When you read codes and a misfire code is present, the app saves the 30 seconds before and after the event as a CSV file. You don't need to start anything.
+
+**Auto night mode.** In the Brightness setting, choose Auto, Always light, or Always dark. Auto uses the light sensor if the tablet has one. Otherwise it uses sunset time.
