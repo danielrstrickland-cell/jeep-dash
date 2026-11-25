@@ -60,6 +60,7 @@ public class TuneLogActivity extends Activity implements ServiceConnection, Link
     private LogProfile logging;
     private long startedAt;
     private int sinceFlush;
+    private long lastLiveMs = Long.MIN_VALUE / 2;
     private final List<Param> tileParams = new ArrayList<>();
     private final List<TextView> tileValues = new ArrayList<>();
     private TextView clock, counts, stepTitle, stepText, note;
@@ -124,9 +125,27 @@ public class TuneLogActivity extends Activity implements ServiceConnection, Link
             stopAndSave(false, "Could not write the log: " + e.getMessage());
             return;
         }
+        sendLive(v, now);
         clock.setText("Logging " + LogProfile.clock(now - startedAt));
         counts.setText(log.rowCount() + " rows · " + logging.rateText());
         for (int i = 0; i < tileParams.size(); i++) tileValues.get(i).setText(format(tileParams.get(i), v.get(tileParams.get(i).id, now)));
+    }
+
+    /**
+     * Tells Jeep Tune's table viewer where the engine is (rpm and MAP already polled for this log), at most 5 times a
+     * second, only to that package. Nothing is sent to the engine computer.
+     */
+    private void sendLive(LiveValues v, long now) {
+        if (now - lastLiveMs < 200) return;
+        Double rpm = v.get("rpm", now), map = v.get("map_kpa", now);
+        if (rpm == null || map == null) return;
+        lastLiveMs = now;
+        Intent i = new Intent("com.strickland.jeepdash.action.LIVE");
+        i.setPackage("com.strickland.jeeptune");
+        i.putExtra("rpm", rpm.floatValue());
+        i.putExtra("map_kpa", map.floatValue());
+        i.putExtra("t", now);
+        try { sendBroadcast(i); } catch (RuntimeException ignored) { }
     }
 
     private static String format(Param p, Double d) {
