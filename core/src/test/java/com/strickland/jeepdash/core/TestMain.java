@@ -20,6 +20,7 @@ public final class TestMain {
             ReleaseTagTest.class,
             CrashReportTest.class,
             DiagLogTest.class,
+            KenwoodFrameTest.class,
             TombstoneTest.class,
             SpectrumTest.class,
             VizTuneTest.class,
