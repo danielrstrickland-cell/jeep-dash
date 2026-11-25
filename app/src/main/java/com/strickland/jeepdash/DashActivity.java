@@ -492,7 +492,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         holoState.mode = q;
         holoState.fx = HoloEffects.of(q, prefs.getBoolean(HoloSettingsDialog.EFFECTS, true) && !paused, feed.calm());
         feed.setStrength(prefs.getFloat(HoloSettingsDialog.MOTION, 0.35f));
-        feed.setCalm(prefs.getBoolean(HoloSettingsDialog.CALM, true), () -> runOnUiThread(this::applyQuality));
+        feed.setCalm(prefs.getBoolean(HoloSettingsDialog.CALM, true), () -> ui.post(this::applyQuality));
         if (!holoOn) return;
         loop.setMode(q);
         if (scene != null) {

@@ -36,7 +36,7 @@ public final class MotionFeed implements SensorEventListener, LocationListener {
     private final HoloEffects.Calm calm = new HoloEffects.Calm();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable tick = this::tick;
-    private final float[] rot = new float[9], remapped = new float[9], angles = new float[3];
+    private final float[] rot = new float[9];
     private SensorManager sensors;
     private LocationManager locations;
     private Display display;
@@ -161,16 +161,9 @@ public final class MotionFeed implements SensorEventListener, LocationListener {
             }
         } else if ((type == Sensor.TYPE_GAME_ROTATION_VECTOR || type == Sensor.TYPE_ROTATION_VECTOR) && e.values.length >= 3) {
             SensorManager.getRotationMatrixFromVector(rot, e.values);
-            int x = SensorManager.AXIS_X, y = SensorManager.AXIS_Y;
-            switch (rotation()) {
-                case 1: x = SensorManager.AXIS_Y; y = SensorManager.AXIS_MINUS_X; break;
-                case 2: x = SensorManager.AXIS_MINUS_X; y = SensorManager.AXIS_MINUS_Y; break;
-                case 3: x = SensorManager.AXIS_MINUS_Y; y = SensorManager.AXIS_X; break;
-                default: break;
-            }
-            SensorManager.remapCoordinateSystem(rot, x, y, remapped);
-            SensorManager.getOrientation(remapped, angles);
-            parallax.sample(-Math.toDegrees(angles[0]), Math.toDegrees(angles[1]), t);
+            // which way the screen faces: steady while the tablet stands up (as mounted or held), any rotation
+            double nx = rot[2], ny = rot[5], nz = rot[8];
+            parallax.sample(Math.toDegrees(Math.atan2(nx, ny)), Math.toDegrees(Math.asin(Math.max(-1, Math.min(1, nz)))), t);
         }
     }
 

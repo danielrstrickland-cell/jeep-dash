@@ -55,7 +55,9 @@ final class TabletHealth {
         if (running) return;
         running = true;
         try {
-            read(context.registerReceiver(battery, new IntentFilter(Intent.ACTION_BATTERY_CHANGED)));
+            IntentFilter f = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            read(Build.VERSION.SDK_INT >= 33 ? context.registerReceiver(battery, f, Context.RECEIVER_NOT_EXPORTED)
+                    : context.registerReceiver(battery, f));
         } catch (RuntimeException ignored) {
             // no battery broadcast: the battery gauges stay blank
         }

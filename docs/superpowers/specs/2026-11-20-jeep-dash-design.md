@@ -308,6 +308,102 @@ timing, so it cannot be used. Its inputs (rpm, manifold
 pressure, timing, coolant) are read only while the gauge is on the dash's layout or the screen in front, and it
 is worked out in the link service like fuel. It is also a column of the drive log.
 
+### Holo look and the 3D truck (batch-3d)
+
+The approved "Holo" mockup (`hud-mockup.png`, Jarvis-style hologram) as a fifth Jeep look. Jeep only: the
+Porsche profile does not offer it, and its catalog is unchanged.
+
+**Engine.** Google Filament 1.69.5 (`filament-android` and `gltfio-android` from Maven Central, pinned; the
+local compile check uses the same version's AAR classes from the google/filament GitHub release). Real-time PBR
+with image-based light, so paint, chrome and glass read like the offline renders; gltfio reads the owner's GLB
+with its base colour, normal, metal/roughness, AO and emissive maps (mipmapped) and the KHR material extensions
+the stand-in uses (clearcoat, transmission, specular, emissive strength). Only arm64-v8a and armeabi-v7a native
+code is packed, compressed: the APK went from 0.29 MB to 8.6 MB. Anisotropic filtering is not reachable: gltfio's
+Java API never hands out the textures it makes. Kotlin-only `filament-utils` is not used; the IBL KTX is read
+by core `Ktx1`. Lighting: `tools/make_ibl.py` draws a dark studio (overhead and side panels, a cyan horizon) from
+numbers and runs it through `cmgen` (128 px cube map, 0.5 MB); a key light from the upper front left; two cyan
+spots behind the truck give the rim; colour grading adds a touch of cyan. Ultra's shadow falls on an invisible
+floor whose material (`tools/materials/shadow_catcher.mat`, compiled with the same version's `matc`) shows only
+the shadow.
+
+**The truck file.** The owner's detailed model comes from a body mesh licensed for his own use, so it is never in
+the repo or the APK: "Load truck model" (Storage Access Framework) copies a .glb into app-private storage after
+`Glb.check`; an optional lite model is for Power saver; one file imported is used in every mode. Importing the
+full model also makes a 2K-texture copy (`GlbImages`: pictures over 2048 px halved, the binary part re-laid and
+the JSON rewritten) that High shows. Without any, the bundled stand-in `zj-standin.glb` (built from scratch,
+fine to publish). Large files are read into a direct buffer without a Java-heap copy; textures decode in the
+background (gltfio async) and parts appear as they are ready. `TruckRig` finds the moving parts by name, any case:
+"hood"/"bonnet", "liftgate"/"gate"/"tailgate"/"hatch", and "wheel"/"tire"/"tyre" with FL/FR/RL/RR (either order)
+or front/rear plus left/right; a hood or gate must be at least 40% of the truck's width (so the stand-in's hood
+decals and gate handle are not taken for one), smaller same-named parts on it move with it, and parts under a
+matched part are left to ride along. Without four named wheels, wheel-like parts (also hub, rim, tread, rotor)
+low at the four corners are grouped by position. Front comes from the wheel names, else headlight/grille/hood
+parts against tail/gate/exhaust ones, else glTF's +Z. A hood hinges on its pivot when that sits at its back
+edge, else at that edge; a liftgate at its top. `TruckPose` gives the matrices: root placed and turned, body
+rolled about a roll centre about 0.5 m up, wheels kept level under the rolling body while they spin (v / r) and
+the front ones steer (bicycle model from the turn rate), hood and gate turned about their hinges.
+
+**Motion.** `TruckMotion` from whatever data there is: when `MountDetector` says the tablet is mounted (standing
+up, not flat; gravity steady within 12 degrees and RMS jostle under 2 m/s squared for 5 s; facing the driver, so
+forward is into the screen), lateral and fore-aft G come from the accelerometer against the learned gravity
+(relearned only near rest, so long turns are not absorbed). Otherwise `GpsTurn`: lateral G = speed x heading
+rate (heading ignored below 2.5 m/s, impossible jumps skipped), fore-aft from the car's own pull value or GPS
+speed change. The two blend (0.5 per second toward the sensor, 1.5 per second back); the result is clamped to
+0.8 g, slew-limited to 3 g/s and smoothed; single knocks of the loose tablet are skipped, several in a row end the
+mount. `BodyMotion`: a spring and damper (1.3 Hz, damping 0.5, about 16% overshoot) from 6 deg/g roll and 3 deg/g
+pitch (realistic) to 20 and 11 (exaggerated), capped at 14 and 9 degrees. The realistic figures are also the Body
+roll and Body pitch readings. Tap the truck: it turns once round and settles; hold: the hood (else the liftgate)
+opens, and closes on the next hold or when the truck drives off.
+
+**Layers and depth.** Panels stay ordinary gauges (moved, resized, any reading, hidden, saved like the other
+looks; Holo panels may be as small as 40 dp). Each has a depth (-2..2, saved as a 12th layout field only when not
+0): behind the truck they are drawn by `HoloBackView` under the Filament `TextureView`, level or in front by
+`DashView` over it, so they pass behind and in front of the truck correctly. `HoloFace.project` floats each panel
+to its depth, turns side panels up to 16 degrees in toward the viewer and slides the layers with the parallax
+(flat while editing, so the edit marks match). Parallax (`Parallax`) comes from the game rotation vector (else
+the tablet's tilt): the turn away from a 5 s average, halved, smoothed (0.4 s) and clamped to 3 degrees, cut to
+15% while mounted or moving; the 3D camera orbits by the same angles and `HoloFraming` keeps the 2D platform
+rings under the 3D truck. The arcs (rpm left, speed right) are gauge styles whose ring centres sit outside their
+boxes toward the truck; the gear hexagon, a big readout and a ring are styles too. Two-reading panels (fuel trim
+L/S, timing/pulled, roll/pitch) read their partner too.
+
+**Hologram effects.** Moving scanlines, a faint edge glow and colour fringe on panel borders, a low flicker, an
+arc sweep, slowly turning segmented rings (their near halves pass in front of the truck), an emitter disc with a
+light cone, and a soft bloom: the bright lines again at half (and on Ultra a quarter) resolution, blurred by the
+GPU (RenderEffect, Android 12+) and added on top. Panels and menus materialize (stretch from a line, then a
+scanline wipe, 250 ms) and dematerialize; menu rows unfold one after another. Figures glide (the needle tween).
+
+**Quality mode** (`QualityMode`, replacing an earlier Full/Lite/Off): Ultra 30 fps, 1.4x render scale, 4x
+MSAA, full textures, soft shadow (DPCF) on the projector base, SSAO, multi-pass bloom; High (default) 60 fps,
+native, 4x MSAA, 2K textures, one bloom pass, 30 fps when nothing moves or changes; Power saver 30 fps (12 when
+still), 0.75x, no MSAA, bloom or fringe, fewer scanlines, the lite model. "Hologram effects" off gives a clean
+look whatever the mode; "Calm while moving" (on from 5 mph, off below 3) drops flicker, sweeps and the
+materialize show. One frame clock (`HoloLoop`, `FramePacer`) paces the 3D view and the 2D layers together,
+never over 60 a second (window refresh rate and Surface frame rate set to 60 too), and stops when the face is not
+on screen; the 3D engine is freed when another look is chosen.
+
+**Tablet heat and battery** (`TabletWatch`, run by the link service behind every screen, layout or not):
+battery %, charging and temperature (battery broadcast), charge current where reported, thermal status
+(listener) and headroom (API 30+, at or over 1.0 counts as moderate). Readings: Tablet temp (degF, degC by
+choice), Tablet battery, Tablet heat (None..Critical), Tablet current; all in the drive log. Heat protection
+(`HeatGuard`, on by default): moderate takes Ultra to High, severe any mode to Power saver, critical pauses the
+3D view (plain 2D gauges); the owner's mode returns after two minutes at none/light, so it does not flap. Alerts:
+45 degC warm, 50 degC "Tablet overheating, shade or cool it", 15% battery while not charging, each clearing a
+little below its mark; shown on the dash (toast and the notice line) or as a notification when the dash is not
+in front. A heat icon shows in the top-left corner from moderate; tapping it gives temperature, battery and
+heat status.
+
+**Tests** (core): spring-damper and body roll/pitch, mount detection (steady, hand-held, flat, knock, picked
+up), screen axes, GPS turn rate and fore-aft, the blend, clamp and slew, wheel spin and steer, rig matching (the
+owner's names, the stand-in by position, nothing named), posing, framing and ring projection, parallax, open
+and close timing, quality modes and model choice, frame pacing at 60/90/120 Hz, heat protection and restore,
+the tablet watch with no tablet gauge on the layout, alerts, the default layout against the mockup, depth
+saving, KTX and GLB reading, the 2K copy, JSON.
+
+**Not yet:** the second 3D face (the truck down a night trail with its headlights, the trail following real
+turns) waits for its mockup; `Stage`, `SceneHost`, `TruckModel`, `TruckMotion` and `HoloLoop` are built for it to
+reuse.
+
 ## Open items
 
 - **Map more Jeep values** (Daniel's help needed later): another capture of the GearWrench app showing its
@@ -316,6 +412,9 @@ is worked out in the link service like fuel. It is also a column of the drive lo
 - **Spotify capture** on this tablet is unverified until the Phase 2 spike.
 - Generic OBD2 path verified from the iPhone capture only; the tablet test exercised SCI. The next
   Link Test run should include Generic RPM.
+- **Holo look on the tablet** (batch-3d): only compile-checked. The 3D view's light levels, the rim, the camera
+  framing against the mockup, Ultra's shadow, frame rates at each Quality mode, heat and battery readings on the
+  TB361FU, and mount detection in the Jeep all need a look on the tablet.
 
 ## Left to the builder
 
