@@ -84,4 +84,14 @@ public class VizTuneTest {
         T.ok(!has(VizTune.GLOBAL, "gain"), "effects are not per-look knobs");
         T.ok(VizTune.seconds("blend") && !VizTune.seconds("crt"), "blend time reads in seconds");
     }
+
+    public static void qualityIsOneOfThreeChoices() {
+        VizTune t = new VizTune();
+        T.eq(VizTune.BALANCED, Math.round(t.get(VizTune.GLOBAL, "quality")), "balanced at 60 to start");
+        t.set(VizTune.GLOBAL, "quality", 0.3f);
+        T.near(0, t.get(VizTune.GLOBAL, "quality"), 1e-6, "snaps to Max quality");
+        T.near(1, VizTune.detail(VizTune.MAX_QUALITY), 1e-6, "full detail at 30 fps");
+        T.ok(VizTune.detail(VizTune.SMOOTH_90) < VizTune.detail(VizTune.BALANCED), "less detail at 90");
+        T.ok(!t.on(VizTune.GLOBAL, "fps"), "the FPS counter starts hidden");
+    }
 }

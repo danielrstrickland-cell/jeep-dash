@@ -133,7 +133,7 @@ public class VisualizerView extends View {
         }
     }
 
-    /** Finds the screen's fastest mode and a 60 Hz one at the current size, for the "Cap at 60 fps" switch. */
+    /** Finds the screen's fastest mode and a 60 Hz one at the current size, for the Quality choice. */
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
@@ -151,7 +151,8 @@ public class VisualizerView extends View {
     }
 
     private void applyMode() {
-        int want = painter.tune.on(VizTune.GLOBAL, "fps60") ? sixtyMode : fastMode;
+        boolean fast = Math.round(painter.tune.get(VizTune.GLOBAL, "quality")) == VizTune.SMOOTH_90;
+        int want = fast ? fastMode : sixtyMode;
         if (want == modeShown || want == 0 || !(getContext() instanceof Activity)) return;
         Window win = ((Activity) getContext()).getWindow();
         WindowManager.LayoutParams lp = win.getAttributes();
@@ -180,6 +181,7 @@ public class VisualizerView extends View {
         if (startNs == 0) startNs = now;
         float dt = lastNs == 0 ? 0.016f : Math.min(0.1f, (now - lastNs) / 1e9f);
         lastNs = now;
+        if (dt > 0) painter.fps += (1 / dt - painter.fps) * Math.min(1, dt * 2);
         applyMode();
         Spectrum s = spectrum;
         if (s != null) {

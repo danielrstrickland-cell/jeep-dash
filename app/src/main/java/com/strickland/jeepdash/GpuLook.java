@@ -11,8 +11,9 @@ import android.os.Build;
 import com.strickland.jeepdash.core.VizTune;
 
 /**
- * A look drawn entirely by the graphics chip from one shader. It is drawn at a lower resolution ("3D detail")
- * and scaled up, and that resolution drops by itself when frames run slow and comes back when there is room,
+ * A look drawn entirely by the graphics chip from one shader. It is drawn at the resolution the Quality choice
+ * sets (full, 85% or 60%) and scaled up; at Max quality the shader runs every other frame (30 a second) so it
+ * has twice the time per picture, and that resolution drops by itself when frames run slow and comes back when there is room,
  * so the screen stays smooth. Every shader gets size and the colour profile as c0 (low), c1 (middle), c2
  * (high). Android 13 and up.
  */
@@ -30,6 +31,7 @@ abstract class GpuLook implements VizPainter.Extra {
     private final RenderNode node;
     private final Paint layer = new Paint(), fill = new Paint();
     private float auto = 1, slowFor, fastFor;
+    private boolean skip;
 
     GpuLook(String name, String source) {
         shader = new RuntimeShader(COMMON + source);
@@ -43,8 +45,15 @@ abstract class GpuLook implements VizPainter.Extra {
 
     @Override
     public final void draw(Canvas c, int w, int h, float dt, float seconds, VizPainter p) {
-        float want = p.tune.get(VizTune.GLOBAL, "res");
-        adapt(dt, want, p.tune.on(VizTune.GLOBAL, "fps60"));
+        int quality = Math.round(p.tune.get(VizTune.GLOBAL, "quality"));
+        float want = VizTune.detail(quality);
+        adapt(dt, want, quality != VizTune.SMOOTH_90);
+        skip = quality == VizTune.MAX_QUALITY && !skip;               // Max quality: a new picture every other frame
+        if (skip && node.hasDisplayList()) {
+            uniforms(p, node.getWidth(), node.getHeight(), dt, seconds); // the look still moves on in time
+            show(c, w, h);
+            return;
+        }
         float scale = Math.min(want, auto);
         int lw = Math.max(64, Math.round(w * scale)), lh = Math.max(64, Math.round(h * scale));
         shader.setFloatUniform("size", lw, lh);
@@ -60,8 +69,13 @@ abstract class GpuLook implements VizPainter.Extra {
         } finally {
             node.endRecording();
         }
+        show(c, w, h);
+    }
+
+    /** Draws the last picture, stretched to the screen. */
+    private void show(Canvas c, int w, int h) {
         int saved = c.save();
-        c.scale(w / (float) lw, h / (float) lh);
+        c.scale(w / (float) node.getWidth(), h / (float) node.getHeight());
         c.drawRenderNode(node);
         c.restoreToCount(saved);
     }

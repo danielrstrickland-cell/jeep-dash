@@ -45,6 +45,7 @@ public final class VizPainter {
     /** The graphics-chip looks, by look number; null where the device cannot run them (smooth bars instead). */
     public final Extra[] gpu = new Extra[10];
     public float sloshX, sloshY;       // the G-meter's push, from VizMotion
+    public float fps = 60;             // frames a second, smoothed, for the optional counter
     public Double speed;                 // mph from the Jeep, null when not connected
 
     // What to draw; the view fills these in before every frame.
@@ -67,7 +68,7 @@ public final class VizPainter {
     private int xpBody, xpInk, xpMuted, xpTitle0, xpTitle1, xpEdge, xpLine, xpTrack, xpFill, xpTabOn, xpTabOff,
             xpButtonFill, xpButtonEdge;
     public boolean music, musicOpen;     // the music button (set on the dash's menu) and its window
-    private final RectF[] rows = new RectF[8];
+    private final RectF[] rows = new RectF[12];
     private float trackLeft, trackRight;
 
     // the hidden tune menu (hold TUNE): tabs Look, Colors, Effects, Presets
@@ -296,6 +297,8 @@ public final class VizPainter {
         float u = h / 800f;
         theme(tune.on(VizTune.GLOBAL, "dark"));
         if (message != null) text(c, message, w / 2f, h - 30 * u, 26 * u, 0xFFFFFFFF, Paint.Align.CENTER);
+        if (tune.on(VizTune.GLOBAL, "fps"))                          // tiny and faint, bottom right
+            text(c, Math.round(fps) + " fps", w - 12 * u, h - 10 * u, 14 * u, 0x77FFFFFF, Paint.Align.RIGHT);
         if (hidden) {
             menuButton.setEmpty();
             return;
@@ -624,6 +627,20 @@ public final class VizPainter {
                 }
                 continue;
             }
+            if (k.choices != null) {                                      // pick one: a row of segments
+                int n = k.choices.length, on = Math.round(tune.get(t, k.id) - k.min);
+                float sw = (right - trackLeft) / n;
+                for (int j = 0; j < n; j++) {
+                    RectF seg = set(trackLeft + j * sw + 3 * u, mid - 21 * u, trackLeft + (j + 1) * sw - 3 * u, mid + 21 * u);
+                    fill(j == on ? xpFill : xpButtonFill);
+                    c.drawRoundRect(seg, 5 * u, 5 * u, paint);
+                    stroke(j == on ? xpFill : xpButtonEdge, 1.5f * u);
+                    c.drawRoundRect(seg, 5 * u, 5 * u, paint);
+                    text(c, k.choices[j], (trackLeft + (j + 0.5f) * sw), mid + 6 * u, 16 * u,
+                            j == on ? 0xFFFFFFFF : xpInk, Paint.Align.CENTER);
+                }
+                continue;
+            }
             float v = tune.get(t, k.id), knob = trackLeft + (trackRight - trackLeft) * tune.at(t, k.id);
             track(c, trackLeft, trackRight, knob, mid, u);
             String shows = VizTune.seconds(k.id) ? Math.round(v * 100) / 100f + " s"
@@ -703,7 +720,13 @@ public final class VizPainter {
 
     /** A finger at x on a slider row moves its knob there. */
     public void dragRow(int row, float x) {
-        tune.setAt(target(), VizTune.knobs(target())[row].id, (x - trackLeft) / (trackRight - trackLeft));
+        VizTune.Knob k = VizTune.knobs(target())[row];
+        if (k.choices != null) {                                      // the segment under the finger
+            float sw = (rows[row].right - trackLeft) / k.choices.length;
+            if (x >= trackLeft) tune.set(target(), k.id, k.min + Math.min(k.choices.length - 1, (int) ((x - trackLeft) / sw)));
+            return;
+        }
+        tune.setAt(target(), k.id, (x - trackLeft) / (trackRight - trackLeft));
     }
 
     public void flipRow(int row) {

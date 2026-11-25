@@ -10,12 +10,19 @@ public final class VizTune {
         public final String id, label;
         public final float min, max, def;
         public final boolean toggle;
+        /** For a pick-one knob: the name of each whole-number value from min up; null for sliders and switches. */
+        public final String[] choices;
 
         Knob(String id, String label, float min, float max, float def) {
             this(id, label, min, max, def, false);
         }
 
         Knob(String id, String label, float min, float max, float def, boolean toggle) {
+            this(id, label, min, max, def, toggle, null);
+        }
+
+        Knob(String id, String label, float min, float max, float def, boolean toggle, String[] choices) {
+            this.choices = choices;
             this.id = id;
             this.label = label;
             this.min = min;
@@ -38,6 +45,13 @@ public final class VizTune {
      * so it saves and loads with the looks' settings.
      */
     public static final int GLOBAL = 99;
+    /** The Quality choices: sharpest at 30 fps, balanced at 60, smoothest at the screen's 90. */
+    public static final String[] QUALITY = {"Max \u00B7 30", "Balanced \u00B7 60", "Smooth \u00B7 90"};
+    public static final int MAX_QUALITY = 0, BALANCED = 1, SMOOTH_90 = 2;
+    private static final float[] DETAIL = {1f, 0.85f, 0.6f};
+
+    /** How much of full resolution the 3D looks draw at, for a Quality choice. */
+    public static float detail(int quality) { return DETAIL[Math.max(0, Math.min(2, quality))]; }
     private static final Knob[] EFFECTS = {
             slider("bloom", "Glow (bloom)", 0, 1.5f, 0.7f),
             slider("crt", "CRT filter", 0, 1, 0),
@@ -45,8 +59,8 @@ public final class VizTune {
             slider("storm", "Particle storm", 0, 1, 0.4f),
             slider("delay", "Speaker delay", 0, 0.5f, 0.2f),
             slider("tilt", "G-meter tilt", 0, 2, 1),
-            slider("res", "3D detail", 0.35f, 1, 0.85f),
-            toggle("fps60", "Cap at 60 fps"),
+            new Knob("quality", "Quality", 0, 2, BALANCED, false, QUALITY),
+            toggleOff("fps", "Show FPS"),
             toggle("autohide", "Fade menu button"),
             toggleOff("dark", "Dark menus"),
     };
@@ -126,6 +140,7 @@ public final class VizTune {
         Knob k = knob(look, id);
         if (k == null || Float.isNaN(v)) return;
         if (k.toggle) v = v >= 0.5f ? 1 : 0;
+        if (k.choices != null) v = Math.round(v);
         values.put(look + "." + id, Math.max(k.min, Math.min(k.max, v)));
     }
 
