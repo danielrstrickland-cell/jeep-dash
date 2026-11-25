@@ -45,8 +45,8 @@ public final class VizTune {
             slider("storm", "Particle storm", 0, 1, 0.4f),
             slider("delay", "Speaker delay", 0, 0.5f, 0.2f),
             slider("tilt", "G-meter tilt", 0, 2, 1),
-            slider("res", "3D detail", 0.35f, 1, 0.6f),
-            toggleOff("fps60", "Cap at 60 fps"),
+            slider("res", "3D detail", 0.35f, 1, 0.85f),
+            toggle("fps60", "Cap at 60 fps"),
             toggle("autohide", "Fade menu button"),
             toggleOff("dark", "Dark menus"),
     };

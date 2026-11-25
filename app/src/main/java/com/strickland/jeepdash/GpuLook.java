@@ -44,7 +44,7 @@ abstract class GpuLook implements VizPainter.Extra {
     @Override
     public final void draw(Canvas c, int w, int h, float dt, float seconds, VizPainter p) {
         float want = p.tune.get(VizTune.GLOBAL, "res");
-        adapt(dt, want);
+        adapt(dt, want, p.tune.on(VizTune.GLOBAL, "fps60"));
         float scale = Math.min(want, auto);
         int lw = Math.max(64, Math.round(w * scale)), lh = Math.max(64, Math.round(h * scale));
         shader.setFloatUniform("size", lw, lh);
@@ -66,11 +66,16 @@ abstract class GpuLook implements VizPainter.Extra {
         c.restoreToCount(saved);
     }
 
-    private void adapt(float dt, float want) {
-        if (dt > 1 / 50f) {
+    /**
+     * Lowers the drawing size when frames run slow and raises it again once there is room, judged against the
+     * frame rate in use (60 when capped, else the screen's fastest).
+     */
+    private void adapt(float dt, float want, boolean capped) {
+        float frame = capped ? 1 / 60f : 1 / 90f;
+        if (dt > frame * 1.3f) {
             slowFor += dt;
             fastFor = 0;
-        } else if (dt < 1 / 75f) {
+        } else if (dt < frame * 1.1f) {
             fastFor += dt;
             slowFor = 0;
         }
