@@ -48,10 +48,13 @@ final class GpuFerro extends GpuLook {
             + "    float level = 0.0;\n"
             + "    for (int i = 0; i < 16; i++) if (abs(float(i) - k) < 0.5) level = lv[i];\n"
             + "    float side = abs(s - idx) * 2.0;\n"                                  // 0 at the spike's middle
-            + "    float tip = radius * 0.92 + level * radius * 1.15 * spikes * (1.0 + 0.5 * beat);\n"
+            + "    float tip = radius * 0.92 + level * radius * 1.4 * spikes * (1.0 + 0.5 * beat);\n"
             + "    float edge = radius * 0.92 + (tip - radius * 0.92) * pow(max(0.0, 1.0 - side), 1.7)\n"
             + "        + radius * 0.02 * sin(time * 3.1 + idx * 1.7);\n"
-            + "    h = max(h, (edge - r) * 1.6);\n"
+            // a spike is a cone rising out of the body: it starts on the dome at 70% of the radius and runs
+            // straight out to its tip, so the body stays round and only the spikes stand out
+            + "    float r0 = radius * 0.7;\n"
+            + "    if (r > r0) h = max(h, radius * 0.714 * (edge - r) / max(edge - r0, 1e-4));\n"
             // small spikes on the face: a hex pattern that stands up on the bass
             + "    float2 g = d / (radius * 0.18);\n"
             + "    float2 hx = float2(g.x + g.y * 0.57735, g.y * 1.1547);\n"
