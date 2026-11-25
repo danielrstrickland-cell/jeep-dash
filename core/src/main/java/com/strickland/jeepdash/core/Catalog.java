@@ -86,6 +86,8 @@ public final class Catalog {
         add(Param.tablet("mpg_avg", "MPG this drive", "mpg", 0, 40));
         add(Param.tablet("fuel_used", "Fuel used this drive", "gal", 0, 10));
         add(Param.tablet("fuel_gph", "Fuel flow", "gal/h", 0, 30));
+        // The stock spark table's timing minus the actual timing (see TimingPulled); blank where it means nothing.
+        add(Param.tablet(TimingPulled.GAUGE, "Timing pulled", "°", 0, 15));
     }
 
     // Which car the app is set up for. Chosen once in SETUP and applied when the app starts, so every screen

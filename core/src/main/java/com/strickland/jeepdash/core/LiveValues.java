@@ -43,6 +43,12 @@ public final class LiveValues {
         return e == null ? null : (long) e[1];
     }
 
+    /** Takes one value off the screen at once (a worked-out value that has stopped meaning anything). */
+    public void remove(String id) {
+        latest.remove(id);
+        latest.remove(RAW + id);
+    }
+
     /** Gives one value its own stale time (slow values read only every few seconds). */
     public void setStaleMs(String id, long ms) { staleMs.put(id, ms); }
 

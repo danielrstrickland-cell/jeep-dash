@@ -262,3 +262,17 @@ Neither engine computer reports fuel use; the dash works it out from values it a
 - Incomplete: while moving (the last speed reading at 1 mph or more, trusted for up to 60 s when readings
   stop), time with no fresh fuel reading is counted. Over a tenth of the moving time and over 10 s, the drive's
   totals go blank and the fill-up estimate is refused for calibration.
+
+## Jeep engine computer: stock spark table
+
+The "Timing pulled" gauge compares the timing read over F4 id 2f with the main spark table of the owner's own
+engine computer: part 56041519AE, flash read of 2026-11-24, table at 0x286B, 17 engine-speed rows by 9
+manifold-pressure columns, degrees = raw / 2 (`SparkTable`). Rows: 608, 704, 800, 896, 992, 1196, 1401, 1606,
+1811, 2016, 2413, 2811, 3209, 3606, 4004, 4402, 4800 rpm. Columns: manifold counts (kPa x 2.428) through the
+pressure axis 36, 58, 76, 96, 128, 160, 192, 224, 255 -> 0, 32, 64, ... 224, 255, divided by 32; cells blended
+in both directions. Checked against the logged drive of 2026-11-24 18:44: logged timing minus the table has a
+median of -0.2 degrees, and 61% of 442 warm readings above 900 rpm are within 2 degrees.
+
+generic mode 01 reads, Jeep-line F4 reads (ids 00 to ef), the stored-code request and the Porsche's
+measured-value reads. `PollRunner` and `KwpRunner` refuse anything else. The value scan's reads must pass
+`Protocols.allowedScan` as well.

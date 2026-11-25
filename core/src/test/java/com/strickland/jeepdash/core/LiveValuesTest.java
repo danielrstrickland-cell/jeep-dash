@@ -46,4 +46,12 @@ public class LiveValuesTest {
         v.put("speed", 30, 1234);
         T.eq(1234L, v.timeOf("speed"), "the time it was put");
     }
+
+    public static void aWorkedOutValueCanGoBlankAtOnce() {
+        LiveValues v = new LiveValues();
+        v.put("spark_pulled", 3, 1000);
+        v.remove("spark_pulled");
+        T.eq(null, v.get("spark_pulled", 1000), "blank straight away, not 3 s later");
+        T.eq(null, v.timeOf("spark_pulled"), "no time either");
+    }
 }

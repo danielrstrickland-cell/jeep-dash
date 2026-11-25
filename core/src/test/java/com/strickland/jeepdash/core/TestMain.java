@@ -29,6 +29,7 @@ public final class TestMain {
             UnitsTest.class,
             NightHoursTest.class,
             FuelUseTest.class,
+            TimingPulledTest.class,
             NowPlayingTest.class,
             AutoStartTest.class,
             SpeedVolumeTest.class,

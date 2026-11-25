@@ -45,6 +45,7 @@ import com.strickland.jeepdash.core.PollScheduler;
 import com.strickland.jeepdash.core.SciCodes;
 import com.strickland.jeepdash.core.SpeedCorrection;
 import com.strickland.jeepdash.core.SpeedVolume;
+import com.strickland.jeepdash.core.TimingPulled;
 import com.strickland.jeepdash.core.Trace;
 
 import java.io.IOException;
@@ -148,6 +149,7 @@ public class LinkService extends Service {
     private volatile Set<String> requested = new LinkedHashSet<>();     // what the screen in front asked for
     private volatile Set<String> dashShown = new LinkedHashSet<>();     // the dash's gauges, in front or not
     private FuelUse fuel;                   // the one fuel counter (see FuelStore); fed here, every tick
+    private final TimingPulled timing = new TimingPulled();        // the Jeep's "Timing pulled" gauge
     private volatile SpeedVolume.Strength volumeStrength = SpeedVolume.Strength.OFF;   // volume follows speed
     // Gear, pull/braking and the 0-60 timer come from the car's readings alone, so they are worked out here and
     // keep going (and reach the drive log) whichever screen is in front. The screen's sensors add to carMotion:
@@ -213,6 +215,7 @@ public class LinkService extends Service {
         FuelUse f = fuel;
         Set<String> ids = FuelUse.withInputs(requested, dashShown, Catalog.porsche(), f != null && f.fillStarted());
         ids = Motion.withCarInputs(ids, dashShown);              // gear, pull and 0-60 behind another screen
+        ids = TimingPulled.withInputs(ids, dashShown, Catalog.porsche());     // timing pulled, likewise
         active = SpeedVolume.withSpeed(ids, volumeStrength);      // speed is read while volume follows it
         activeDirty = true;
     }
@@ -364,6 +367,17 @@ public class LinkService extends Service {
     }
 
     private void putIf(String id, Double v, long now) { if (v != null) values.put(id, v, now); }
+
+    // ---------------- timing pulled (Jeep) ----------------
+
+    /** Ticker thread: while the gauge is on screen or on the dash, works it out; blank at once when it means nothing. */
+    private void workOutTiming() {
+        if (Catalog.porsche() || !(TimingPulled.needsInputs(requested) || TimingPulled.needsInputs(dashShown))) return;
+        long now = now();
+        Double pulled = timing.update(values, now);
+        if (pulled != null) values.put(TimingPulled.GAUGE, pulled, now);
+        else values.remove(TimingPulled.GAUGE);
+    }
 
     public int readsPerSecond() { return readsPerSec; }
 
@@ -1027,6 +1041,7 @@ public class LinkService extends Service {
         }
         workOutMotion();
         countFuel();
+        workOutTiming();
         sampleMisfire();
         if (++tickCount % 5 == 0) followSpeed();
         if (tickCount % 10 != 0) return;

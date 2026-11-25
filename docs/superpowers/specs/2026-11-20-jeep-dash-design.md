@@ -228,6 +228,30 @@ screens, the manifest's new service and receiver stay switched off, and nothing 
 - **Visualizer**: looks change only with the LOOK button; a tap or swipe on the picture does nothing. The boom
   meters look is gone; a saved choice of it becomes Smooth (core `VizTune.CHOICES`).
 
+### Timing pulled (2026-11-25, Jeep only)
+
+A gauge, "Timing pulled", 0 to 15 degrees: the stock main spark table's timing for the engine speed and
+manifold pressure now, minus the actual timing, never below 0 (core `SparkTable`, `TimingPulled`). The table
+is from the owner's own engine computer (docs/protocol-notes.md). It reads only where that table is what the
+engine computer uses, and is blank otherwise:
+
+- coolant at least 180 °F; 1100 to 4800 rpm (below is idle and closed-throttle coasting, which run their own
+  spark, a flat 19° around 1000 rpm in the logs);
+- not at closed throttle (manifold under 25 kPa) and not while engine speed falls faster than 250 rpm a second
+  (a lift-off or an upshift), nor for 2 s after either;
+- only after those have held for 2 s (pulling away from a stop the timing is still on idle logic);
+- a timing reading is compared only with engine speed and pressure read within 1.5 s of it;
+- smoothing: the middle of the last three readings (none older than 3.5 s), so one reading taken mid-change
+  does not move it but two in a row do.
+
+Tuned on the owner's drive logs (one row a second; in them a value is often a few seconds old, so the gauge,
+which compares only readings taken together, should do at least as well). Share of the readings shown that
+read 0 / 0-2 / over 2 degrees: d1844 71% / 19% / 10% (shown for 15% of the drive, which was mostly town and
+idle); d1901 84% / 13% / 3% (shown 54%); d2149 89% / 8% / 3% (shown 25%). d1124 logged no manifold pressure or
+timing, so it cannot be used. Its inputs (rpm, manifold
+pressure, timing, coolant) are read only while the gauge is on the dash's layout or the screen in front, and it
+is worked out in the link service like fuel. It is also a column of the drive log.
+
 ## Open items
 
 - **Map more Jeep values** (Daniel's help needed later): another capture of the GearWrench app showing its

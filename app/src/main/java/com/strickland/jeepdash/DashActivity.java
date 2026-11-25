@@ -27,6 +27,7 @@ import com.strickland.jeepdash.core.AutoStart;
 import com.strickland.jeepdash.core.Catalog;
 import com.strickland.jeepdash.core.DashMenu;
 import com.strickland.jeepdash.core.FuelUse;
+import com.strickland.jeepdash.core.TimingPulled;
 import com.strickland.jeepdash.core.NightHours;
 import com.strickland.jeepdash.core.PollRunner;
 import com.strickland.jeepdash.core.GaugeSpec;
@@ -277,7 +278,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         boolean any = false;
         for (String id : ids) {
             Param p = Catalog.byId(id);
-            if (p != null && p.tablet && !FuelUse.GAUGES.contains(id)) any = true;      // fuel: LinkService
+            // fuel and timing pulled are worked out by LinkService from the car's readings
+            if (p != null && p.tablet && !FuelUse.GAUGES.contains(id) && !TimingPulled.GAUGE.equals(id)) any = true;
         }
         if (!any) {
             tablet.stop();
