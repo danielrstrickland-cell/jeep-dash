@@ -109,6 +109,10 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable everySecond = this::everySecond;
 
+    // the 3D view's crash guard: "scene_live" is on disk while Filament runs on screen; still there at the next
+    // start means the app died with it up (a native crash Java cannot catch), so 3D stays off for this build
+    private static final String SCENE_LIVE = "scene_live", SCENE_OFF = "scene_off_build";
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -126,6 +130,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         root = new FrameLayout(this);
         root.addView(view, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
+        if (prefs.getBoolean(SCENE_LIVE, false))
+            prefs.edit().putLong(SCENE_OFF, buildNumber()).remove(SCENE_LIVE).commit();
         applyLook();
         syncNight();
         music = new MusicSession(this, this::onMusic);
@@ -243,6 +249,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     protected void onStart() {
         super.onStart();
         started = true;
+        if (scene != null) sceneLive(true);
         if (loop != null) loop.start();
         ui.post(everySecond);
         syncNight();
@@ -258,6 +265,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     @Override
     protected void onStop() {
         started = false;
+        sceneLive(false);
         if (loop != null) loop.stop();
         stopFeed();
         ui.removeCallbacks(everySecond);
@@ -433,8 +441,10 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         root.addView(backView, 0, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         loop = new HoloLoop(view, holoState);
         loop.setDisplay(getWindowManager().getDefaultDisplay());
-        if (SceneHost.available()) {
+        boolean crashedHere = prefs.getLong(SCENE_OFF, -1) == buildNumber();
+        if (!crashedHere && SceneHost.available()) {
             try {
+                sceneLive(true);
                 scene = new SceneHost(this);
                 stage = new HoloStage(this, feed, holoState, this::onModel);
                 scene.view.setVisibility(View.GONE);
@@ -442,6 +452,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                 scene.setStage(stage);
                 holoState.sceneOk = true;
             } catch (RuntimeException | UnsatisfiedLinkError e) {
+                sceneLive(false);
                 scene = null;
                 stage = null;
                 holoState.sceneOk = false;
@@ -449,7 +460,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             }
         } else {
             holoState.sceneOk = false;
-            holoState.sceneNote = "3D view unavailable on this tablet";
+            holoState.sceneNote = crashedHere ? "3D view off: it crashed on this tablet. It comes back with the next update"
+                    : "3D view unavailable on this tablet";
         }
         // the screen at 60 Hz while this look is up: no frames wasted above the cap
         WindowManager.LayoutParams lp = getWindow().getAttributes();
@@ -473,12 +485,20 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             root.removeView(scene.view);
             scene.destroy();               // frees the GPU memory for the other looks
         }
+        sceneLive(false);
         scene = null;
         stage = null;
         WindowManager.LayoutParams lp = getWindow().getAttributes();
         lp.preferredRefreshRate = 0;
         getWindow().setAttributes(lp);
         syncFeed();
+    }
+
+    /** Marks (synchronously, so it is on disk before any native crash) whether the 3D view is running on screen. */
+    private void sceneLive(boolean on) {
+        if (on == prefs.getBoolean(SCENE_LIVE, false)) return;
+        if (on) prefs.edit().putBoolean(SCENE_LIVE, true).commit();
+        else prefs.edit().remove(SCENE_LIVE).commit();
     }
 
     /**

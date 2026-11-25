@@ -72,6 +72,58 @@ public class DashApp extends Application {
 
     static void clearCrash(Context c) { new java.io.File(c.getFilesDir(), CRASH_FILE).delete(); }
 
+    private static final String EXIT_SEEN = "exit_seen";
+
+    /**
+     * Android's own record of how the app last ended, when it was a crash not shown yet: this catches native
+     * crashes (the 3D engine) that the Java handler above never sees. Its trace is the crash "tombstone" (or the
+     * not-responding trace); its readable text is included. Null when there is nothing new.
+     */
+    static String lastExit(Context c) {
+        if (android.os.Build.VERSION.SDK_INT < 30) return null;
+        try {
+            android.app.ActivityManager am = c.getSystemService(android.app.ActivityManager.class);
+            if (am == null) return null;
+            java.util.List<android.app.ApplicationExitInfo> list = am.getHistoricalProcessExitReasons(null, 0, 8);
+            android.content.SharedPreferences p = c.getSharedPreferences(PREFS, MODE_PRIVATE);
+            long seen = p.getLong(EXIT_SEEN, 0), newest = seen;
+            android.app.ApplicationExitInfo pick = null;
+            for (android.app.ApplicationExitInfo e : list) {
+                if (e.getTimestamp() <= seen) continue;
+                newest = Math.max(newest, e.getTimestamp());
+                boolean worth = com.strickland.jeepdash.core.CrashReport.worthShowing(e.getReason());
+                if (worth && (pick == null || e.getTimestamp() > pick.getTimestamp())) pick = e;
+            }
+            p.edit().putLong(EXIT_SEEN, newest).apply();
+            if (pick == null) return null;
+            StringBuilder sb = new StringBuilder();
+            String when = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(new java.util.Date(pick.getTimestamp()));
+            sb.append("Jeep Dash dash-").append(build(c)).append(": last exit was a ")
+                    .append(com.strickland.jeepdash.core.CrashReport.reasonName(pick.getReason()))
+                    .append(" at ").append(when).append('\n');
+            if (pick.getDescription() != null) sb.append("Description: ").append(pick.getDescription()).append('\n');
+            sb.append("Process ").append(pick.getProcessName()).append(", status ").append(pick.getStatus())
+                    .append(", importance ").append(pick.getImportance())
+                    .append(", memory ").append(pick.getPss() / 1024).append(" MB pss / ").append(pick.getRss() / 1024).append(" MB rss\n");
+            sb.append("Android ").append(android.os.Build.VERSION.RELEASE).append(" (API ").append(android.os.Build.VERSION.SDK_INT)
+                    .append("), ").append(android.os.Build.MANUFACTURER).append(' ').append(android.os.Build.MODEL).append('\n');
+            try (java.io.InputStream in = pick.getTraceInputStream()) {
+                if (in != null) {
+                    java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+                    byte[] chunk = new byte[16384];
+                    int n;
+                    while (buf.size() < 512 * 1024 && (n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
+                    sb.append("\nTrace:\n").append(com.strickland.jeepdash.core.CrashReport.printable(buf.toByteArray(), 4, 16000));
+                }
+            } catch (java.io.IOException | RuntimeException e) {
+                sb.append("\n(trace unreadable: ").append(e).append(")");
+            }
+            return sb.toString();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     static int build(Context c) {
         try {
             android.content.pm.PackageInfo pi = c.getPackageManager().getPackageInfo(c.getPackageName(), 0);

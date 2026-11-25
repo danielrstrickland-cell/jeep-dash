@@ -65,6 +65,8 @@ public class SplashActivity extends Activity implements ServiceConnection, LinkS
         super.onCreate(saved);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         String crash = DashApp.lastCrash(this);
+        String exit = DashApp.lastExit(this);       // read either way, so a Java crash's exit is not shown again
+        if (crash == null) crash = exit;
         if (crash != null) {
             showCrash(crash);
             return;
