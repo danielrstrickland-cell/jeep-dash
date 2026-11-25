@@ -88,7 +88,16 @@ public final class Catalog {
         add(Param.tablet("fuel_gph", "Fuel flow", "gal/h", 0, 30));
         // The stock spark table's timing minus the actual timing (see TimingPulled); blank where it means nothing.
         add(Param.tablet(TimingPulled.GAUGE, "Timing pulled", "°", 0, 15));
+        // The truck's body lean, worked out from the motion sensor or GPS (see TruckMotion) while the dash shows it.
+        add(Param.tablet("roll", "Body roll", "°", -10, 10));
+        add(Param.tablet("pitch", "Body pitch", "°", -6, 6));
+        // How far the learning alerts have got (see NormalReadings): drives counted, 5 once learned.
+        add(Param.tablet("normal", "Normal readings", "of 5", 0, 5));
     }
+
+    /** Values the dash screen works out itself (not the tablet's sensors as such, nor the link service). */
+    public static final java.util.Set<String> SCREEN_MADE = java.util.Collections.unmodifiableSet(
+            new java.util.HashSet<>(java.util.Arrays.asList("roll", "pitch", "normal")));
 
     // Which car the app is set up for. Chosen once in SETUP and applied when the app starts, so every screen
     // and the link service agree; the Jeep is the default.

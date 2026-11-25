@@ -258,6 +258,9 @@ public final class NormalReadings {
         return n;
     }
 
+    /** Drives counted toward learning, up to LEARN_DRIVES; LEARN_DRIVES once learned. */
+    public synchronized int drivesLearned() { return learned ? LEARN_DRIVES : Math.min(countingDrives(true), LEARN_DRIVES); }
+
     /** "Learning normal: drive 3 of 5, day 4 of 7" while learning; null once learned. */
     public synchronized String progress(long wallMs) {
         if (learned) return null;

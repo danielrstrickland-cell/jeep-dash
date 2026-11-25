@@ -5,14 +5,23 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Free-placement layout for one look. Every edit keeps gauges on screen and at least MIN_SIZE. */
+/**
+ * Free-placement layout for one look. Every edit keeps gauges on screen and at least the look's smallest size
+ * (MIN_SIZE, or smaller for a look made of small panels).
+ */
 public final class Layout {
     public static final float MIN_SIZE = 96;
 
-    public final float screenW, screenH;
+    public final float screenW, screenH, minSize;
     public final List<GaugeSpec> gauges = new ArrayList<>();
 
-    public Layout(float screenW, float screenH) { this.screenW = screenW; this.screenH = screenH; }
+    public Layout(float screenW, float screenH) { this(screenW, screenH, MIN_SIZE); }
+
+    public Layout(float screenW, float screenH, float minSize) {
+        this.screenW = screenW;
+        this.screenH = screenH;
+        this.minSize = minSize;
+    }
 
     public void add(GaugeSpec g) { gauges.add(g); clamp(g); }
 
@@ -33,8 +42,8 @@ public final class Layout {
     public void resize(String key, float dw, float dh) {
         GaugeSpec g = find(key);
         if (g == null) return;
-        g.w = Math.max(MIN_SIZE, Math.min(g.w + dw, screenW - g.x));
-        g.h = Math.max(MIN_SIZE, Math.min(g.h + dh, screenH - g.y));
+        g.w = Math.max(minSize, Math.min(g.w + dw, screenW - g.x));
+        g.h = Math.max(minSize, Math.min(g.h + dh, screenH - g.y));
         clamp(g);
     }
 
@@ -58,8 +67,8 @@ public final class Layout {
     public void clampAll() { for (GaugeSpec g : gauges) clamp(g); }
 
     private void clamp(GaugeSpec g) {
-        g.w = Math.max(MIN_SIZE, Math.min(g.w, screenW));
-        g.h = Math.max(MIN_SIZE, Math.min(g.h, screenH));
+        g.w = Math.max(minSize, Math.min(g.w, screenW));
+        g.h = Math.max(minSize, Math.min(g.h, screenH));
         g.x = Math.max(0, Math.min(g.x, screenW - g.w));
         g.y = Math.max(0, Math.min(g.y, screenH - g.h));
     }

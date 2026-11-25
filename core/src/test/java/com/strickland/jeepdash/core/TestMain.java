@@ -48,6 +48,9 @@ public final class TestMain {
             AutoNightTest.class,
             ValueScanTest.class,
             NormalReadingsTest.class,
+            TruckMotionTest.class,
+            TruckRigTest.class,
+            HoloFaceTest.class,
     };
 
     public static void main(String[] args) {

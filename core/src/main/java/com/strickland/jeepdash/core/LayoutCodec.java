@@ -25,7 +25,7 @@ public final class LayoutCodec {
         if (text == null) return defaultFor(look, w, h);
         String[] lines = text.split("\n");
         if (lines.length < 2 || !lines[0].trim().equals("v1")) return defaultFor(look, w, h);
-        Layout l = new Layout(w, h);
+        Layout l = new Layout(w, h, HoloFace.minSize(look));
         for (int i = 1; i < lines.length; i++) {
             String[] f = lines[i].trim().split("\\|");
             if (f.length != 10 && f.length != 11) continue;
@@ -49,8 +49,10 @@ public final class LayoutCodec {
     /** The approved mockup layouts at 1280x800 dp, scaled to the given screen. */
     public static Layout defaultFor(String look, float w, float h) {
         float sx = w / 1280f, sy = h / 800f;
-        Layout l = new Layout(w, h);
-        if ("retro".equals(look)) {
+        Layout l = new Layout(w, h, HoloFace.minSize(look));
+        if (HoloFace.isHolo(look)) {
+            holo(l, sx, sy, "p_holo".equals(look));
+        } else if ("retro".equals(look)) {
             // the Jeep in 1980s digital: tachometer band across the top, big speed in the middle, bars either side
             put(l, sx, sy, "g1", "rpm", GaugeType.DIAL, 40, 20, 1200, 296);
             put(l, sx, sy, "g2", "speed", GaugeType.DIGITAL, 430, 330, 420, 270);
@@ -96,6 +98,27 @@ public final class LayoutCodec {
                 put(l, sx, sy, "g" + (3 + i), bottom[i], GaugeType.BAR, 16 + i * (colW + 16), 452, colW, 290);
         }
         return l;
+    }
+
+    /**
+     * The approved Holo mockup (1600 x 1000, so scaled by 0.8): rpm and speed arcs wrapping round the truck,
+     * the gear hexagon under its platform, five panels down each side.
+     */
+    private static void holo(Layout l, float sx, float sy, boolean porsche) {
+        float m = 0.8f;
+        put(l, sx, sy, "g1", "rpm", GaugeType.ARC_LEFT, 220 * m, 60 * m, 380 * m, 790 * m);
+        put(l, sx, sy, "g2", "speed", GaugeType.ARC_RIGHT, 1000 * m, 60 * m, 380 * m, 790 * m);
+        put(l, sx, sy, "g3", "speed", GaugeType.TRUCK, 470 * m, 125 * m, 660 * m, 660 * m);
+        put(l, sx, sy, "g4", "gear", GaugeType.HEX, 735 * m, 686 * m, 130 * m, 126 * m);
+        String[] left = porsche ? new String[]{"coolant", "oil_temp", "boost", "batt_v", "timing"}
+                : new String[]{"coolant", "map_kpa", "ltft", "batt_v", "spark"};
+        String[] right = porsche ? new String[]{"mpg_avg", "fuel_used", "iat", "roll", "normal"}
+                : new String[]{"mpg_avg", "fuel_used", "speedo_err", "roll", "normal"};
+        float[] rows = {120, 200, 280, 600, 680};
+        for (int i = 0; i < 5; i++) {
+            put(l, sx, sy, "g" + (5 + i), left[i], GaugeType.DIGITAL, 28 * m, rows[i] * m, 230 * m, 62 * m);
+            put(l, sx, sy, "g" + (10 + i), right[i], GaugeType.DIGITAL, 1342 * m, rows[i] * m, 230 * m, 62 * m);
+        }
     }
 
     private static void put(Layout l, float sx, float sy, String key, String param, GaugeType t,

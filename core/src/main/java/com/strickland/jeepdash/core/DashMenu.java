@@ -20,7 +20,8 @@ public final class DashMenu {
             MUSIC_BUTTON = "music_button", VOLUME = "volume", VISUALIZER = "visualizer",
             FUEL = "fuel",
             CODES = "codes", LOGS = "logs", NORMAL = "normal", SCAN = "scan",
-            AUTO_START = "auto_start", UPDATE = "update", LISTEN = "listen", TUNE_LOG = "tune_log";
+            AUTO_START = "auto_start", UPDATE = "update", LISTEN = "listen", TUNE_LOG = "tune_log",
+            TRUCK = "truck", ADD_TRUCK = "add_truck", HOLO_RADIO = "holo_radio";
 
     /** What the menu needs to know, filled in by the dash each time it opens. */
     public static final class State {
@@ -38,6 +39,9 @@ public final class DashMenu {
         public boolean canEdit, snap;
         public String normalProgress;          // the learning alerts' progress line; null once learned
         public String scanProgress;            // a value scan under way; null when none
+        public boolean hasTruck;               // the Holo look's layout has its 3D truck view
+        public String truckMotion = "realistic";   // how hard the truck leans (TruckSettings wording)
+        public boolean holoOnRadio;            // the Porsche's radio offers the Holo look
     }
 
     public static final class Entry {
@@ -66,6 +70,7 @@ public final class DashMenu {
         if (s.canEdit) gauges.add(new Entry(EDIT, "Edit gauges"));
         gauges.add(new Entry(ADD, "Add a gauge"));
         gauges.add(new Entry(SNAP, "Snap to grid: " + onOff(s.snap)));
+        if (HoloFace.isHolo(s.look) && !s.hasTruck) gauges.add(new Entry(ADD_TRUCK, "Put the 3D truck back"));
         gauges.add(new Entry(RESET, "Put this look's gauges back to the original layout"));
         add(out, "Gauges", gauges);
 
@@ -77,7 +82,10 @@ public final class DashMenu {
                     + (NightHours.AUTO.equals(s.xpMode) ? " (light sensor, else sunset)" : "")));
         } else if ("jeep".equals(s.look)) {
             look.add(new Entry(JEEP_BACKLIGHT, "Backlight: " + s.jeepBacklight));
+        } else if (HoloFace.isHolo(s.look)) {
+            look.add(new Entry(TRUCK, "3D truck: model, lighting, motion (" + s.truckMotion + ")"));
         }
+        if (s.porsche) look.add(new Entry(HOLO_RADIO, "Holo look with the 3D truck (heavy for this radio): " + onOff(s.holoOnRadio)));
         add(out, "Look", look);
 
         List<Entry> music = new ArrayList<>();
