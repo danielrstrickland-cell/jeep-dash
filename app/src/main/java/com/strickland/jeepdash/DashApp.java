@@ -154,9 +154,45 @@ public class DashApp extends Application {
             } catch (java.io.IOException | RuntimeException e) {
                 sb.append("\n(trace unreadable: ").append(e).append(")");
             }
+            String trail = com.strickland.jeepdash.scene.Trail.forPid(c, pick.getPid());
+            if (trail != null) sb.append("\n3D steps before the crash (last one was running):\n").append(trail);
+            String log = logOf(pick.getPid());
+            if (log != null) sb.append("\nLog of that run (warnings and errors):\n").append(log);
             return sb.toString();
         } catch (RuntimeException e) {
             return null;
+        }
+    }
+
+    /**
+     * The crashed run's own warnings and errors, while the system log still holds them (an app may read its own
+     * lines). Filament writes why it stopped here; the tombstone leaves the log out on most phones. Null when none.
+     */
+    private static String logOf(int pid) {
+        if (pid <= 0) return null;
+        Process p = null;
+        try {
+            p = new ProcessBuilder("logcat", "-d", "-v", "time", "--pid=" + pid, "-t", "300", "*:W")
+                    .redirectErrorStream(true).start();
+            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            byte[] chunk = new byte[8192];
+            int n;
+            java.io.InputStream in = p.getInputStream();
+            long end = android.os.SystemClock.elapsedRealtime() + 2000;
+            while (buf.size() < 64 * 1024 && android.os.SystemClock.elapsedRealtime() < end && (n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
+            String s = buf.toString("UTF-8").trim();
+            if (s.isEmpty()) return null;
+            String[] lines = s.split("\n");
+            StringBuilder sb = new StringBuilder();
+            for (int i = Math.max(0, lines.length - 60); i < lines.length; i++) {
+                if (lines[i].startsWith("--------- beginning of")) continue;
+                sb.append(lines[i]).append('\n');
+            }
+            return sb.length() == 0 ? null : sb.toString();
+        } catch (java.io.IOException | RuntimeException e) {
+            return null;
+        } finally {
+            if (p != null) p.destroy();
         }
     }
 

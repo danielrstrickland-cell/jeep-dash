@@ -40,6 +40,7 @@ public final class TruckModel {
     private final double[][] world0, parentWorld0;
     private final int rootInstance;
     private final int[] ready = new int[64];
+    private int updates;
     public final TruckRig rig;
     private boolean loaded, destroyed;
 
@@ -126,6 +127,7 @@ public final class TruckModel {
         UbershaderProvider materials = new UbershaderProvider(engine);
         AssetLoader loader = new AssetLoader(engine, materials, EntityManager.get());
         ResourceLoader resources = new ResourceLoader(engine);
+        Trail.step("gltf createAsset");
         FilamentAsset asset = loader.createAsset(glb);
         if (asset == null) {
             resources.destroy();
@@ -143,7 +145,9 @@ public final class TruckModel {
             materials.destroy();
             throw new IllegalArgumentException("That model needs files beside it. Export it as one .glb with everything packed in.");
         }
+        Trail.step("gltf asyncBeginLoad");
         resources.asyncBeginLoad(asset);
+        Trail.step("gltf releaseSourceData");
         asset.releaseSourceData();
         return new TruckModel(engine, scene, materials, loader, resources, asset);
     }
@@ -151,6 +155,7 @@ public final class TruckModel {
     /** Call every frame while loading: finishes textures and adds parts to the scene as they become ready. */
     public boolean update() {
         if (destroyed || loaded) return false;
+        if (updates < 2) Trail.step("gltf asyncUpdateLoad " + updates++);
         resources.asyncUpdateLoad();
         int n;
         while ((n = asset.popRenderables(ready)) > 0) {
@@ -165,6 +170,7 @@ public final class TruckModel {
                 scene.addEntities(some);
             }
             loaded = true;
+            Trail.step("gltf load complete");
         }
         return true;
     }

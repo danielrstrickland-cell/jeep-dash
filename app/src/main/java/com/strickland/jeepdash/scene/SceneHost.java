@@ -54,11 +54,13 @@ public final class SceneHost implements UiHelper.RendererCallback {
     private Stage stage;
     private boolean destroyed, failed, moving = true;
     private QualityMode quality = QualityMode.of(QualityMode.HIGH);
-    private int viewW, viewH;
+    private int viewW, viewH, framesMarked;
 
     /** Call only when available() is true. */
     public SceneHost(Context c) {
+        Trail.start(c);
         view = new TextureView(c);
+        Trail.step("Engine.create");
         engine = Engine.create();
         renderer = engine.createRenderer();
         scene = engine.createScene();
@@ -85,6 +87,7 @@ public final class SceneHost implements UiHelper.RendererCallback {
                 applySize();
             }
         });
+        Trail.step("view set up; attach TextureView");
         ui.setOpaque(false);
         ui.setRenderCallback(this);
         ui.attachTo(view);
@@ -104,6 +107,7 @@ public final class SceneHost implements UiHelper.RendererCallback {
 
     /** The Quality mode's settings for the 3D view. */
     public void setQuality(QualityMode q) {
+        Trail.step("setQuality " + q.name + " msaa=" + q.msaa + " bloom=" + q.bloom + " shadow=" + q.shadow + " ssao=" + q.ssao + " scale=" + q.renderScale);
         quality = q;
         View.MultiSampleAntiAliasingOptions msaa = new View.MultiSampleAntiAliasingOptions();
         msaa.enabled = q.msaa;
@@ -124,6 +128,7 @@ public final class SceneHost implements UiHelper.RendererCallback {
         ao.radius = 0.3f;
         filamentView.setAmbientOcclusionOptions(ao);
         applySize();
+        Trail.step("setQuality done");
         moving = true;
     }
 
@@ -150,10 +155,15 @@ public final class SceneHost implements UiHelper.RendererCallback {
     public boolean frame(long frameNs, double dt) {
         if (destroyed || failed) return false;
         try {
+            if (framesMarked < 3) Trail.step("frame " + framesMarked + ": stage.frame");
             moving = stage == null || stage.frame(SystemClock.elapsedRealtime(), dt);
+            boolean mark = framesMarked < 3;
+            if (mark) Trail.step("frame " + framesMarked + ": stage moved; swapChain=" + (swapChain != null) + " ready=" + ui.isReadyToRender());
             if (swapChain != null && ui.isReadyToRender() && renderer.beginFrame(swapChain, frameNs)) {
+                if (mark) Trail.step("frame " + framesMarked + ": render " + viewW + "x" + viewH);
                 renderer.render(filamentView);
                 renderer.endFrame();
+                if (mark) Trail.step("frame " + framesMarked++ + ": done");
             }
             return true;
         } catch (RuntimeException e) {
@@ -166,8 +176,10 @@ public final class SceneHost implements UiHelper.RendererCallback {
     @Override
     public void onNativeWindowChanged(Surface surface) {
         if (destroyed) return;
+        Trail.step("createSwapChain flags=" + ui.getSwapChainFlags());
         if (swapChain != null) engine.destroySwapChain(swapChain);
         swapChain = engine.createSwapChain(surface, ui.getSwapChainFlags());
+        Trail.step("createSwapChain done");
         if (Build.VERSION.SDK_INT >= 30) {
             try {
                 surface.setFrameRate(60f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
@@ -189,6 +201,7 @@ public final class SceneHost implements UiHelper.RendererCallback {
 
     @Override
     public void onResized(int w, int h) {
+        Trail.step("resized " + w + "x" + h);
         filamentView.setViewport(new Viewport(0, 0, w, h));
         if (stage != null) stage.resize(w, h);
         moving = true;

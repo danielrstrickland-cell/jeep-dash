@@ -18,6 +18,7 @@ final class Ibl {
     static Ibl load(Engine engine, byte[] file, float intensity) {
         Ktx1 k = Ktx1.parse(file);
         if (k == null || k.sh == null) return null;
+        Trail.step("IBL texture " + k.size + "px, " + k.levels + " levels");
         Texture tex = new Texture.Builder()
                 .width(k.size)
                 .height(k.size)
@@ -27,6 +28,7 @@ final class Ibl {
                 .build(engine);
         for (int level = 0; level < k.levels; level++) {
             int n = k.faceBytes[level];
+            Trail.step("IBL setImage level " + level + " side " + Math.max(1, k.size >> level) + " faceBytes " + n);
             ByteBuffer buf = ByteBuffer.allocateDirect(6 * n);
             buf.put(file, k.offset[level], 6 * n);
             buf.flip();
@@ -35,6 +37,7 @@ final class Ibl {
             tex.setImage(engine, level, 0, 0, 0, side, side, 6, new Texture.PixelBufferDescriptor(buf, Texture.Format.RGB,
                     Texture.Type.UINT_10F_11F_11F_REV));
         }
+        Trail.step("IBL light");
         IndirectLight light = new IndirectLight.Builder()
                 .reflections(tex)
                 .irradiance(3, k.sh)

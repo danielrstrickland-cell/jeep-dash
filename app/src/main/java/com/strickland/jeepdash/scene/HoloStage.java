@@ -61,12 +61,14 @@ public final class HoloStage implements Stage {
         host = h;
         attached = true;
         Engine e = h.engine;
+        Trail.step("Holo attach: IBL");
         try {
             ibl = Ibl.load(e, ModelStore.asset(context, "scene/holo_ibl.ktx"), IBL_LUX);
         } catch (java.io.IOException ex) {
             ibl = null;
         }
         if (ibl != null) h.scene.setIndirectLight(ibl.light);
+        Trail.step("lights");
         key = EntityManager.get().create();
         new LightManager.Builder(LightManager.Type.DIRECTIONAL)
                 .color(0.96f, 0.98f, 1.0f)
@@ -79,6 +81,7 @@ public final class HoloStage implements Stage {
         rimRight = rim(e, 3.2f);
         h.scene.addEntity(rimLeft);
         h.scene.addEntity(rimRight);
+        Trail.step("color grading");
         // a touch of the hologram's cyan over the whole truck
         grading = new ColorGrading.Builder()
                 .toneMapper(new ToneMapper.Filmic())
@@ -86,7 +89,9 @@ public final class HoloStage implements Stage {
                 .build(e);
         h.filamentView.setColorGrading(grading);
         setExposure(exposureEv);
+        Trail.step("shadow " + shadow);
         applyShadow();
+        Trail.step("load model " + ModelStore.pick(context, mode));
         reload();
     }
 
@@ -106,6 +111,7 @@ public final class HoloStage implements Stage {
         if (li != 0) lm.setShadowCaster(li, shadow);
         if (shadow && floor == null) {
             try {
+                Trail.step("shadow floor");
                 floor = new ShadowFloor(host.engine, host.scene, ModelStore.asset(context, "scene/shadow_catcher.filamat"), 4f);
             } catch (java.io.IOException | RuntimeException e) {
                 floor = null;                     // no shadow, everything else as Ultra
@@ -174,7 +180,9 @@ public final class HoloStage implements Stage {
         }
         if (data != null) {
             try {
+                Trail.step("install model " + kind + " " + data.remaining() + " bytes");
                 truck = TruckModel.load(host.engine, host.scene, data);
+                Trail.step("model installed");
             } catch (RuntimeException ex) {
                 error = ex.getMessage() == null ? "The 3D view could not read that model." : ex.getMessage();
             }
