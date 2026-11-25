@@ -1,5 +1,7 @@
 # jeep-dash
 
+Copyright (c) 2026 Daniel Strickland. All rights reserved. See [LICENSE](LICENSE).
+
 Digital dash for a 1997 Jeep Grand Cherokee (ZJ) running a 1998 5.9 JTEC engine computer,
 reading live data through a GearWrench GWSMARTBT Bluetooth dongle.
 

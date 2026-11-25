@@ -236,6 +236,14 @@ public class LinkService extends Service {
     /** For the screen's sensors to add the first shove of a launch and GPS speed (see TabletSensors). */
     public Motion carMotion() { return carMotion; }
 
+    private TabletHealth tablet;
+
+    /** The tablet's heat and battery watch (Jeep only; null on the Porsche). */
+    TabletHealth tablet() { return tablet; }
+
+    /** The dash is in front: it shows the tablet's alerts itself, so no notification. */
+    void setDashInFront(boolean front) { if (tablet != null) tablet.setDashInFront(front); }
+
     /** Ticker thread: hands carMotion and the gear indicator each new speed reading once, then puts their figures. */
     private void workOutMotion() {
         if (!Motion.carWanted(requested, dashShown)) return;
@@ -587,6 +595,11 @@ public class LinkService extends Service {
         }
         lastUsefulMs = now();
         instance = this;
+        // the tablet's heat and battery: watched behind every screen, layout or not
+        if (com.strickland.jeepdash.core.TabletWatch.wanted(Catalog.porsche())) {
+            tablet = new TabletHealth(this, values);
+            tablet.start();
+        }
         List<String> misfireIds = new ArrayList<>();
         for (Param p : Catalog.all()) misfireIds.add(p.id);
         misfire = new RollingCapture(misfireIds);
@@ -643,6 +656,7 @@ public class LinkService extends Service {
 
     @Override
     public void onDestroy() {
+        if (tablet != null) tablet.stop();
         stopWorker();
         try {
             unregisterReceiver(pairingWatcher);

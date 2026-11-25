@@ -18,9 +18,11 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.provider.Settings;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import com.strickland.jeepdash.core.AutoStart;
@@ -32,17 +34,29 @@ import com.strickland.jeepdash.core.NightHours;
 import com.strickland.jeepdash.core.PollRunner;
 import com.strickland.jeepdash.core.GaugeSpec;
 import com.strickland.jeepdash.core.GaugeType;
+import com.strickland.jeepdash.core.HeatGuard;
+import com.strickland.jeepdash.core.HoloEffects;
+import com.strickland.jeepdash.core.HoloFace;
 import com.strickland.jeepdash.core.Layout;
 import com.strickland.jeepdash.core.LayoutCodec;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Motion;
 import com.strickland.jeepdash.core.NowPlaying;
 import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.core.QualityMode;
+import com.strickland.jeepdash.core.TabletWatch;
 import com.strickland.jeepdash.core.SpeedCorrection;
 import com.strickland.jeepdash.core.SpeedVolume;
 import com.strickland.jeepdash.core.TimingPulled;
 import com.strickland.jeepdash.core.ValueScan;
+import com.strickland.jeepdash.scene.HoloLoop;
+import com.strickland.jeepdash.scene.HoloStage;
+import com.strickland.jeepdash.scene.HoloState;
+import com.strickland.jeepdash.scene.ModelStore;
+import com.strickland.jeepdash.scene.MotionFeed;
+import com.strickland.jeepdash.scene.SceneHost;
 import com.strickland.jeepdash.theme.GtTheme;
+import com.strickland.jeepdash.theme.HoloTheme;
 import com.strickland.jeepdash.theme.JeepTheme;
 import com.strickland.jeepdash.theme.RetroTheme;
 import com.strickland.jeepdash.theme.Theme;
@@ -77,11 +91,29 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private boolean askedLocation;                     // asked once; a refusal is not argued with
     private MusicSession music;                        // what the music app plays, for the music button's window
 
+    // the Holo look: its layers, the 3D truck, its motion and its frame clock
+    private static final int REQ_FULL = 41, REQ_LITE = 42;
+    private FrameLayout root;
+    private final HoloState holoState = new HoloState();
+    private HoloTheme holoTheme;
+    private HoloBackView backView;
+    private HoloBloomView[] blooms = new HoloBloomView[0];
+    private SceneHost scene;
+    private HoloStage stage;
+    private final MotionFeed feed = new MotionFeed();
+    private HoloLoop loop;
+    private boolean started, holoOn, feedOn;
+    private String modelFound;
+    private int heatCap;
+    private String tabletLine = "";
+    private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable everySecond = this::everySecond;
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         prefs = getSharedPreferences("dash", MODE_PRIVATE);
-        looks = Catalog.porsche() ? new String[]{"p_retro", "p_gt"} : new String[]{"xp", "jeep", "retro"};
+        looks = HoloFace.looks(Catalog.porsche());
         look = prefs.getString(lookKey(), looks[0]);
         if (!Arrays.asList(looks).contains(look)) look = looks[0];
         xp = new XpTheme(prefs.getString("xp_scheme", "Blue"));
@@ -91,8 +123,10 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         view = new DashView(this, this);
         view.chrome.canEdit = true;
         view.chrome.snap = prefs.getBoolean("snap", true);
+        root = new FrameLayout(this);
+        root.addView(view, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        setContentView(root);
         applyLook();
-        setContentView(view);
         syncNight();
         music = new MusicSession(this, this::onMusic);
         view.chrome.music = MusicSession.buttonOn(this);
@@ -120,6 +154,9 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case "jeep": return jeep;
             case "retro": case "p_retro": return new RetroTheme(look);
             case "p_gt": return new GtTheme();
+            case "holo":
+                if (holoTheme == null) holoTheme = new HoloTheme(this, holoState);
+                return holoTheme;
             default: return xp;
         }
     }
@@ -129,6 +166,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case "jeep": return "JEEP STYLE";
             case "retro": case "p_retro": return "80s DIGITAL";
             case "p_gt": return "GT STYLE";
+            case "holo": return "HOLO";
             default: return "XP STYLE";
         }
     }
@@ -140,6 +178,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         String next = lookName(nextLook());
         view.chrome.nextLook = "xp".equals(look) ? next.charAt(0) + next.substring(1).toLowerCase(java.util.Locale.US) : next;
         view.setTheme(theme());
+        if (HoloFace.isHolo(look)) enterHolo();
+        else exitHolo();
         syncNight();
     }
 
@@ -188,6 +228,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         asking = false;
         startLink();
         syncTabletSensors();       // location may just have been allowed, or it is now its turn to be asked
+        syncFeed();
     }
 
     private void startLink() {
@@ -201,6 +242,9 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     @Override
     protected void onStart() {
         super.onStart();
+        started = true;
+        if (loop != null) loop.start();
+        ui.post(everySecond);
         syncNight();
         startLink();
         bound = bindService(new Intent(this, LinkService.class), this, Context.BIND_AUTO_CREATE);
@@ -213,6 +257,11 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
 
     @Override
     protected void onStop() {
+        started = false;
+        if (loop != null) loop.stop();
+        stopFeed();
+        ui.removeCallbacks(everySecond);
+        if (service != null) service.setDashInFront(false);
         music.stop();
         tablet.stop();
         night.stop();
@@ -228,8 +277,16 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     @Override
     public void onServiceConnected(ComponentName name, IBinder binder) {
         service = ((LinkService.LocalBinder) binder).service();
+        service.setDashInFront(started);
+        feed.setValues(service.values());
         pushActiveParams();
         service.addListener(this);
+    }
+
+    @Override
+    protected void onDestroy() {
+        exitHolo();
+        super.onDestroy();
     }
 
     @Override
@@ -270,8 +327,10 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
 
     private void refreshNotice() {
         noticeAt = LinkService.now();
+        if (service != null && !Catalog.porsche())
+            service.values().put("normal", NormalStore.get(this).drivesLearned(), noticeAt);
         String n = NormalStore.get(this).notice(gaugeUnits());
-        String line = n == null ? "" : n;
+        String line = !tabletLine.isEmpty() ? tabletLine : n == null ? "" : n;
         if (!line.equals(view.chrome.notice)) {
             view.chrome.notice = line;
             view.invalidate();
@@ -282,6 +341,10 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private void showNotice() {
         String n = view.chrome.notice;
         if (n.isEmpty()) return;
+        if (n.equals(tabletLine)) {
+            showTabletHeat();
+            return;
+        }
         new AlertDialog.Builder(this)
                 .setTitle("Reading out of the usual")
                 .setMessage(n + "\n\nIt was outside its normal range on two drives in a row. Dismiss hides this until the "
@@ -302,11 +365,18 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             // Pull, 0-60 and the speedo check are worked out from the Jeep's speed, speed gauge or not.
             if (Motion.needsJeepSpeed(ids)) ids.add("speed");
             if (Motion.needsRpm(ids)) ids.add("rpm");            // the gear indicator
+            Set<String> shown = l.activeParamIds();
+            if (HoloFace.isHolo(look)) {
+                // two-reading panels need both; the truck's wheels need road speed
+                ids = HoloFace.withCompanions(ids);
+                shown = HoloFace.withCompanions(shown);
+            }
             // the service adds what the fuel counter needs, and keeps it read while another screen is in front
-            service.setDashGauges(l.activeParamIds());
+            service.setDashGauges(shown);
             service.setActiveParams(ids);
         }
         syncTabletSensors();
+        syncFeed();
     }
 
     // ---------------- the tablet's own sensors ----------------
@@ -323,7 +393,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         for (String id : ids) {
             Param p = Catalog.byId(id);
             // fuel and timing pulled are worked out by LinkService from the car's readings
-            if (p != null && p.tablet && !FuelUse.GAUGES.contains(id) && !TimingPulled.GAUGE.equals(id)) any = true;
+            if (p != null && p.tablet && !FuelUse.GAUGES.contains(id) && !TimingPulled.GAUGE.equals(id)
+                    && !Catalog.SCREEN_MADE.contains(id)) any = true;
         }
         if (!any) {
             tablet.stop();
@@ -346,6 +417,298 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     /** Tablet values do not wait for the dongle: they go to the screen as they are worked out. */
     private void onTabletValues() {
         if (service != null && sweepStart == 0) view.setValues(service.values());
+    }
+
+    // ---------------- the Holo look: layers, the 3D truck, quality and heat ----------------
+
+    /** Puts up the layers behind and over the gauges, the 3D truck (where Filament runs) and the frame clock. */
+    @SuppressWarnings("deprecation")
+    private void enterHolo() {
+        if (holoOn) {
+            applyQuality();
+            return;
+        }
+        holoOn = true;
+        backView = new HoloBackView(this, view, holoTheme);
+        root.addView(backView, 0, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        loop = new HoloLoop(view, holoState);
+        loop.setDisplay(getWindowManager().getDefaultDisplay());
+        if (SceneHost.available()) {
+            try {
+                scene = new SceneHost(this);
+                stage = new HoloStage(this, feed, holoState, this::onModel);
+                scene.view.setVisibility(View.GONE);
+                root.addView(scene.view, 1, new FrameLayout.LayoutParams(1, 1));
+                scene.setStage(stage);
+                holoState.sceneOk = true;
+            } catch (RuntimeException | UnsatisfiedLinkError e) {
+                scene = null;
+                stage = null;
+                holoState.sceneOk = false;
+                holoState.sceneNote = "3D view unavailable on this tablet";
+            }
+        } else {
+            holoState.sceneOk = false;
+            holoState.sceneNote = "3D view unavailable on this tablet";
+        }
+        // the screen at 60 Hz while this look is up: no frames wasted above the cap
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.preferredRefreshRate = 60f;
+        getWindow().setAttributes(lp);
+        applyQuality();
+        if (started) loop.start();
+    }
+
+    private void exitHolo() {
+        if (!holoOn) return;
+        holoOn = false;
+        if (loop != null) loop.stop();
+        loop = null;
+        view.setHoloLayers(null, null, null);
+        for (View b : blooms) root.removeView(b);
+        blooms = new HoloBloomView[0];
+        if (backView != null) root.removeView(backView);
+        backView = null;
+        if (scene != null) {
+            root.removeView(scene.view);
+            scene.destroy();               // frees the GPU memory for the other looks
+        }
+        scene = null;
+        stage = null;
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.preferredRefreshRate = 0;
+        getWindow().setAttributes(lp);
+        syncFeed();
+    }
+
+    /**
+     * The Quality mode in force (the owner's, lowered by heat protection), the hologram effects, calm while
+     * moving, and the truck's lean and lighting: applied to every layer.
+     */
+    private void applyQuality() {
+        String chosen = QualityMode.pick(prefs.getString(HoloSettingsDialog.QUALITY, null));
+        QualityMode q = QualityMode.of(HeatGuard.mode(chosen, heatCap));
+        boolean paused = heatCap >= HeatGuard.CAP_2D;
+        holoState.mode = q;
+        holoState.fx = HoloEffects.of(q, prefs.getBoolean(HoloSettingsDialog.EFFECTS, true) && !paused, feed.calm());
+        feed.setStrength(prefs.getFloat(HoloSettingsDialog.MOTION, 0.35f));
+        feed.setCalm(prefs.getBoolean(HoloSettingsDialog.CALM, true), () -> runOnUiThread(this::applyQuality));
+        if (!holoOn) return;
+        loop.setMode(q);
+        if (scene != null) {
+            scene.setQuality(q);
+            stage.setMode(q);
+            stage.setExposure(prefs.getFloat(HoloSettingsDialog.LIGHT, 0));
+            holoState.sceneOk = !paused;
+            holoState.sceneNote = paused ? "3D paused: the tablet is too hot" : "";
+            loop.setScene(paused ? null : scene);
+            if (paused) scene.view.setVisibility(View.GONE);
+            else onSceneRect(truckSpec());
+        }
+        // the bloom layers: one pass on High, two on Ultra, none on Power saver or with effects off
+        int want = !holoState.fx.bloom || !HoloBloomView.supported() ? 0 : holoState.fx.multiBloom ? 2 : 1;
+        if (want != blooms.length) {
+            for (View b : blooms) root.removeView(b);
+            blooms = new HoloBloomView[want];
+            for (int i = 0; i < want; i++) {
+                float scale = i == 0 ? 0.5f : 0.25f;
+                blooms[i] = new HoloBloomView(this, view, scale, i == 0 ? 6 : 10, i == 0 ? 150 : 110);
+                int w = Math.max(1, Math.round(root.getWidth() * scale)), h = Math.max(1, Math.round(root.getHeight() * scale));
+                root.addView(blooms[i], new FrameLayout.LayoutParams(w > 1 ? w : ViewGroup.LayoutParams.MATCH_PARENT,
+                        h > 1 ? h : ViewGroup.LayoutParams.MATCH_PARENT));
+            }
+        }
+        view.setHoloLayers(backView, blooms, loop);
+        syncFeed();
+    }
+
+    private GaugeSpec truckSpec() {
+        Layout l = view.layout();
+        if (l != null) for (GaugeSpec g : l.gauges) if (g.type == GaugeType.TRUCK) return g;
+        return null;
+    }
+
+    /** The 3D view sits over the truck's box, under the gauges. */
+    @Override
+    public void onSceneRect(GaugeSpec t) {
+        if (scene == null) return;
+        if (t == null || !holoState.sceneOk) {
+            scene.view.setVisibility(View.GONE);
+            return;
+        }
+        float d = getResources().getDisplayMetrics().density;
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(Math.round(t.w * d), Math.round(t.h * d));
+        lp.leftMargin = Math.round(t.x * d);
+        lp.topMargin = Math.round(t.y * d);
+        scene.view.setLayoutParams(lp);
+        scene.view.setVisibility(View.VISIBLE);
+        // the bloom layers follow the screen's size
+        for (HoloBloomView b : blooms) {
+            ViewGroup.LayoutParams bl = b.getLayoutParams();
+            int w = Math.round(root.getWidth() * b.scale()), h = Math.round(root.getHeight() * b.scale());
+            if (w > 0 && (bl.width != w || bl.height != h)) {
+                bl.width = w;
+                bl.height = h;
+                b.setLayoutParams(bl);
+            }
+        }
+    }
+
+    @Override
+    public void onTruckTap() { if (stage != null) stage.spin(); }
+
+    @Override
+    public void onTruckHold() {
+        if (stage != null && !stage.toggleOpen())
+            Toast.makeText(this, "This truck model has no hood or liftgate that opens.", Toast.LENGTH_SHORT).show();
+    }
+
+    private void onModel(String summary, String error) {
+        if (summary != null) modelFound = summary;
+        if (error != null) Toast.makeText(this, error, Toast.LENGTH_LONG).show();
+        holoState.canOpen = stage != null && holoState.canOpen;
+    }
+
+    /** The truck's motion runs while the truck or a Body roll / pitch gauge is on screen. */
+    private void syncFeed() {
+        Layout l = view.layout();
+        boolean want = started && l != null && (holoOn && truckSpec() != null
+                || l.activeParamIds().contains("roll") || l.activeParamIds().contains("pitch"));
+        if (want && !feedOn) {
+            feedOn = true;
+            feed.start(this);
+            if (!askedLocation && !asking && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                // GPS moves the truck when the tablet is not mounted
+                askedLocation = true;
+                asking = true;
+                requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, 2);
+            }
+        } else if (!want && feedOn) {
+            stopFeed();
+        } else if (want) {
+            feed.retryGps(this);
+        }
+    }
+
+    private void stopFeed() {
+        if (!feedOn) return;
+        feedOn = false;
+        feed.stop();
+    }
+
+    private void showHoloSettings() {
+        HoloSettingsDialog.show(this, prefs, modelFound, new HoloSettingsDialog.Actions() {
+            @Override public void loadModel(String kind) { pickModel(kind); }
+            @Override public void forgetModels() {
+                ModelStore.forget(DashActivity.this, QualityMode.FULL);
+                ModelStore.forget(DashActivity.this, QualityMode.LITE);
+                if (stage != null) stage.reload();
+            }
+            @Override public void hideTruck() {
+                GaugeSpec t = truckSpec();
+                Layout l = view.layout();
+                if (t != null && l != null) {
+                    l.remove(t.key);
+                    saveLayout();
+                }
+            }
+            @Override public void settingsChanged() { applyQuality(); }
+        });
+    }
+
+    /** The Storage Access Framework's file picker, for a .glb on the tablet. */
+    private void pickModel(String kind) {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"model/gltf-binary", "application/octet-stream", "*/*"});
+        try {
+            startActivityForResult(i, QualityMode.LITE.equals(kind) ? REQ_LITE : REQ_FULL);
+        } catch (RuntimeException e) {
+            showMessage("Load truck model", "This tablet has no file picker to open.");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != REQ_FULL && request != REQ_LITE || result != RESULT_OK || data == null || data.getData() == null) return;
+        final Uri uri = data.getData();
+        final String kind = request == REQ_LITE ? QualityMode.LITE : QualityMode.FULL;
+        Toast.makeText(this, "Copying the model onto the tablet...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            String bad = ModelStore.importFrom(getApplicationContext(), uri, kind);
+            runOnUiThread(() -> {
+                if (bad != null) {
+                    showMessage("Load truck model", bad);
+                    return;
+                }
+                Toast.makeText(this, (QualityMode.LITE.equals(kind) ? "Lite model" : "Truck model") + " saved.", Toast.LENGTH_SHORT).show();
+                if (stage != null) stage.reload();
+            });
+        }, "truck-import").start();
+    }
+
+    private void addTruck() {
+        Layout l = view.layout();
+        if (l == null || truckSpec() != null) return;
+        GaugeSpec t = LayoutCodec.defaultFor(look, view.widthDp(), view.heightDp()).find("g3");
+        int n = 1;
+        while (l.find("g" + n) != null) n++;
+        GaugeSpec g = new GaugeSpec("g" + n, "speed", GaugeType.TRUCK, t.x, t.y, t.w, t.h);
+        l.add(g);
+        saveLayout();
+    }
+
+    private void toggle(String key) {
+        prefs.edit().putBoolean(key, !prefs.getBoolean(key, true)).apply();
+        applyQuality();
+    }
+
+    /** The unit the tablet's temperature is said in: its gauge's, else the coolant gauge's, else °F. */
+    private String tempUnit() {
+        Map<String, String> u = gaugeUnits();
+        String t = u.get("tablet_temp");
+        if (t == null) t = u.get("coolant");
+        return "°C".equals(t) ? "°C" : "°F";
+    }
+
+    /** Once a second while the dash is up: the tablet's heat and battery, from the link service's watch. */
+    private void everySecond() {
+        ui.postDelayed(everySecond, 1000);
+        TabletHealth th = service == null ? null : service.tablet();
+        if (th == null) return;
+        TabletWatch w = th.watch;
+        view.setHeat(w.heat());
+        String line = w.alert() == TabletWatch.OK ? "" : w.message(tempUnit());
+        if (!line.equals(tabletLine)) {
+            boolean rose = !line.isEmpty();
+            tabletLine = line;
+            refreshNotice();
+            if (rose) Toast.makeText(this, line, Toast.LENGTH_LONG).show();
+        }
+        int cap = w.guard.cap();
+        if (cap != heatCap) {
+            boolean down = cap > heatCap;
+            heatCap = cap;
+            if (holoOn) {
+                applyQuality();
+                String chosen = QualityMode.pick(prefs.getString(HoloSettingsDialog.QUALITY, null));
+                String now = HeatGuard.mode(chosen, cap);
+                Toast.makeText(this, down ? (cap >= HeatGuard.CAP_2D ? "Tablet very hot: 3D paused, plain gauges for now"
+                        : "Tablet warm: quality lowered to " + now) : "Tablet cool again: quality back to " + now, Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    /** The heat icon (or a tablet alert) was tapped: how hot, how charged, and what the protection is doing. */
+    private void showTabletHeat() {
+        TabletHealth th = service == null ? null : service.tablet();
+        if (th == null) return;
+        String protect = !prefs.getBoolean(TabletHealth.PREF_PROTECT, true) ? "Heat protection is off."
+                : heatCap == HeatGuard.CAP_NONE ? "Heat protection: nothing lowered."
+                : heatCap >= HeatGuard.CAP_2D ? "Heat protection: the 3D view is paused until the tablet has been cool for 2 minutes."
+                : "Heat protection: the Holo look runs at " + HeatGuard.mode(prefs.getString(HoloSettingsDialog.QUALITY, null), heatCap)
+                        + " until the tablet has been cool for 2 minutes.";
+        showMessage("Tablet heat and battery", th.watch.summary(tempUnit()) + "\n\n" + protect);
     }
 
     // ---------------- look and layout ----------------
@@ -383,12 +746,21 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private void saveLayout() {
         Layout l = view.layout();
         if (l == null) return;
-        prefs.edit().putString("layout_" + look, LayoutCodec.encode(l)).apply();
+        prefs.edit().putString("layout_" + look, LayoutCodec.encode(l)).putString("temp_unit", tempUnit()).apply();
         pushActiveParams();
         view.invalidate();
     }
 
     private void switchLook() {
+        if (HoloFace.isHolo(look)) {
+            view.chrome.editing = false;
+            view.dematerializeAll(this::switchNow);
+            return;
+        }
+        switchNow();
+    }
+
+    private void switchNow() {
         view.chrome.editing = false;
         look = nextLook();
         prefs.edit().putString(lookKey(), look).apply();
@@ -431,6 +803,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case "music:play": music.transport(0); break;
             case "music:next": music.transport(1); break;
             case "music:window": music.windowTap(); break;
+            case "heat": showTabletHeat(); break;
             default: break;
         }
     }
@@ -444,7 +817,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     public void onGaugeTap(String key) {
         Layout l = view.layout();
         GaugeSpec g = l == null ? null : l.find(key);
-        if (g != null) GaugeSettingsDialog.show(this, l, g, this::saveLayout);
+        if (g != null && g.type == GaugeType.TRUCK) showHoloSettings();
+        else if (g != null) GaugeSettingsDialog.show(this, l, g, look, this::saveLayout);
     }
 
     @Override
@@ -459,11 +833,14 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         for (Param p : Catalog.all()) {
             if (!l.activeParamIds().contains(p.id)) { param = p.id; break; }
         }
-        GaugeSpec g = new GaugeSpec("g" + n, param, GaugeType.DIAL,
-                view.widthDp() / 2 - 130, view.heightDp() / 2 - 130, 260, 260);
+        boolean holo = HoloFace.isHolo(look);
+        GaugeSpec g = holo
+                ? new GaugeSpec("g" + n, param, GaugeType.DIGITAL, view.widthDp() / 2 - 92, view.heightDp() * 0.82f, 184, 50)
+                : new GaugeSpec("g" + n, param, GaugeType.DIAL, view.widthDp() / 2 - 130, view.heightDp() / 2 - 130, 260, 260);
+        if (holo) g.depth = 1;
         l.add(g);
         saveLayout();
-        GaugeSettingsDialog.show(this, l, g, this::saveLayout);
+        GaugeSettingsDialog.show(this, l, g, look, this::saveLayout);
     }
 
     private void showLogs() {
@@ -488,7 +865,8 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     }
 
     private void showMessage(String title, String message) {
-        new AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("OK", null).show();
+        HoloDialogs.show(HoloDialogs.builder(this, holoOn).setTitle(title).setMessage(message).setPositiveButton("OK", null),
+                holoOn, holoState.fx.animateMs > 0);
     }
 
     private void showStatus() {
@@ -545,6 +923,14 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         s.normalProgress = NormalStore.get(this).progress(System.currentTimeMillis());
         ValueScan scan = service != null && service.scanRunning() ? service.scan() : null;
         s.scanProgress = scan == null ? null : scan.progress();
+        Layout l = view.layout();
+        s.hasTruck = false;
+        if (l != null) for (GaugeSpec g : l.gauges) s.hasTruck |= g.type == GaugeType.TRUCK;
+        s.truckMotion = HoloSettingsDialog.motionLabel(prefs.getFloat(HoloSettingsDialog.MOTION, 0.35f));
+        s.quality = QualityMode.pick(prefs.getString(HoloSettingsDialog.QUALITY, null));
+        s.effects = prefs.getBoolean(HoloSettingsDialog.EFFECTS, true);
+        s.calm = prefs.getBoolean(HoloSettingsDialog.CALM, true);
+        s.heatProtect = prefs.getBoolean(TabletHealth.PREF_PROTECT, true);
         return s;
     }
 
@@ -552,21 +938,19 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         final List<DashMenu.Group> groups = DashMenu.build(menuState());
         String[] titles = new String[groups.size()];
         for (int i = 0; i < titles.length; i++) titles[i] = groups.get(i).title;
-        new AlertDialog.Builder(this)
+        HoloDialogs.show(HoloDialogs.builder(this, holoOn)
                 .setTitle((Catalog.porsche() ? "Cayenne Dash" : "Jeep Dash") + "  (build " + buildNumber() + ")")
                 .setItems(titles, (dlg, which) -> showGroup(groups.get(which)))
-                .setNegativeButton("Close", null)
-                .show();
+                .setNegativeButton("Close", null), holoOn, holoState.fx.animateMs > 0);
     }
 
     private void showGroup(DashMenu.Group g) {
         String[] labels = new String[g.entries.size()];
         for (int i = 0; i < labels.length; i++) labels[i] = g.entries.get(i).label;
-        new AlertDialog.Builder(this)
+        HoloDialogs.show(HoloDialogs.builder(this, holoOn)
                 .setTitle(g.title)
                 .setItems(labels, (dlg, which) -> runEntry(g.entries.get(which).id))
-                .setNegativeButton("Back", (dlg, which) -> showMenu())
-                .show();
+                .setNegativeButton("Back", (dlg, which) -> showMenu()), holoOn, holoState.fx.animateMs > 0);
     }
 
     private void runEntry(String id) {
@@ -620,21 +1004,31 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                 break;
             case DashMenu.AUTO_START: chooseAutoStart(); break;
             case DashMenu.UPDATE: UpdateChecker.check(this, buildNumber(), true); break;
+            case DashMenu.TRUCK: showHoloSettings(); break;
+            case DashMenu.ADD_TRUCK: addTruck(); break;
+            case DashMenu.QUALITY:
+                pick("Quality mode", QualityMode.MODES, QualityMode.pick(prefs.getString(HoloSettingsDialog.QUALITY, null)), v -> {
+                    prefs.edit().putString(HoloSettingsDialog.QUALITY, v).apply();
+                    applyQuality();
+                });
+                break;
+            case DashMenu.EFFECTS: toggle(HoloSettingsDialog.EFFECTS); break;
+            case DashMenu.CALM: toggle(HoloSettingsDialog.CALM); break;
+            case DashMenu.HEAT: toggle(TabletHealth.PREF_PROTECT); break;
             default: break;
         }
     }
 
     /** One of a few named choices, the current one marked; the dash redraws after. */
     private void pick(String title, String[] choices, String now, java.util.function.Consumer<String> then) {
-        new AlertDialog.Builder(this)
+        HoloDialogs.show(HoloDialogs.builder(this, holoOn)
                 .setTitle(title)
                 .setSingleChoiceItems(choices, Arrays.asList(choices).indexOf(now), (dlg, which) -> {
                     dlg.dismiss();
                     then.accept(choices[which]);
                     view.invalidate();
                 })
-                .setNegativeButton("Cancel", null)
-                .show();
+                .setNegativeButton("Cancel", null), holoOn, holoState.fx.animateMs > 0);
     }
 
     // ---------------- now playing, auto-start, volume follows speed ----------------

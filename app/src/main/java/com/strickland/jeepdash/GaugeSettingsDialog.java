@@ -16,6 +16,7 @@ import android.widget.TextView;
 import com.strickland.jeepdash.core.Catalog;
 import com.strickland.jeepdash.core.GaugeSpec;
 import com.strickland.jeepdash.core.GaugeType;
+import com.strickland.jeepdash.core.HoloFace;
 import com.strickland.jeepdash.core.Layout;
 import com.strickland.jeepdash.core.Param;
 import com.strickland.jeepdash.core.Units;
@@ -31,9 +32,10 @@ import java.util.Locale;
 final class GaugeSettingsDialog {
     private GaugeSettingsDialog() { }
 
-    private static final String[] STYLES = {"Dial", "Digital", "Bar"};
-
-    static void show(Activity a, final Layout layout, final GaugeSpec g, final Runnable onChanged) {
+    static void show(Activity a, final Layout layout, final GaugeSpec g, String look, final Runnable onChanged) {
+        final boolean holo = HoloFace.isHolo(look);
+        final GaugeType[] types = HoloFace.styles(look);
+        final String[] styleNames = HoloFace.styleNames(look);
         final List<Param> params = Catalog.all();
         float d = a.getResources().getDisplayMetrics().density;
         int pad = Math.round(20 * d);
@@ -69,9 +71,18 @@ final class GaugeSettingsDialog {
 
         box.addView(label(a, "Style"));
         final Spinner style = new Spinner(a);
-        style.setAdapter(adapter(a, STYLES));
-        style.setSelection(g.type == GaugeType.DIAL ? 0 : g.type == GaugeType.DIGITAL ? 1 : 2);
+        style.setAdapter(adapter(a, styleNames));
+        style.setSelection(Math.max(0, java.util.Arrays.asList(types).indexOf(g.type)));
         box.addView(style);
+
+        // the Holo look: how far in front of or behind the truck the gauge floats
+        final Spinner depth = new Spinner(a);
+        if (holo) {
+            box.addView(label(a, "Depth"));
+            depth.setAdapter(adapter(a, HoloFace.DEPTH_NAMES));
+            depth.setSelection(Math.max(0, Math.min(4, g.depth + 2)));
+            box.addView(depth);
+        }
 
         final CheckBox warn = new CheckBox(a);
         warn.setText("Flash a warning when the reading goes");
@@ -150,15 +161,15 @@ final class GaugeSettingsDialog {
 
         ScrollView scroll = new ScrollView(a);
         scroll.addView(box);
-        new AlertDialog.Builder(a)
+        HoloDialogs.show(HoloDialogs.builder(a, holo)
                 .setTitle("Gauge")
                 .setView(scroll)
                 .setPositiveButton("OK", (dlg, w) -> {
                     Param chosen = params.get(what.getSelectedItemPosition());
                     g.paramId = chosen.id;
                     g.unit = Units.offers(chosen.unit, shownUnit[0]) && !shownUnit[0].equals(chosen.unit) ? shownUnit[0] : null;
-                    int s = style.getSelectedItemPosition();
-                    g.type = s == 0 ? GaugeType.DIAL : s == 1 ? GaugeType.DIGITAL : GaugeType.BAR;
+                    g.type = types[Math.max(0, style.getSelectedItemPosition())];
+                    if (holo) g.depth = depth.getSelectedItemPosition() - 2;
                     g.warnAbove = dir.getSelectedItemPosition() == 0;
                     Double lim = parse(limit.getText().toString());
                     // typed in the unit shown; kept in the value's own unit
@@ -168,11 +179,10 @@ final class GaugeSettingsDialog {
                     onChanged.run();
                 })
                 .setNegativeButton("Cancel", null)
-                .setNeutralButton("Delete gauge", (dlg, w) -> {
+                .setNeutralButton(holo ? "Hide gauge" : "Delete gauge", (dlg, w) -> {
                     layout.remove(g.key);
                     onChanged.run();
-                })
-                .show();
+                }), holo, true);
     }
 
     /** Fills the unit picker, or hides it when the value has no other units. */

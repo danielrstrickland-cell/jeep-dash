@@ -10,19 +10,32 @@ import android.view.View;
 
 import com.strickland.jeepdash.core.Catalog;
 import com.strickland.jeepdash.core.GaugeSpec;
+import com.strickland.jeepdash.core.GaugeType;
+import com.strickland.jeepdash.core.HeatGuard;
+import com.strickland.jeepdash.core.HoloFace;
 import com.strickland.jeepdash.core.Layout;
 import com.strickland.jeepdash.core.LiveValues;
+import com.strickland.jeepdash.core.Materialize;
 import com.strickland.jeepdash.core.MusicLayout;
 import com.strickland.jeepdash.core.Param;
 import com.strickland.jeepdash.core.Units;
+import com.strickland.jeepdash.scene.HoloLoop;
+import com.strickland.jeepdash.theme.HoloTheme;
 import com.strickland.jeepdash.theme.MusicPainter;
 import com.strickland.jeepdash.theme.Theme;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
-/** Draws the gauges through the current look and reports taps on the look's buttons. */
-public class DashView extends View {
+/**
+ * Draws the gauges through the current look and reports taps on the look's buttons. In the Holo look it is the
+ * layer in front of the 3D truck: gauges floating behind the truck are drawn by HoloBackView (through
+ * drawHoloLayer), the glow by HoloBloomView, and redraws are paced by HoloLoop.
+ */
+public class DashView extends View implements HoloLoop.Layers {
 
     public interface Host {
         /** The view knows its size in dp (first layout, rotation). */
@@ -33,11 +46,18 @@ public class DashView extends View {
         void onGaugeTap(String key);
         /** Edit mode: a gauge was moved or resized. */
         void onLayoutEdited();
+        /** Holo look: where the 3D truck's box is now (dp), or null when there is none. */
+        default void onSceneRect(GaugeSpec truck) { }
+        /** Holo look: the truck was tapped, or held. */
+        default void onTruckTap() { }
+        default void onTruckHold() { }
     }
 
     private static final float HANDLE = 48;           // dp: the resize corner
     private static final float SLOP = 10;             // dp: movement below this is a tap
     private static final float GRID = 16;
+    private static final long HOLD_MS = 550;
+    private static final float HEAT_ICON = 34;        // dp
 
     private static final double NEEDLE_MS = 160;      // needle catch-up time constant
     private static final long IDLE_REDRAW_MS = 30000; // nothing moving: redraw anyway (clock, XP brightness on Auto)
@@ -49,6 +69,7 @@ public class DashView extends View {
     private Layout layout;
     private LiveValues values;
     private final Map<String, Double> shown = new HashMap<>();
+    private long lastFront, lastBack;
     private final Map<String, Param> inUnits = new HashMap<>();     // gauges shown in another unit, by id and unit
     private final Runnable idleRedraw = this::invalidate;
     private long lastFrameMs;
@@ -62,15 +83,66 @@ public class DashView extends View {
     private final Paint editPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final DashPathEffect dashes = new DashPathEffect(new float[]{10, 6}, 0);
 
+    // the Holo look
+    private HoloTheme holo;
+    private View back;
+    private View[] glows = new View[0];
+    private HoloLoop loop;
+    private final Map<String, Materialize> anim = new HashMap<>();
+    private final Map<String, GaugeSpec> seen = new LinkedHashMap<>();
+    private final Map<String, GaugeSpec> ghosts = new LinkedHashMap<>();
+    private final Map<String, String> ghostParam = new HashMap<>();
+    private GaugeSpec truckRect;
+    private boolean holoMoving;
+    private boolean truckDown, holdFired;
+    private final Runnable hold = this::fireHold;
+
+    // the tablet heat icon (any look), shown at moderate heat and above
+    private int heat;
+    private final RectF heatRect = new RectF();
+
     public DashView(Context c, Host host) {
         super(c);
         this.host = host;
         this.density = c.getResources().getDisplayMetrics().density;
     }
 
-    public void setTheme(Theme t) { theme = t; shown.clear(); invalidate(); }
+    public void setTheme(Theme t) {
+        theme = t;
+        shown.clear();
+        holo = t instanceof HoloTheme ? (HoloTheme) t : null;
+        if (holo == null) {
+            anim.clear();
+            ghosts.clear();
+            seen.clear();
+        }
+        invalidate();
+    }
 
-    public void setLayout(Layout l) { layout = l; shown.clear(); invalidate(); }
+    /** The Holo look's other layers and frame clock (null when another look is on). */
+    public void setHoloLayers(View back, View[] glows, HoloLoop loop) {
+        this.back = back;
+        this.glows = glows == null ? new View[0] : glows;
+        this.loop = loop;
+    }
+
+    public void setLayout(Layout l) {
+        layout = l;
+        shown.clear();
+        // a new layout on screen: every panel materializes, one after another
+        anim.clear();
+        ghosts.clear();
+        seen.clear();
+        if (holo != null && l != null) {
+            long now = LinkService.now(), ms = holo.st.fx.animateMs;
+            int i = 0;
+            for (GaugeSpec g : l.gauges) {
+                anim.put(g.key, Materialize.opening(now + 25L * i++, ms));
+                seen.put(g.key, copy(g));
+            }
+        }
+        invalidate();
+    }
 
     public Layout layout() { return layout; }
 
@@ -79,6 +151,46 @@ public class DashView extends View {
     public float widthDp() { return wDp; }
 
     public float heightDp() { return hDp; }
+
+    /** Tablet heat (HeatGuard level): the icon shows from moderate. */
+    public void setHeat(int level) {
+        if (level != heat) {
+            heat = level;
+            invalidate();
+        }
+    }
+
+    /** Holo look: every panel dematerializes, then runs the given step (switching look, say). */
+    public void dematerializeAll(Runnable then) {
+        long ms = holo == null || layout == null ? 0 : holo.st.fx.animateMs;
+        if (ms <= 0) {
+            then.run();
+            return;
+        }
+        long now = LinkService.now();
+        for (GaugeSpec g : layout.gauges) anim.put(g.key, Materialize.closing(now, ms));
+        invalidate();
+        postDelayed(then, ms + 30);
+    }
+
+    @Override
+    public void invalidate() {
+        if (holo != null && loop != null && loop.running()) loop.poke();
+        else super.invalidate();
+    }
+
+    /** HoloLoop: redraw every Holo layer now; true while something still animates. */
+    @Override
+    public boolean redraw(long nowMs) {
+        if (holo == null) return false;
+        holo.frameTime(nowMs);
+        super.invalidate();
+        if (back != null) back.invalidate();
+        for (View g : glows) g.invalidate();
+        boolean busy = holoMoving || !ghosts.isEmpty();
+        for (Materialize m : anim.values()) busy |= !m.done(nowMs);
+        return busy;
+    }
 
     @Override
     protected void onSizeChanged(int w, int h, int oldW, int oldH) {
@@ -99,43 +211,159 @@ public class DashView extends View {
 
         c.save();
         c.scale(density, density);
-        theme.drawBackground(c, wDp, hDp);
-        if (!"gauges".equals(chrome.tab)) {
-            theme.drawPanel(c, wDp, hDp, "Visualizer", "Coming in the next update");
-        } else if (layout != null) {
-            for (GaugeSpec g : layout.gauges) {
-                Param p = Catalog.byId(g.paramId);
-                if (p == null) continue;
-                Double v = values == null ? null : values.get(p.id, now);
-                Double s = null;
-                if (v == null) {
-                    shown.remove(g.key);
-                } else {
-                    Double prev = shown.get(g.key);
-                    double next = prev == null ? v : prev + (v - prev) * (1 - Math.exp(-dt / NEEDLE_MS));
-                    if (Math.abs(v - next) < (p.max - p.min) * 0.001) next = v; else moving = true;
-                    shown.put(g.key, next);
-                    s = next;
+        if (holo != null && "gauges".equals(chrome.tab) && layout != null) {
+            // the backdrop and the gauges behind the truck are HoloBackView's
+            if (back == null) holo.drawBackground(c, wDp, hDp);
+            noticeChanges(now);
+            GaugeSpec truck = null;
+            for (GaugeSpec g : layout.gauges) if (g.type == GaugeType.TRUCK) truck = g;
+            reportTruck(truck);
+            holoMoving = drawHoloLayer(c, false, now);
+            if (back == null) holoMoving |= drawHoloLayer(c, true, now);
+            holo.drawStage(c, truck, wDp, hDp, false);
+        } else {
+            reportTruck(null);
+            theme.drawBackground(c, wDp, hDp);
+            if (!"gauges".equals(chrome.tab)) {
+                theme.drawPanel(c, wDp, hDp, "Visualizer", "Coming in the next update");
+            } else if (layout != null) {
+                for (GaugeSpec g : layout.gauges) {
+                    Param p = Catalog.byId(g.paramId);
+                    if (p == null) continue;
+                    Double v = values == null ? null : values.get(p.id, now);
+                    Double s = tween(g.key, p, v, dt);
+                    if (s != null && !s.equals(v)) moving = true;
+                    boolean warn = Layout.shouldFlash(g, v);         // the limit is kept in the value's own unit
+                    flashing |= warn;
+                    Param d = display(p, g.unit);
+                    if (d != p) {
+                        if (v != null) v = Units.convert(v, p.unit, d.unit);
+                        if (s != null) s = Units.convert(s, p.unit, d.unit);
+                    }
+                    theme.drawGauge(c, g, d, v, s, warn && blink, chrome.editing);
                 }
-                boolean warn = Layout.shouldFlash(g, v);         // the limit is kept in the value's own unit
-                flashing |= warn;
-                Param d = display(p, g.unit);
-                if (d != p) {
-                    if (v != null) v = Units.convert(v, p.unit, d.unit);
-                    if (s != null) s = Units.convert(s, p.unit, d.unit);
-                }
-                theme.drawGauge(c, g, d, v, s, warn && blink, chrome.editing);
             }
         }
         if (chrome.editing && layout != null && "gauges".equals(chrome.tab)) drawEditMarks(c);
         theme.drawChrome(c, wDp, hDp, chrome);
+        drawHeat(c);
         drawMusic(c);
         c.restore();
+        if (holo != null && loop != null && loop.running()) return;        // HoloLoop paces the Holo look
         if (moving) postInvalidateOnAnimation();
         else if (flashing) postInvalidateDelayed(100);
         // one pending at a time, so it never adds frames of its own while readings are coming in
         removeCallbacks(idleRedraw);
         postDelayed(idleRedraw, IDLE_REDRAW_MS);
+    }
+
+    /** The smoothed reading for needles, bars and gliding figures; null with no reading. */
+    private Double tween(String key, Param p, Double v, double dt) {
+        if (v == null) {
+            shown.remove(key);
+            return null;
+        }
+        Double prev = shown.get(key);
+        double next = prev == null ? v : prev + (v - prev) * (1 - Math.exp(-dt / NEEDLE_MS));
+        if (Math.abs(v - next) < (p.max - p.min) * 0.001) next = v;
+        shown.put(key, next);
+        return next;
+    }
+
+    private void reportTruck(GaugeSpec t) {
+        boolean same = t == null ? truckRect == null
+                : truckRect != null && t.x == truckRect.x && t.y == truckRect.y && t.w == truckRect.w && t.h == truckRect.h;
+        if (same) return;
+        truckRect = t == null ? null : copy(t);
+        final GaugeSpec r = truckRect;
+        post(() -> host.onSceneRect(r));           // not in the middle of drawing
+    }
+
+    private static GaugeSpec copy(GaugeSpec g) {
+        GaugeSpec c = new GaugeSpec(g.key, g.paramId, g.type, g.x, g.y, g.w, g.h);
+        c.depth = g.depth;
+        c.unit = g.unit;
+        return c;
+    }
+
+    /** New gauges materialize; removed ones dematerialize as ghosts. */
+    private void noticeChanges(long now) {
+        long ms = holo.st.fx.animateMs;
+        List<String> gone = new ArrayList<>(seen.keySet());
+        for (GaugeSpec g : layout.gauges) {
+            gone.remove(g.key);
+            if (!seen.containsKey(g.key)) anim.put(g.key, Materialize.opening(now, ms));
+            seen.put(g.key, copy(g));
+            ghosts.remove(g.key);
+        }
+        for (String k : gone) {
+            GaugeSpec g = seen.remove(k);
+            if (ms > 0 && g != null && g.type != GaugeType.TRUCK) {
+                ghosts.put(k, g);
+                ghostParam.put(k, g.paramId);
+                anim.put(k, Materialize.closing(now, ms));
+            } else {
+                anim.remove(k);
+            }
+        }
+        List<String> done = new ArrayList<>();
+        for (String k : ghosts.keySet()) if (anim.get(k) == null || anim.get(k).gone(now)) done.add(k);
+        for (String k : done) {
+            ghosts.remove(k);
+            anim.remove(k);
+        }
+    }
+
+    /**
+     * Holo look: draws one layer of gauges (behind the truck, or level with and in front of it), each floated,
+     * tilted and animated by the look. True while any of them is still moving toward its reading.
+     */
+    public boolean drawHoloLayer(Canvas c, boolean behind, long now) {
+        if (holo == null || layout == null || !"gauges".equals(chrome.tab)) return false;
+        long last = behind ? lastBack : lastFront;
+        double dt = last == 0 ? 16 : Math.max(1, Math.min(1000, now - last));
+        if (behind) lastBack = now;
+        else lastFront = now;
+        boolean blink = (now / 250) % 2 == 0, moving = false;
+        List<GaugeSpec> all = new ArrayList<>(layout.gauges);
+        all.addAll(ghosts.values());
+        for (GaugeSpec g : all) {
+            if ((g.depth < 0) != behind) continue;
+            Param p = Catalog.byId(g.paramId);
+            if (p == null) continue;
+            boolean ghost = ghosts.containsKey(g.key);
+            Double v = ghost || values == null ? null : values.get(p.id, now);
+            Double s = ghost ? null : tween(g.key, p, v, dt);
+            if (s != null && !s.equals(v)) moving = true;
+            boolean warn = Layout.shouldFlash(g, v);
+            String partnerId = HoloFace.partner(p.id);
+            Double partner = partnerId == null || values == null ? null : values.get(partnerId, now);
+            Param d = display(p, g.unit);
+            if (d != p) {
+                if (v != null) v = Units.convert(v, p.unit, d.unit);
+                if (s != null) s = Units.convert(s, p.unit, d.unit);
+            }
+            holo.drawLayered(c, g, d, v, s, partner, warn && blink, chrome.editing, wDp, hDp, anim.get(g.key));
+        }
+        return moving;
+    }
+
+    /** Holo look: the bright lines of every gauge and of the stage, for the bloom layer. */
+    public void drawHoloGlow(Canvas c) {
+        if (holo == null || layout == null || !"gauges".equals(chrome.tab) || chrome.editing) return;
+        GaugeSpec truck = null;
+        for (GaugeSpec g : layout.gauges) {
+            if (g.type == GaugeType.TRUCK) truck = g;
+            Param p = Catalog.byId(g.paramId);
+            if (p == null) continue;
+            Materialize m = anim.get(g.key);
+            if (m != null && !m.done(LinkService.now())) continue;
+            Param d = display(p, g.unit);
+            Double s = shown.get(g.key);
+            if (s != null && d != p) s = Units.convert(s, p.unit, d.unit);
+            holo.drawGlow(c, g, d, s, wDp, hDp);
+        }
+        holo.drawStageGlow(c, truck, wDp, hDp);
     }
 
     /** The music window, beside the look's music button, over everything else. */
@@ -147,6 +375,30 @@ public class DashView extends View {
         }
         music = MusicLayout.place(wDp, hDp, b.left, b.top, b.right, b.bottom);
         MusicPainter.draw(c, music, chrome, theme.musicDress());
+    }
+
+    /** A small thermometer in the top-left corner while the tablet runs hot; tapping it says how hot. */
+    private void drawHeat(Canvas c) {
+        if (heat < HeatGuard.MODERATE) {
+            heatRect.setEmpty();
+            return;
+        }
+        float x = 10, y = Math.max(52, hDp * 0.065f), s = HEAT_ICON;
+        heatRect.set(x - 6, y - 6, x + s + 6, y + s + 6);
+        int col = heat >= HeatGuard.SEVERE ? 0xffff463c : 0xffffb020;
+        editPaint.setPathEffect(null);
+        editPaint.setStyle(Paint.Style.FILL);
+        editPaint.setColor(0xcc05090f);
+        c.drawRoundRect(x, y, x + s, y + s, 6, 6, editPaint);
+        editPaint.setStyle(Paint.Style.STROKE);
+        editPaint.setStrokeWidth(1.5f);
+        editPaint.setColor(col);
+        c.drawRoundRect(x, y, x + s, y + s, 6, 6, editPaint);
+        float cx = x + s / 2;
+        c.drawRoundRect(cx - s * 0.09f, y + s * 0.16f, cx + s * 0.09f, y + s * 0.66f, s * 0.09f, s * 0.09f, editPaint);
+        editPaint.setStyle(Paint.Style.FILL);
+        c.drawCircle(cx, y + s * 0.72f, s * 0.15f, editPaint);
+        c.drawRect(cx - s * 0.04f, y + s * 0.34f, cx + s * 0.04f, y + s * 0.7f, editPaint);
     }
 
     /**
@@ -265,13 +517,73 @@ public class DashView extends View {
         }
     }
 
+    private void fireHold() {
+        if (!truckDown) return;
+        holdFired = true;
+        host.onTruckHold();
+    }
+
+    /** Holo look, not editing: a tap on the truck spins it, a hold opens its hood. */
+    private boolean truckTouch(MotionEvent e, float x, float y) {
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                if (truckRect == null || theme.hit(x, y) != null || x < truckRect.x || x > truckRect.x + truckRect.w
+                        || y < truckRect.y || y > truckRect.y + truckRect.h) return false;
+                truckDown = true;
+                holdFired = false;
+                downX = x;
+                downY = y;
+                postDelayed(hold, HOLD_MS);
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                if (!truckDown) return false;
+                if (Math.hypot(x - downX, y - downY) > SLOP * 2) {
+                    truckDown = false;
+                    removeCallbacks(hold);
+                }
+                return true;
+            case MotionEvent.ACTION_UP:
+                if (!truckDown) return false;
+                truckDown = false;
+                removeCallbacks(hold);
+                if (!holdFired) {
+                    performClick();
+                    host.onTruckTap();
+                }
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                truckDown = false;
+                removeCallbacks(hold);
+                return true;
+            default:
+                return truckDown;
+        }
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent e) {
         if (theme == null) return false;
         float x = e.getX() / density, y = e.getY() / density;
         if (musicTouch(e, x, y)) return true;
+        if (e.getActionMasked() == MotionEvent.ACTION_DOWN && heatRect.contains(x, y)) {
+            downAction = "heat";
+            return true;
+        }
+        if ("heat".equals(downAction)) {
+            if (e.getActionMasked() == MotionEvent.ACTION_UP) {
+                downAction = null;
+                if (heatRect.contains(x, y)) {
+                    performClick();
+                    host.onDashAction("heat");
+                }
+            } else if (e.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                downAction = null;
+            }
+            return true;
+        }
         boolean editingGauges = chrome.editing && layout != null && "gauges".equals(chrome.tab);
         if (editingGauges && (dragKey != null || theme.hit(x, y) == null) && editTouch(e, x, y)) return true;
+        if (!editingGauges && holo != null && truckTouch(e, x, y)) return true;
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 downAction = theme.hit(x, y);
