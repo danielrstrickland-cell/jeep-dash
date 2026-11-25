@@ -39,6 +39,10 @@ public final class TestMain {
             DashMenuTest.class,
             VizLooksTest.class,
             ListenLogTest.class,
+            PauseGateTest.class,
+            RollingCaptureTest.class,
+            MisfireCodesTest.class,
+            TuneLogTest.class,
     };
 
     public static void main(String[] args) {

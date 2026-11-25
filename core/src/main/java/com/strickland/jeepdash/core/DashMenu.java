@@ -20,7 +20,7 @@ public final class DashMenu {
             MUSIC_BUTTON = "music_button", VOLUME = "volume", VISUALIZER = "visualizer",
             FUEL = "fuel",
             CODES = "codes", LOGS = "logs",
-            AUTO_START = "auto_start", UPDATE = "update", LISTEN = "listen";
+            AUTO_START = "auto_start", UPDATE = "update", LISTEN = "listen", TUNE_LOG = "tune_log";
 
     /** What the menu needs to know, filled in by the dash each time it opens. */
     public static final class State {
@@ -91,6 +91,7 @@ public final class DashMenu {
 
         List<Entry> diag = new ArrayList<>();
         if (s.linked && s.codes) diag.add(new Entry(CODES, "Trouble codes (read and clear)"));
+        if (s.linked) diag.add(new Entry(TUNE_LOG, "Tune log"));
         diag.add(new Entry(LOGS, "Drive logs"));
         diag.add(new Entry(LISTEN, "Listen mode (Kenwood stereo Bluetooth)"));
         add(out, "Diagnostics", diag);

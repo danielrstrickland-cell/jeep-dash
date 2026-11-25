@@ -73,6 +73,20 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+        <!-- Jeep Tune (com.strickland.jeeptune) says when it is reading through the dongle; the dash lets go meanwhile. -->
+        <receiver
+            android:name=".BusyReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.strickland.jeeptune.action.DONGLE_BUSY" />
+            </intent-filter>
+        </receiver>
+        <activity
+            android:name=".TuneLogActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:exported="false"
+            android:label="Tune log"
+            android:screenOrientation="sensorLandscape" />
         <!-- Auto-start with Bluetooth device: switched on only while a device is chosen. -->
         <receiver
             android:name=".AutoStartReceiver"

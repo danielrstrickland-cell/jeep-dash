@@ -230,6 +230,7 @@ public final class JeepTheme implements Theme {
             case RECONNECTING: return "RECONNECTING";
             case BUSY: return "NO DONGLE";
             case NO_PERMISSION: return "NEEDS PERMISSION";
+            case PAUSED: return "PAUSED";
             default: return "SEARCHING";
         }
     }

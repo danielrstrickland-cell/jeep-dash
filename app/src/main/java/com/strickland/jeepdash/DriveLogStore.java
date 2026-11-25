@@ -51,6 +51,26 @@ final class DriveLogStore {
         return new DriveLogWriter(new BufferedWriter(new OutputStreamWriter(os, StandardCharsets.UTF_8)), ids);
     }
 
+    /** Creates an empty CSV with this exact name next to the drive logs; null on Android 9 and older. */
+    static Uri createCsv(Context c, String name) throws IOException {
+        if (Build.VERSION.SDK_INT < 29) return null;
+        ContentValues cv = new ContentValues();
+        cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+        cv.put(MediaStore.MediaColumns.MIME_TYPE, "text/csv");
+        cv.put(MediaStore.MediaColumns.RELATIVE_PATH, FOLDER);
+        try {
+            return c.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+        } catch (RuntimeException e) {
+            throw new IOException("could not create " + name + ": " + e);
+        }
+    }
+
+    static java.io.Writer writer(Context c, Uri uri) throws IOException {
+        OutputStream os = c.getContentResolver().openOutputStream(uri, "w");
+        if (os == null) throw new IOException("could not open " + uri);
+        return new BufferedWriter(new OutputStreamWriter(os, StandardCharsets.UTF_8));
+    }
+
     /** This app's drive logs, newest first. */
     static List<Uri> list(Context c) {
         List<Uri> out = new ArrayList<>();
@@ -111,11 +131,13 @@ final class DriveLogStore {
         a.startActivity(Intent.createChooser(i, title));
     }
 
-    static void share(Activity a, Uri uri) {
+    static void share(Activity a, Uri uri) { share(a, uri, "Share drive log"); }
+
+    static void share(Activity a, Uri uri, String title) {
         Intent i = new Intent(Intent.ACTION_SEND);
         i.setType("text/csv");
         i.putExtra(Intent.EXTRA_STREAM, uri);
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        a.startActivity(Intent.createChooser(i, "Share drive log"));
+        a.startActivity(Intent.createChooser(i, title));
     }
 }

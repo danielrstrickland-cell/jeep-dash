@@ -34,7 +34,10 @@ import com.strickland.jeepdash.core.FuelUse;
 import com.strickland.jeepdash.core.Gears;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Motion;
+import com.strickland.jeepdash.core.MisfireCodes;
 import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.core.PauseGate;
+import com.strickland.jeepdash.core.RollingCapture;
 import com.strickland.jeepdash.core.KwpRunner;
 import com.strickland.jeepdash.core.PollRunner;
 import com.strickland.jeepdash.core.Poller;
@@ -63,7 +66,7 @@ import java.util.concurrent.TimeUnit;
  */
 public class LinkService extends Service {
 
-    public enum Status { SEARCHING, CONNECTING, SETTING_UP, LIVE, RECONNECTING, BUSY, NO_PERMISSION }
+    public enum Status { SEARCHING, CONNECTING, SETTING_UP, LIVE, RECONNECTING, BUSY, NO_PERMISSION, PAUSED }
 
     /** Both callbacks arrive on the main thread. onValues comes about ten times a second. */
     public interface Listener {
@@ -91,6 +94,27 @@ public class LinkService extends Service {
             "Can't reach the dongle. Check it's plugged in, then close the GearWrench app and turn off your iPhone's Bluetooth.";
     static final String KEY_OFF_DETAIL = "Waiting for the engine computer. Turn the key on.";
 
+    /** Shown on the dash while the Jeep Tune app has the dongle. */
+    static final String PAUSED_DETAIL = "Paused \u2014 Jeep Tune reading";
+
+    // ---------------- pause while Jeep Tune reads (see BusyReceiver and core PauseGate) ----------------
+
+    /**
+     * Jeep Tune's busy broadcasts land here, in this process even when the service is not running, so the
+     * state is already right when the service starts. The 90 s failsafe is in the gate.
+     */
+    private static final PauseGate GATE = new PauseGate(LinkService::now);
+    private static volatile LinkService instance;
+
+    /** True while Jeep Tune has the dongle: nothing here may talk to it. */
+    static boolean tunePaused() { return GATE.isPaused(); }
+
+    static void onTuneBusy(boolean busy) {
+        GATE.onBusy(busy);
+        LinkService s = instance;
+        if (s != null) s.note("Jeep Tune busy=" + busy);
+    }
+
     private static final String CHANNEL = "link";
     private static final int NOTIFICATION_ID = 1;
     private static final long OTHER_LINE_EVERY_MS = 60000;
@@ -117,6 +141,8 @@ public class LinkService extends Service {
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
     private final LiveValues values = new LiveValues();
     private final Trace trace = new Trace(2000);
+    // Misfire catcher: the last 30 s of readings, kept in memory; see MisfireCodes and RollingCapture.
+    private RollingCapture misfire;
 
     private volatile Set<String> active = new LinkedHashSet<>();
     private volatile Set<String> requested = new LinkedHashSet<>();     // what the screen in front asked for
@@ -396,7 +422,10 @@ public class LinkService extends Service {
                 SciCodes.Cleared c = r.clearCodes();
                 answerCodes(job, c.left, c.outcome);
             } else {
-                answerCodes(job, r.readCodes(), null);
+                List<Integer> codes = r.readCodes();
+                String m = MisfireCodes.first(codes, Catalog.porsche());
+                if (m != null && misfire != null) misfire.trigger(now(), m);     // misfire code in the list: keep 30 s either side
+                answerCodes(job, codes, null);
             }
         } catch (IOException e) {
             answerCodes(job, null, job.clear ? SciCodes.Outcome.FAILED : null);
@@ -442,6 +471,10 @@ public class LinkService extends Service {
             nm.createNotificationChannel(ch);
         }
         lastUsefulMs = now();
+        instance = this;
+        List<String> misfireIds = new ArrayList<>();
+        for (Param p : Catalog.all()) misfireIds.add(p.id);
+        misfire = new RollingCapture(misfireIds);
         try {
             IntentFilter pairing = new IntentFilter(BluetoothDevice.ACTION_PAIRING_REQUEST);
             pairing.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
@@ -500,7 +533,9 @@ public class LinkService extends Service {
         } catch (RuntimeException ignored) {
             // it was never registered
         }
+        if (instance == this) instance = null;
         if (ticker != null) {
+            ticker.execute(() -> saveMisfire(misfire.finish()));
             ticker.execute(this::closeLog);
             ticker.execute(this::releaseVolume);
             ticker.execute(FuelStore::save);
@@ -563,6 +598,7 @@ public class LinkService extends Service {
             case RECONNECTING: return "Reconnecting";
             case BUSY: return "Can't reach the dongle";
             case NO_PERMISSION: return "Needs the Nearby devices permission";
+            case PAUSED: return PAUSED_DETAIL;
             default: return "Looking for the dongle";
         }
     }
@@ -623,6 +659,11 @@ public class LinkService extends Service {
         SharedPreferences prefs = getSharedPreferences("link", MODE_PRIVATE);
         while (alive(gen)) {
             try {
+                if (GATE.isPaused()) {          // Jeep Tune has the dongle: no connecting, no retries
+                    setStatus(Status.PAUSED, PAUSED_DETAIL);
+                    pause(500);
+                    continue;
+                }
                 if (!hasBluetoothPermission()) {
                     setStatus(Status.NO_PERMISSION, "Allow Nearby devices for Jeep Dash");
                     pause(RETRY_MS);
@@ -640,6 +681,11 @@ public class LinkService extends Service {
                 if (failures == 0) setStatus(everLive ? Status.RECONNECTING : Status.CONNECTING, "");
                 if (!paired(dev)) pair(dev, gen);
                 AndroidByteLink link = connect(dev, prefs.getInt("mode", -1), failures, gen);
+                if (link != null && GATE.isPaused()) {      // Tune started while this was connecting
+                    link.close();
+                    continue;
+                }
+                if (link == null && GATE.isPaused()) continue;
                 if (link == null) {
                     failures++;
                     // An address remembered from an unpaired dongle may be a dongle that is gone: look again.
@@ -651,7 +697,7 @@ public class LinkService extends Service {
                 failures = 0;
                 prefs.edit().putString("address", dev.getAddress()).putInt("mode", link.mode).apply();
                 if (runConnection(link, gen)) everLive = true;
-                if (alive(gen)) {
+                if (alive(gen) && !GATE.isPaused()) {
                     setStatus(Status.RECONNECTING, "Lost the dongle. Reconnecting.");
                     pause(RETRY_MS);
                 }
@@ -879,7 +925,7 @@ public class LinkService extends Service {
     /** Tries the way that worked last time first; every fourth failed round tries all three ways. */
     private AndroidByteLink connect(BluetoothDevice dev, int lastGoodMode, int failures, int gen) {
         boolean tryAll = lastGoodMode < 0 || lastGoodMode >= AndroidByteLink.MODES || failures % 4 == 3;
-        for (int i = 0; i < AndroidByteLink.MODES && alive(gen); i++) {
+        for (int i = 0; i < AndroidByteLink.MODES && alive(gen) && !GATE.isPaused(); i++) {
             int mode = tryAll ? i : lastGoodMode;
             try {
                 AndroidByteLink link = AndroidByteLink.connect(dev, mode);
@@ -933,6 +979,7 @@ public class LinkService extends Service {
         boolean live = false;
         try {
             while (alive(gen)) {
+                if (GATE.isPaused()) break;         // Jeep Tune wants the dongle: leave() below, then the socket closes
                 if (activeDirty) {
                     activeDirty = false;
                     r.setActive(active);
@@ -980,6 +1027,7 @@ public class LinkService extends Service {
         }
         workOutMotion();
         countFuel();
+        sampleMisfire();
         if (++tickCount % 5 == 0) followSpeed();
         if (tickCount % 10 != 0) return;
 
@@ -1013,6 +1061,39 @@ public class LinkService extends Service {
 
         if (anyBound || dataLately) lastUsefulMs = t;
         else if (running && t - lastUsefulMs > IDLE_STOP_MS) main.post(this::shutDown);
+    }
+
+    /** Ticker thread: feeds the misfire buffer while the link is up; a capture cut short by a lost link is saved as it is. */
+    private void sampleMisfire() {
+        RollingCapture m = misfire;
+        if (m == null) return;
+        if (status == Status.LIVE && runner != null) saveMisfire(m.sample(now(), values));
+        else if (m.pending()) saveMisfire(m.finish());
+    }
+
+    private static final int KEEP_MISFIRE_FILES = 30;
+
+    /** Writes a finished capture to misfire-yyyyMMdd-HHmmss-P0303.csv in the app's own storage folder. */
+    private void saveMisfire(RollingCapture.Capture c) {
+        if (c == null) return;
+        try {
+            java.io.File dir = getExternalFilesDir("misfire");
+            if (dir == null) dir = new java.io.File(getFilesDir(), "misfire");
+            if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("no folder " + dir);
+            String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(new java.util.Date());
+            java.io.File f = new java.io.File(dir, "misfire-" + stamp + "-" + c.reason + ".csv");
+            try (java.io.Writer w = new java.io.OutputStreamWriter(new java.io.FileOutputStream(f), java.nio.charset.StandardCharsets.UTF_8)) {
+                c.writeCsv(w);
+            }
+            note("misfire capture saved: " + f.getName() + " (" + c.rows.size() + " rows)");
+            java.io.File[] all = dir.listFiles((d, n) -> n.startsWith("misfire-") && n.endsWith(".csv"));
+            if (all != null && all.length > KEEP_MISFIRE_FILES) {
+                java.util.Arrays.sort(all);                 // names start with the time, so oldest first
+                for (int i = 0; i < all.length - KEEP_MISFIRE_FILES; i++) all[i].delete();
+            }
+        } catch (IOException | RuntimeException e) {
+            note("misfire capture not saved: " + e);
+        }
     }
 
     private void openLog(long t) {

@@ -541,6 +541,10 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case DashMenu.CODES: if (service != null) CodesDialog.show(this, service); break;
             case DashMenu.LOGS: showLogs(); break;
             case DashMenu.LISTEN: startActivity(new Intent(this, ListenActivity.class)); break;
+            case DashMenu.TUNE_LOG:
+                if (LinkService.tunePaused()) showMessage("Tune log", LinkService.PAUSED_DETAIL);
+                else startActivity(new Intent(this, TuneLogActivity.class));
+                break;
             case DashMenu.AUTO_START: chooseAutoStart(); break;
             case DashMenu.UPDATE: UpdateChecker.check(this, buildNumber(), true); break;
             default: break;

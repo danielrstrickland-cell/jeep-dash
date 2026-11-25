@@ -422,6 +422,7 @@ public final class XpTheme implements Theme {
             case RECONNECTING: return "Reconnecting";
             case BUSY: return "Can't reach dongle";
             case NO_PERMISSION: return "Needs permission";
+            case PAUSED: return "Paused";
             default: return "Looking for dongle";
         }
     }
