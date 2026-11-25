@@ -21,7 +21,7 @@ public final class DashMenu {
             FUEL = "fuel",
             CODES = "codes", LOGS = "logs", NORMAL = "normal", SCAN = "scan",
             AUTO_START = "auto_start", UPDATE = "update", LISTEN = "listen", TUNE_LOG = "tune_log",
-            TRUCK = "truck", ADD_TRUCK = "add_truck", HOLO_RADIO = "holo_radio";
+            TRUCK = "truck", ADD_TRUCK = "add_truck", EFFECTS = "effects", CALM = "calm";
 
     /** What the menu needs to know, filled in by the dash each time it opens. */
     public static final class State {
@@ -41,7 +41,8 @@ public final class DashMenu {
         public String scanProgress;            // a value scan under way; null when none
         public boolean hasTruck;               // the Holo look's layout has its 3D truck view
         public String truckMotion = "realistic";   // how hard the truck leans (TruckSettings wording)
-        public boolean holoOnRadio;            // the Porsche's radio offers the Holo look
+        public String effects = "Full";        // the Holo look's effects (HoloEffects)
+        public boolean calm = true;            // Holo: calm while moving
     }
 
     public static final class Entry {
@@ -84,8 +85,9 @@ public final class DashMenu {
             look.add(new Entry(JEEP_BACKLIGHT, "Backlight: " + s.jeepBacklight));
         } else if (HoloFace.isHolo(s.look)) {
             look.add(new Entry(TRUCK, "3D truck: model, lighting, motion (" + s.truckMotion + ")"));
+            look.add(new Entry(EFFECTS, "Effects: " + s.effects));
+            look.add(new Entry(CALM, "Calm while moving: " + onOff(s.calm)));
         }
-        if (s.porsche) look.add(new Entry(HOLO_RADIO, "Holo look with the 3D truck (heavy for this radio): " + onOff(s.holoOnRadio)));
         add(out, "Look", look);
 
         List<Entry> music = new ArrayList<>();

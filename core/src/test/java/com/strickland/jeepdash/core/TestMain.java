@@ -51,6 +51,7 @@ public final class TestMain {
             TruckMotionTest.class,
             TruckRigTest.class,
             HoloFaceTest.class,
+            HoloEffectsTest.class,
     };
 
     public static void main(String[] args) {

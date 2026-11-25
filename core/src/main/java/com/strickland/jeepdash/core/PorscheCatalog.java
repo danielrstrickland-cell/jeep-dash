@@ -113,10 +113,6 @@ public final class PorscheCatalog {
         screen("mpg_avg", "MPG this drive", "mpg", 0, 40);
         screen("fuel_used", "Fuel used this drive", "gal", 0, 10);
         screen("fuel_gph", "Fuel flow", "gal/h", 0, 50);        // the turbo goes past 30 at full throttle
-        // the body's lean (see TruckMotion) and the learning alerts' progress, as on the Jeep
-        screen("roll", "Body roll", "°", -10, 10);
-        screen("pitch", "Body pitch", "°", -6, 6);
-        screen("normal", "Normal readings", "of 5", 0, 5);
     }
 
     private static void screen(String id, String name, String unit, double min, double max) {

@@ -72,17 +72,6 @@ public final class HoloFaceTest {
         T.eq(java.util.Collections.emptySet(), s.slowIds(), "every reading on the working line");
     }
 
-    public static void thePorscheHoloLayoutUsesItsOwnValues() {
-        Catalog.useVehicle("porsche");
-        try {
-            Layout l = LayoutCodec.defaultFor("p_holo", 1280, 800);
-            for (GaugeSpec g : l.gauges) T.ok(Catalog.byId(g.paramId) != null, g.paramId + " is a Porsche value");
-            T.ok(find(l, "speed", GaugeType.TRUCK) != null, "truck too");
-        } finally {
-            Catalog.useVehicle("jeep");
-        }
-    }
-
     public static void stylesDependOnTheLook() {
         T.eq(Arrays.asList(GaugeType.DIAL, GaugeType.DIGITAL, GaugeType.BAR), Arrays.asList(HoloFace.styles("xp")), "other looks");
         GaugeType[] holo = HoloFace.styles("holo");
@@ -134,19 +123,25 @@ public final class HoloFaceTest {
         T.ok(entry(s, DashMenu.ADD_TRUCK) != null, "hidden: can be put back");
         s.look = "xp";
         T.eq(null, entry(s, DashMenu.TRUCK), "not in other looks");
-        T.eq(null, entry(s, DashMenu.HOLO_RADIO), "the Jeep always has the Holo look");
     }
 
-    public static void thePorscheOffersTheHoloLookOnlyWhenAskedFor() {
+    public static void theHoloLookIsTheJeepsAlone() {
+        T.eq(Arrays.asList("p_retro", "p_gt"), Arrays.asList(HoloFace.looks(true)), "the Porsche keeps its two looks");
+        T.eq(Arrays.asList("xp", "jeep", "retro", "holo"), Arrays.asList(HoloFace.looks(false)), "Jeep looks");
         DashMenu.State s = new DashMenu.State();
         s.porsche = true;
         s.look = "p_gt";
-        T.ok(entry(s, DashMenu.HOLO_RADIO).label.endsWith("off"), "off by default on the radio");
-        s.holoOnRadio = true;
-        T.ok(entry(s, DashMenu.HOLO_RADIO).label.endsWith("on"), "and says when it is on");
-        T.eq(Arrays.asList("p_retro", "p_gt"), Arrays.asList(HoloFace.looks(true, false)), "Porsche looks by default");
-        T.eq(Arrays.asList("p_retro", "p_gt", "p_holo"), Arrays.asList(HoloFace.looks(true, true)), "with the Holo look");
-        T.eq(Arrays.asList("xp", "jeep", "retro", "holo"), Arrays.asList(HoloFace.looks(false, false)), "Jeep looks");
+        T.eq(null, entry(s, DashMenu.TRUCK), "no truck entries on the Porsche");
+        T.eq(null, entry(s, DashMenu.EFFECTS), "no effects entry on the Porsche");
+    }
+
+    public static void effectsAndCalmAreInTheHoloLooksMenu() {
+        DashMenu.State s = new DashMenu.State();
+        s.look = "holo";
+        s.effects = "Lite";
+        s.calm = true;
+        T.eq("Effects: Lite", entry(s, DashMenu.EFFECTS).label, "effects level");
+        T.eq("Calm while moving: on", entry(s, DashMenu.CALM).label, "calm while moving, on by default");
     }
 
     // ---------------- files ----------------

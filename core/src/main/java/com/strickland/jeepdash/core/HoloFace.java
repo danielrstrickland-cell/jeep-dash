@@ -19,14 +19,13 @@ public final class HoloFace {
     /** The arc's radius as a share of its box's height, and how far its centre sits outside the box (radii). */
     static final float ARC_RADIUS = 0.471f, ARC_OUTSIDE = 0.538f;
 
-    public static boolean isHolo(String look) { return "holo".equals(look) || "p_holo".equals(look); }
+    public static boolean isHolo(String look) { return "holo".equals(look); }
 
     public static float minSize(String look) { return isHolo(look) ? MIN_SIZE : Layout.MIN_SIZE; }
 
-    /** The looks a car offers, in the order the switch button steps through them. The radio gets Holo only when asked. */
-    public static String[] looks(boolean porsche, boolean holoOnRadio) {
-        if (porsche) return holoOnRadio ? new String[]{"p_retro", "p_gt", "p_holo"} : new String[]{"p_retro", "p_gt"};
-        return new String[]{"xp", "jeep", "retro", "holo"};
+    /** The looks a car offers, in the order the switch button steps through them. Holo (and its 3D truck) is the Jeep's. */
+    public static String[] looks(boolean porsche) {
+        return porsche ? new String[]{"p_retro", "p_gt"} : new String[]{"xp", "jeep", "retro", "holo"};
     }
 
     // ---------------- styles ----------------
@@ -52,10 +51,6 @@ public final class HoloFace {
         pair("ltft", "stft", "FUEL TRIM  L / S", "FUEL TRIM  S / L");
         pair("spark", "timing_pulled", "TIMING  /  PULLED", null);
         pair("roll", "pitch", "BODY ROLL", "BODY PITCH");
-        pair("boost", "boost_set", "BOOST  /  TARGET", null);
-        pair("trim_1", "trim_2", "FUEL TRIM  1 / 2", "FUEL TRIM  2 / 1");
-        pair("cam_r", "cam_l", "CAMS  R / L", "CAMS  L / R");
-        pair("lambda_r", "lambda_l", "LAMBDA  R / L", "LAMBDA  L / R");
         TITLE.put("map_kpa", "MANIFOLD");
         TITLE.put("mpg_avg", "MPG THIS DRIVE");
         TITLE.put("fuel_used", "FUEL USED");
@@ -97,6 +92,44 @@ public final class HoloFace {
     public static String lean(double deg) {
         if (Math.abs(deg) < 0.05) return "0.0°";
         return (deg < 0 ? "L " : "R ") + String.format(Locale.US, "%.1f°", Math.abs(deg));
+    }
+
+    // ---------------- depth ----------------
+
+    /** dp in front of the screen per step of depth; the viewer's distance from the screen (dp). */
+    public static final float DEPTH_STEP = 90, VIEW_DIST = 900;
+    /** Degrees the side panels turn in toward the viewer, and the top and bottom rows tip toward them. */
+    public static final float TILT_Y = 16, TILT_X = 5;
+    public static final String[] DEPTH_NAMES = {"Far behind the truck", "Behind the truck", "Level with the truck",
+            "In front of the truck", "Close up"};
+
+    /** Panels turn toward the viewer; the arcs, the hexagon and the truck stay square on (they ring the truck). */
+    public static boolean tilts(GaugeType t) { return t == GaugeType.DIGITAL || t == GaugeType.BAR || t == GaugeType.DIAL; }
+
+    /**
+     * Where a gauge's corners land on screen (top left, top right, bottom right, bottom left; dp) when it floats
+     * at its depth, turned in toward the viewer (tilt 0..1) and seen from a viewer moved by the parallax angles.
+     * With no tilt and no parallax it lands exactly on its box, whatever its depth.
+     */
+    public static float[] project(GaugeSpec g, float screenW, float screenH, double tilt, double parallaxYawDeg, double parallaxPitchDeg) {
+        double d = VIEW_DIST, z = g.depth * DEPTH_STEP, k = (d - z) / d;
+        double cx = g.x + g.w / 2.0 - screenW / 2.0, cy = screenH / 2.0 - (g.y + g.h / 2.0);
+        double t = tilts(g.type) ? tilt : 0;
+        double side = Math.max(-1, Math.min(1, cx / (screenW / 2.0))), vert = Math.max(-1, Math.min(1, cy / (screenH / 2.0)));
+        double ay = Math.toRadians(-TILT_Y * t * side), ax = Math.toRadians(TILT_X * t * vert);
+        double ex = d * Math.tan(Math.toRadians(parallaxYawDeg)), ey = d * Math.tan(Math.toRadians(parallaxPitchDeg));
+        double[][] corners = {{-g.w / 2.0, g.h / 2.0}, {g.w / 2.0, g.h / 2.0}, {g.w / 2.0, -g.h / 2.0}, {-g.w / 2.0, -g.h / 2.0}};
+        float[] out = new float[8];
+        for (int i = 0; i < 4; i++) {
+            double lx = corners[i][0], ly = corners[i][1];
+            double x1 = lx * Math.cos(ay), z1 = -lx * Math.sin(ay);
+            double y2 = ly * Math.cos(ax), z2 = z1 + ly * Math.sin(ax);
+            double px = (cx + x1) * k, py = (cy + y2) * k, pz = z + z2 * k;
+            double s = d / Math.max(1, d - pz);
+            out[i * 2] = (float) (ex + s * (px - ex) + screenW / 2.0);
+            out[i * 2 + 1] = (float) (screenH / 2.0 - (ey + s * (py - ey)));
+        }
+        return out;
     }
 
     // ---------------- the arcs ----------------
