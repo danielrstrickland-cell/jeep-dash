@@ -21,7 +21,8 @@ public final class DashMenu {
             FUEL = "fuel",
             CODES = "codes", LOGS = "logs", NORMAL = "normal", SCAN = "scan",
             AUTO_START = "auto_start", UPDATE = "update", LISTEN = "listen", TUNE_LOG = "tune_log",
-            TRUCK = "truck", ADD_TRUCK = "add_truck", EFFECTS = "effects", CALM = "calm";
+            TRUCK = "truck", ADD_TRUCK = "add_truck", QUALITY = "quality", EFFECTS = "effects", CALM = "calm",
+            HEAT = "heat";
 
     /** What the menu needs to know, filled in by the dash each time it opens. */
     public static final class State {
@@ -41,8 +42,10 @@ public final class DashMenu {
         public String scanProgress;            // a value scan under way; null when none
         public boolean hasTruck;               // the Holo look's layout has its 3D truck view
         public String truckMotion = "realistic";   // how hard the truck leans (TruckSettings wording)
-        public String effects = "Full";        // the Holo look's effects (HoloEffects)
+        public String quality = QualityMode.HIGH;  // the Holo look's Quality mode
+        public boolean effects = true;         // Holo: hologram effects on
         public boolean calm = true;            // Holo: calm while moving
+        public boolean heatProtect = true;     // Holo: heat protection
     }
 
     public static final class Entry {
@@ -85,8 +88,10 @@ public final class DashMenu {
             look.add(new Entry(JEEP_BACKLIGHT, "Backlight: " + s.jeepBacklight));
         } else if (HoloFace.isHolo(s.look)) {
             look.add(new Entry(TRUCK, "3D truck: model, lighting, motion (" + s.truckMotion + ")"));
-            look.add(new Entry(EFFECTS, "Effects: " + s.effects));
+            look.add(new Entry(QUALITY, "Quality mode: " + s.quality));
+            look.add(new Entry(EFFECTS, "Hologram effects: " + onOff(s.effects)));
             look.add(new Entry(CALM, "Calm while moving: " + onOff(s.calm)));
+            look.add(new Entry(HEAT, "Heat protection: " + onOff(s.heatProtect)));
         }
         add(out, "Look", look);
 

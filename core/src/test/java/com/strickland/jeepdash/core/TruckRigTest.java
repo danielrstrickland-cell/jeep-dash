@@ -180,4 +180,14 @@ public final class TruckRigTest {
         T.near(Math.sin(down), ring[3] / ring[2], 0.03, "squashed by the camera's height");
         T.ok(down > Math.toRadians(HoloFraming.ELEVATION_DEG), "looking down a little more than the camera's own tilt");
     }
+
+    public static void parallaxSwingsTheCameraRoundTheTruck() {
+        HoloFraming still = HoloFraming.fit(1.0, 4.0, 1.6, 1.8), moved = HoloFraming.fit(1.0, 4.0, 1.6, 1.8, 3, 0);
+        T.ok(moved.eye[0] > 0.1, "viewer moved right: " + moved.eye[0]);
+        double[] a = still.project(0, 0, 0), b = moved.project(0, 0, 0);
+        T.ok(Math.abs(a[0] - b[0]) < 0.02, "the truck stays in its box");
+        T.near(b[0], moved.ring(2.0)[0], 0.02, "rings follow the ground");
+        double[] far = moved.project(0, 0, -3), near = moved.project(0, 0, 3);
+        T.ok(far[0] > near[0], "the far side slides the other way to the near side");
+    }
 }

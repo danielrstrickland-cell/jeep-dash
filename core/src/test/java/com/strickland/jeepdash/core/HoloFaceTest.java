@@ -132,16 +132,20 @@ public final class HoloFaceTest {
         s.porsche = true;
         s.look = "p_gt";
         T.eq(null, entry(s, DashMenu.TRUCK), "no truck entries on the Porsche");
-        T.eq(null, entry(s, DashMenu.EFFECTS), "no effects entry on the Porsche");
+        T.eq(null, entry(s, DashMenu.QUALITY), "no quality entry on the Porsche");
     }
 
-    public static void effectsAndCalmAreInTheHoloLooksMenu() {
+    public static void qualityEffectsCalmAndHeatAreInTheHoloLooksMenu() {
         DashMenu.State s = new DashMenu.State();
         s.look = "holo";
-        s.effects = "Lite";
-        s.calm = true;
-        T.eq("Effects: Lite", entry(s, DashMenu.EFFECTS).label, "effects level");
+        T.eq("Quality mode: High", entry(s, DashMenu.QUALITY).label, "High by default");
+        T.eq("Hologram effects: on", entry(s, DashMenu.EFFECTS).label, "effects on by default");
         T.eq("Calm while moving: on", entry(s, DashMenu.CALM).label, "calm while moving, on by default");
+        T.eq("Heat protection: on", entry(s, DashMenu.HEAT).label, "heat protection, on by default");
+        s.quality = QualityMode.SAVER;
+        s.effects = false;
+        T.eq("Quality mode: Power saver", entry(s, DashMenu.QUALITY).label, "shows the mode");
+        T.eq("Hologram effects: off", entry(s, DashMenu.EFFECTS).label, "clean look");
     }
 
     // ---------------- files ----------------

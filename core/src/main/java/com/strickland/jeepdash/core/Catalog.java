@@ -93,11 +93,20 @@ public final class Catalog {
         add(Param.tablet("pitch", "Body pitch", "°", -6, 6));
         // How far the learning alerts have got (see NormalReadings): drives counted, 5 once learned.
         add(Param.tablet("normal", "Normal readings", "of 5", 0, 5));
+        // The tablet's own heat and battery (see TabletWatch), watched by the link service behind every screen.
+        add(Param.tablet("tablet_temp", "Tablet temp", "°F", 40, 140));
+        add(Param.tablet("tablet_batt", "Tablet battery", "%", 0, 100));
+        add(Param.tablet("tablet_heat", "Tablet heat", "level", 0, 4));
+        add(Param.tablet("tablet_ma", "Tablet current", "mA", -4000, 4000));
     }
 
-    /** Values the dash screen works out itself (not the tablet's sensors as such, nor the link service). */
+    /**
+     * Tablet values that do not need the dash's GPS and G-force sensors: worked out by the truck's motion model and
+     * the learning alerts on screen, or by the link service's watch on the tablet's heat and battery.
+     */
     public static final java.util.Set<String> SCREEN_MADE = java.util.Collections.unmodifiableSet(
-            new java.util.HashSet<>(java.util.Arrays.asList("roll", "pitch", "normal")));
+            new java.util.HashSet<>(java.util.Arrays.asList("roll", "pitch", "normal", "tablet_temp", "tablet_batt",
+                    "tablet_heat", "tablet_ma")));
 
     // Which car the app is set up for. Chosen once in SETUP and applied when the app starts, so every screen
     // and the link service agree; the Jeep is the default.

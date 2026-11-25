@@ -92,35 +92,7 @@ public final class HoloEffectsTest {
         T.eq(0L, Materialize.rowDelay(5, false), "no unfolding when animations are off");
     }
 
-    // ---------------- effects levels ----------------
-
-    public static void effectsLevelIsTheSavedChoiceElseFull() {
-        T.eq(HoloEffects.FULL, HoloEffects.pick(null), "tablet default");
-        T.eq(HoloEffects.FULL, HoloEffects.pick("Sparkly"), "unknown: default");
-        T.eq(HoloEffects.LITE, HoloEffects.pick("Lite"), "saved choice");
-        T.eq(HoloEffects.OFF, HoloEffects.pick("Off"), "saved choice");
-    }
-
-    public static void eachLevelTurnsOnItsOwnEffects() {
-        HoloEffects full = HoloEffects.of(HoloEffects.FULL, false);
-        HoloEffects lite = HoloEffects.of(HoloEffects.LITE, false);
-        HoloEffects off = HoloEffects.of(HoloEffects.OFF, false);
-        T.ok(full.bloom && full.fringe && full.flicker && full.idleMotion, "full: everything");
-        T.ok(!lite.bloom && !lite.fringe, "lite: no bloom, no colour fringe");
-        T.ok(lite.scanlineGap > full.scanlineGap, "lite: fewer scanlines");
-        T.ok(lite.idleMotion && lite.animateMs > 0, "lite still moves");
-        T.ok(!off.bloom && !off.fringe && !off.flicker && !off.idleMotion && off.scanlineGap == 0 && off.animateMs == 0, "off: plain");
-        T.ok(full.maxFps >= 60, "full aims for 60 frames a second");
-    }
-
-    public static void calmDropsFlickerAndBigAnimationsButNotTheReadings() {
-        HoloEffects calm = HoloEffects.of(HoloEffects.FULL, true);
-        T.ok(!calm.flicker, "no flicker while moving");
-        T.eq(0L, calm.animateMs, "panels appear without the show");
-        T.ok(!calm.sweep, "arcs keep still");
-        T.ok(calm.bloom && calm.scanlineGap > 0, "the look stays");
-        T.ok(calm.ringSpeed < HoloEffects.of(HoloEffects.FULL, false).ringSpeed, "rings turn slower");
-    }
+    // ---------------- calm while moving ----------------
 
     public static void calmStartsAboveFiveMphAndEndsBelowThree() {
         HoloEffects.Calm c = new HoloEffects.Calm();
@@ -130,27 +102,6 @@ public final class HoloEffectsTest {
         T.ok(!c.update(2.9, true), "below three: lively again");
         T.ok(!c.update(40, false), "turned off: never calm");
         T.ok(!c.update(Double.NaN, true), "no speed known: not calm");
-    }
-
-    public static void aSlowTabletStepsDownFromFullOnce() {
-        HoloEffects.FrameWatch w = new HoloEffects.FrameWatch();
-        boolean down = false;
-        for (long t = 0; t < 5000; t += 16) down |= w.frame(t);
-        T.ok(!down, "60 a second is fine");
-        for (long t = 5000; t < 9000; t += 30) down |= w.frame(t);
-        T.ok(down, "about 33 a second for a few seconds: step down");
-        boolean again = false;
-        for (long t = 9000; t < 15000; t += 30) again |= w.frame(t);
-        T.ok(!again, "only once");
-    }
-
-    public static void aPauseIsNotSlowness() {
-        HoloEffects.FrameWatch w = new HoloEffects.FrameWatch();
-        boolean down = false;
-        for (long t = 0; t < 3000; t += 16) down |= w.frame(t);
-        down |= w.frame(10000);                                 // the screen was off
-        for (long t = 10016; t < 13000; t += 16) down |= w.frame(t);
-        T.ok(!down, "a gap is not a slow frame");
     }
 
     // ---------------- depth ----------------

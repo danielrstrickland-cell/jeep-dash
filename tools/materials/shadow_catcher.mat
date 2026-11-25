@@ -1,0 +1,20 @@
+// The projector base in Ultra: an invisible floor that only shows the truck's soft shadow on the 2D platform
+// under it. Compile with the same Filament version as the app (Android draws with OpenGL ES):
+//   matc -p mobile -a opengl -o app/src/main/assets/scene/shadow_catcher.filamat tools/materials/shadow_catcher.mat
+material {
+    name : shadow_catcher,
+    shadingModel : unlit,
+    blending : transparent,
+    shadowMultiplier : true,
+    depthWrite : false,
+    parameters : [
+        { type : float, name : strength }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = vec4(0.0, 0.0, 0.0, materialParams.strength);
+    }
+}
