@@ -72,4 +72,26 @@ public class VizTuneTest {
         T.near(2, u.get(0, "gain"), 1e-6, "out of range clamped");
         T.near(1, VizTune.load(null).get(0, "gain"), 1e-6, "nothing saved yet");
     }
+
+    public static void effectsAreSharedByEveryLook() {
+        VizTune t = new VizTune();
+        T.near(0.7, t.get(VizTune.GLOBAL, "bloom"), 1e-6, "glow starts on");
+        T.near(0, t.get(VizTune.GLOBAL, "crt"), 1e-6, "CRT filter starts off");
+        T.near(0.6, t.get(VizTune.GLOBAL, "blend"), 1e-6, "looks blend over 0.6 s");
+        t.set(VizTune.GLOBAL, "crt", 0.8f);
+        t.reset(0);
+        T.near(0.8, VizTune.load(t.save()).get(VizTune.GLOBAL, "crt"), 1e-6, "saved, and kept when a look resets");
+        T.ok(!has(VizTune.GLOBAL, "gain"), "effects are not per-look knobs");
+        T.ok(VizTune.seconds("blend") && !VizTune.seconds("crt"), "blend time reads in seconds");
+    }
+
+    public static void qualityIsOneOfThreeChoices() {
+        VizTune t = new VizTune();
+        T.eq(VizTune.BALANCED, Math.round(t.get(VizTune.GLOBAL, "quality")), "balanced at 60 to start");
+        t.set(VizTune.GLOBAL, "quality", 0.3f);
+        T.near(0, t.get(VizTune.GLOBAL, "quality"), 1e-6, "snaps to Max quality");
+        T.near(1, VizTune.detail(VizTune.MAX_QUALITY), 1e-6, "full detail at 30 fps");
+        T.ok(VizTune.detail(VizTune.SMOOTH_90) < VizTune.detail(VizTune.BALANCED), "less detail at 90");
+        T.ok(!t.on(VizTune.GLOBAL, "fps"), "the FPS counter starts hidden");
+    }
 }

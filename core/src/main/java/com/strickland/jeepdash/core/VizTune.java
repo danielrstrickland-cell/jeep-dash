@@ -10,12 +10,19 @@ public final class VizTune {
         public final String id, label;
         public final float min, max, def;
         public final boolean toggle;
+        /** For a pick-one knob: the name of each whole-number value from min up; null for sliders and switches. */
+        public final String[] choices;
 
         Knob(String id, String label, float min, float max, float def) {
             this(id, label, min, max, def, false);
         }
 
         Knob(String id, String label, float min, float max, float def, boolean toggle) {
+            this(id, label, min, max, def, toggle, null);
+        }
+
+        Knob(String id, String label, float min, float max, float def, boolean toggle, String[] choices) {
+            this.choices = choices;
             this.id = id;
             this.label = label;
             this.min = min;
@@ -31,6 +38,33 @@ public final class VizTune {
 
     private static Knob toggle(String id, String label) { return new Knob(id, label, 0, 1, 1, true); }
 
+    private static Knob toggleOff(String id, String label) { return new Knob(id, label, 0, 1, 0, true); }
+
+    /**
+     * Not a look: the settings every look shares, on the hidden menu's Effects tab. Kept under its own number
+     * so it saves and loads with the looks' settings.
+     */
+    public static final int GLOBAL = 99;
+    /** The Quality choices: sharpest at 30 fps, balanced at 60, smoothest at the screen's 90. */
+    public static final String[] QUALITY = {"Max \u00B7 30", "Balanced \u00B7 60", "Smooth \u00B7 90"};
+    public static final int MAX_QUALITY = 0, BALANCED = 1, SMOOTH_90 = 2;
+    private static final float[] DETAIL = {1f, 0.85f, 0.6f};
+
+    /** How much of full resolution the 3D looks draw at, for a Quality choice. */
+    public static float detail(int quality) { return DETAIL[Math.max(0, Math.min(2, quality))]; }
+    private static final Knob[] EFFECTS = {
+            slider("bloom", "Glow (bloom)", 0, 1.5f, 0.7f),
+            slider("crt", "CRT filter", 0, 1, 0),
+            slider("blend", "Blend between looks", 0, 2, 0.6f),
+            slider("storm", "Particle storm", 0, 1, 0.4f),
+            slider("delay", "Speaker delay", 0, 0.5f, 0.2f),
+            slider("tilt", "G-meter tilt", 0, 2, 1),
+            new Knob("quality", "Quality", 0, 2, BALANCED, false, QUALITY),
+            toggleOff("fps", "Show FPS"),
+            toggle("autohide", "Fade menu button"),
+            toggleOff("dark", "Dark menus"),
+    };
+
     private static final Knob GAIN = slider("gain", "Sensitivity", 0.5f, 2, 1);
     private static final Knob GLOW = slider("glow", "Background glow", 0, 1.5f, 1);
     private static final Knob FALL = slider("fall", "Fall speed", 0.4f, 3, 1);
@@ -39,7 +73,8 @@ public final class VizTune {
      * The looks that can be chosen, by number: blocks, smooth, bass ring, swirl. Number 2 was the boom meters,
      * taken out; the numbers stay as they were so every look keeps its saved settings.
      */
-    public static final int[] CHOICES = {0, 1, 3, 4};
+    public static final int[] CHOICES = {0, 1, 3, 4, 5, 6, 7, 8, 9};
+    public static final int FERRO = 5, MILK = 6, ROAD = 7, LAVA = 8, MANDEL = 9;
     public static final int SMOOTH = 1;
 
     /** A saved look, or Smooth when it was the boom meters or makes no sense. */
@@ -57,17 +92,34 @@ public final class VizTune {
     /** Indexed by look: blocks, smooth, (the boom meters' old place), bass ring, swirl. */
     private static final Knob[][] KNOBS = {
             {GAIN, GLOW, slider("width", "Bar width", 0.4f, 0.95f, 0.78f), FALL, CAPS},
-            {GAIN, GLOW, slider("width", "Bar width", 0.4f, 0.95f, 0.72f), FALL, CAPS},
+            {GAIN, GLOW, slider("width", "Bar width", 0.4f, 0.95f, 0.72f), FALL, CAPS, toggle("3d", "3D bars"),
+                    slider("depth", "3D depth", 0.2f, 2, 1)},
             {GAIN, GLOW},
             {GAIN, GLOW, slider("size", "Ring size", 0.6f, 1.4f, 1), slider("pulse", "Pulse", 0, 2, 1), CAPS},
             {GAIN, GLOW, slider("trail", "Trail length", 0.15f, 1.5f, 0.55f), slider("spin", "Spin", 0, 2, 1),
                     slider("zoom", "Zoom", 0, 2, 1), toggle("drops", "Droplets")},
+            {GAIN, GLOW, slider("size", "Blob size", 0.6f, 1.4f, 1), slider("spikes", "Spike size", 0, 2, 1),
+                    slider("shine", "Shine", 0, 1.5f, 1), slider("spin", "Spin", 0, 2, 0.5f), toggle("drops", "Droplets")},
+            {GAIN, GLOW, slider("ripples", "Ripple size", 0, 2, 1), slider("splash", "Splash height", 0, 2, 1),
+                    slider("view", "Camera height", 0.6f, 1.6f, 1)},
+            {GAIN, GLOW, slider("build", "Building height", 0, 2, 1), slider("turns", "Turn strength", 0, 2, 1),
+                    slider("pace", "Speed feel", 0.5f, 2, 1), toggleOff("flip", "Flip turns")},
+            {GAIN, GLOW, slider("blobs", "Blobs", 3, 8, 6), slider("flow", "Flow speed", 0, 2, 1),
+                    slider("heat", "Heat glow", 0, 1.5f, 1)},
+            {GAIN, GLOW, slider("dive", "Dive speed", 0, 2, 1), slider("spin", "Spin", 0, 2, 0.3f),
+                    toggle("rpmdive", "RPM sets dive speed")},
     };
     private static final Knob[] SHARED = {GAIN, GLOW};
 
     private final Map<String, Float> values = new HashMap<>();
 
-    public static Knob[] knobs(int look) { return look >= 0 && look < KNOBS.length ? KNOBS[look] : SHARED; }
+    public static Knob[] knobs(int look) {
+        if (look == GLOBAL) return EFFECTS;
+        return look >= 0 && look < KNOBS.length ? KNOBS[look] : SHARED;
+    }
+
+    /** True for knobs measured in seconds rather than percent. */
+    public static boolean seconds(String id) { return id.equals("trail") || id.equals("blend") || id.equals("delay"); }
 
     private static Knob knob(int look, String id) {
         for (Knob k : knobs(look)) if (k.id.equals(id)) return k;
@@ -88,6 +140,7 @@ public final class VizTune {
         Knob k = knob(look, id);
         if (k == null || Float.isNaN(v)) return;
         if (k.toggle) v = v >= 0.5f ? 1 : 0;
+        if (k.choices != null) v = Math.round(v);
         values.put(look + "." + id, Math.max(k.min, Math.min(k.max, v)));
     }
 
