@@ -19,6 +19,8 @@ public final class HoloState {
     /** False when the 3D view is not running (not available here, paused for heat); note says why. */
     public boolean sceneOk = true;
     public String sceneNote = "";
+    /** The night trail scene instead of the projector room (Holo settings). */
+    public boolean trail;
     /** Hood, liftgate or neither can open on this model. */
     public boolean canOpen;
 }

@@ -150,6 +150,15 @@ public final class SceneHost implements UiHelper.RendererCallback {
 
     public QualityMode quality() { return quality; }
 
+    /** An opaque sky colour behind the scene (rgba, 0-1), or null for see-through (the Holo backdrop shows). */
+    public void setSky(float[] rgba) {
+        Renderer.ClearOptions clear = new Renderer.ClearOptions();
+        clear.clear = true;
+        clear.clearColor = rgba == null ? new float[]{0, 0, 0, 0} : rgba;
+        renderer.setClearOptions(clear);
+        requestFrame();
+    }
+
     /** The render buffer: the view's size times the mode's scale (over 1 is supersampled, under 1 cheaper). */
     private int[] bufferSize() {
         return new int[]{Math.max(1, Math.round(viewW * quality.renderScale)), Math.max(1, Math.round(viewH * quality.renderScale))};

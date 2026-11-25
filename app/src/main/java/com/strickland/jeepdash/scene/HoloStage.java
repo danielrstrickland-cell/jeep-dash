@@ -47,6 +47,15 @@ public final class HoloStage implements Stage {
     private int loadSerial;
     private double wheel, lastYaw = Double.NaN, lastPitch = Double.NaN, lastZoom = 1;
     private final com.strickland.jeepdash.core.OrbitView orbit = new com.strickland.jeepdash.core.OrbitView();
+    // the night trail scene (the owner's approved mockup): the truck from behind, headlights on, pines going by
+    private boolean trail;
+    private Forest forest;
+    private final com.strickland.jeepdash.core.TrailWorld world = new com.strickland.jeepdash.core.TrailWorld();
+    private int headLeft, headRight;
+    /** Night: moonlight, a faint sky fill and dimmed rims keep the truck just visible; the headlights do the rest. */
+    static final float MOON_LUX = 5_000, NIGHT_IBL_LUX = 1_500, NIGHT_RIM_LUMENS = 500_000, HEADLIGHT_LUMENS = 3_000_000;
+    /** The truck turned to face down the trail, away from the camera. */
+    static final double TRAIL_YAW_DEG = 180;
     private int width = 1, height = 1;
     private float exposureEv;
 
@@ -90,10 +99,98 @@ public final class HoloStage implements Stage {
                 .build(e);
         h.filamentView.setColorGrading(grading);
         setExposure(exposureEv);
+        if (trail) enterTrail();
         Trail.step("shadow " + shadow);
         applyShadow();
         Trail.step("load model " + ModelStore.pick(context, mode));
         reload();
+    }
+
+    /** Studio (the projector platform) or the night trail. */
+    public void setTrail(boolean on) {
+        if (on == trail) return;
+        trail = on;
+        if (!attached) return;
+        if (on) enterTrail();
+        else leaveTrail();
+        lastYaw = Double.NaN;
+        orbit.reset();
+        host.requestFrame();
+    }
+
+    public boolean trail() { return trail; }
+
+    private void enterTrail() {
+        Engine e = host.engine;
+        try {
+            if (forest == null) forest = new Forest(e, host.scene);
+        } catch (RuntimeException ex) {
+            forest = null;
+        }
+        headLeft = headlight(e, -0.62f);
+        headRight = headlight(e, 0.62f);
+        host.scene.addEntity(headLeft);
+        host.scene.addEntity(headRight);
+        nightLights(true);
+        com.google.android.filament.View.FogOptions fog = new com.google.android.filament.View.FogOptions();
+        fog.enabled = true;
+        fog.distance = 13f;
+        fog.density = 0.05f;
+        fog.heightFalloff = 0.02f;
+        fog.maximumOpacity = 1f;
+        fog.color = new float[]{0.012f, 0.018f, 0.026f};
+        host.filamentView.setFogOptions(fog);
+        host.setSky(new float[]{0.035f, 0.05f, 0.075f, 1f});
+    }
+
+    private void leaveTrail() {
+        if (host == null) return;
+        Engine e = host.engine;
+        if (forest != null) forest.destroy();
+        forest = null;
+        for (int ent : new int[]{headLeft, headRight}) {
+            if (ent == 0) continue;
+            host.scene.removeEntity(ent);
+            e.getLightManager().destroy(ent);
+            EntityManager.get().destroy(ent);
+        }
+        headLeft = headRight = 0;
+        nightLights(false);
+        com.google.android.filament.View.FogOptions fog = new com.google.android.filament.View.FogOptions();
+        fog.enabled = false;
+        host.filamentView.setFogOptions(fog);
+        host.setSky(null);
+    }
+
+    /** Moonlight and dim rims at night; the studio's lights otherwise. */
+    private void nightLights(boolean night) {
+        LightManager lm = host.engine.getLightManager();
+        int k = lm.getInstance(key);
+        if (k != 0) {
+            lm.setIntensity(k, night ? MOON_LUX : KEY_LUX);
+            if (night) lm.setColor(k, 0.62f, 0.72f, 1.0f);
+            else lm.setColor(k, 0.96f, 0.98f, 1.0f);
+        }
+        for (int rim : new int[]{rimLeft, rimRight}) {
+            int ri = lm.getInstance(rim);
+            if (ri != 0) lm.setIntensity(ri, night ? NIGHT_RIM_LUMENS : RIM_LUMENS);
+        }
+        if (ibl != null) ibl.light.setIntensity(night ? NIGHT_IBL_LUX : IBL_LUX);
+    }
+
+    /** One headlight at the truck's nose (the truck faces -z on the trail), aimed down the trail a little low. */
+    private static int headlight(Engine e, float x) {
+        int ent = EntityManager.get().create();
+        new LightManager.Builder(LightManager.Type.FOCUSED_SPOT)
+                .color(1.0f, 0.93f, 0.78f)
+                .intensity(HEADLIGHT_LUMENS)
+                .position(x, 0.85f, (float) (-TruckModel.LENGTH / 2 - 0.05))
+                .direction(x * 0.04f, -0.10f, -1f)
+                .falloff(48f)
+                .spotLightCone((float) Math.toRadians(10), (float) Math.toRadians(30))
+                .castShadows(false)
+                .build(e, ent);
+        return ent;
     }
 
     /** The Quality mode in force: picks the truck file for it and Ultra's shadow. */
@@ -259,11 +356,17 @@ public final class HoloStage implements Stage {
         if (spin.settled(0.2, 1) && spin.target() >= 360) spin.shift(-360 * Math.floor(spin.target() / 360));
         if (feed.motion.speedMps() > 1.5 && hood.target() > 0) hood.setTarget(0);      // driving off closes it
         double speed = feed.motion.speedMps();
+        if (trail) {
+            world.step(dt, speed, feed.motion.steerDeg());
+            if (forest != null) forest.place(world);
+            busy |= world.moving(speed);
+        }
         wheel = (wheel + speed / com.strickland.jeepdash.core.TruckMotion.TIRE_RADIUS_M * dt) % (2 * Math.PI);
 
         // the camera, swung a little by the parallax
-        double py = feed.parallax.yawDeg() + orbit.yawDeg(), pp = orbit.pitchWith(feed.parallax.pitchDeg());
-        double zoom = orbit.zoom();
+        double py = feed.parallax.yawDeg() + orbit.yawDeg(), pp = orbit.pitchWith(feed.parallax.pitchDeg() + (trail ? 6 : 0));
+        // on the trail the camera sits further back so the trail ahead shows past the truck
+        double zoom = orbit.zoom() * (trail ? 0.62 : 1);
         state.parallaxYaw = py;
         state.parallaxPitch = pp;
         // under a twentieth of a degree is less than a pixel: the sensor's jitter alone must not keep the GPU drawing
@@ -279,7 +382,7 @@ public final class HoloStage implements Stage {
             host.camera.lookAt(f.eye[0], f.eye[1], f.eye[2], f.target[0], f.target[1], f.target[2], 0, 1, 0);
         }
         if (truck != null) {
-            double yaw = Math.toRadians(BASE_YAW_DEG + spin.value());
+            double yaw = Math.toRadians((trail ? TRAIL_YAW_DEG : BASE_YAW_DEG) + spin.value());
             double open = Math.toRadians(hood.value());
             boolean hoodPart = truck.rig.hood.length > 0;
             truck.pose(yaw, feed.motion.rollDeg(), feed.motion.pitchDeg(), Math.toRadians(feed.motion.steerDeg()), wheel,
@@ -293,6 +396,7 @@ public final class HoloStage implements Stage {
 
     @Override
     public void detach(SceneHost h) {
+        if (trail) leaveTrail();
         attached = false;
         loadSerial++;
         if (truck != null) truck.destroy();

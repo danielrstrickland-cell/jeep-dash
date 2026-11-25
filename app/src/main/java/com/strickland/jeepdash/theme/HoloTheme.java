@@ -131,6 +131,7 @@ public final class HoloTheme implements Theme {
 
     @Override
     public void drawBackground(Canvas c, float w, float h) {
+        if (st.trail) return;           // the night trail: its own 3D sky, ground and truck, no room or platform
         float d = c.getWidth() > 0 && w > 0 ? c.getWidth() / w : 1;
         if (bg == null || bgW != w || bgH != h || bgDensity != d) makeBackground(w, h, d);
         r.set(0, 0, w, h);
@@ -211,6 +212,7 @@ public final class HoloTheme implements Theme {
      * the scanlines over the truck.
      */
     public void drawStage(Canvas c, GaugeSpec t, float w, float h, boolean back) {
+        if (st.trail) return;           // the night trail: its own 3D sky, ground and truck, no room or platform
         if (t == null) return;
         fade = 1;
         float cx = t.x + t.w / 2, cy = t.y + t.h / 2, k = t.w / 660f;
@@ -430,6 +432,7 @@ public final class HoloTheme implements Theme {
 
     /** The stage's bright rings, for the bloom layer. */
     public void drawStageGlow(Canvas c, GaugeSpec t, float w, float h) {
+        if (st.trail) return;           // the night trail: its own 3D sky, ground and truck, no room or platform
         if (t == null) return;
         fade = 1;
         float cx = t.x + t.w / 2, cy = t.y + t.h / 2, k = t.w / 660f;

@@ -518,6 +518,16 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         if (scene != null) {
             scene.setQuality(q);
             stage.setMode(q);
+            boolean trail = prefs.getBoolean(HoloSettingsDialog.TRAIL, false);
+            if (trail != holoState.trail) {
+                holoState.trail = trail;
+                stage.setTrail(trail);
+                // the trail fills the screen behind every layer; the truck alone sits over the room's backdrop
+                root.removeView(scene.view);
+                root.addView(scene.view, trail ? 0 : 1, scene.view.getLayoutParams());
+                if (backView != null) backView.invalidate();
+                view.invalidate();
+            }
             stage.setExposure(prefs.getFloat(HoloSettingsDialog.LIGHT, 0));
             holoState.sceneOk = !paused;
             holoState.sceneNote = paused ? "3D paused: the tablet is too hot" : "";
@@ -552,6 +562,14 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     @Override
     public void onSceneRect(GaugeSpec t) {
         if (scene == null) return;
+        if (holoState.sceneOk && holoState.trail) {
+            FrameLayout.LayoutParams full = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+            if (scene.view.getLayoutParams() == null || scene.view.getLayoutParams().width != ViewGroup.LayoutParams.MATCH_PARENT)
+                scene.view.setLayoutParams(full);
+            scene.view.setVisibility(View.VISIBLE);
+            return;
+        }
         if (t == null || !holoState.sceneOk) {
             scene.view.setVisibility(View.GONE);
             return;

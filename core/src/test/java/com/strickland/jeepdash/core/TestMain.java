@@ -24,6 +24,7 @@ public final class TestMain {
             VizTuneTest.class,
             MotionTest.class,
             OrbitViewTest.class,
+            TrailWorldTest.class,
             KwpTest.class,
             SciCodesTest.class,
             FastRefreshTest.class,

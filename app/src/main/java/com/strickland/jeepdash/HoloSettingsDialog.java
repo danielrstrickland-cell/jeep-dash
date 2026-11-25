@@ -29,7 +29,8 @@ final class HoloSettingsDialog {
     private HoloSettingsDialog() { }
 
     static final String MOTION = "truck_motion", LIGHT = "truck_ev", QUALITY = "holo_quality", EFFECTS = "holo_effects",
-            CALM = "holo_calm";
+            CALM = "holo_calm", TRAIL = "holo_trail";
+    static final String[] SCENES = {"Projector room", "Night trail"};
 
     interface Actions {
         void loadModel(String kind);
@@ -86,6 +87,14 @@ final class HoloSettingsDialog {
         box.addView(light);
         box.addView(lightText);
 
+        box.addView(text(a, "Scene", 13));
+        Spinner sceneSpin = new Spinner(a);
+        ArrayAdapter<String> sa = new ArrayAdapter<>(a, android.R.layout.simple_spinner_item, SCENES);
+        sa.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        sceneSpin.setAdapter(sa);
+        sceneSpin.setSelection(prefs.getBoolean(TRAIL, false) ? 1 : 0);
+        box.addView(sceneSpin);
+
         box.addView(text(a, "Quality mode", 13));
         Spinner quality = new Spinner(a);
         ArrayAdapter<String> ad = new ArrayAdapter<>(a, android.R.layout.simple_spinner_item, QualityMode.MODES);
@@ -93,8 +102,8 @@ final class HoloSettingsDialog {
         quality.setAdapter(ad);
         quality.setSelection(Arrays.asList(QualityMode.MODES).indexOf(QualityMode.pick(prefs.getString(QUALITY, null))));
         box.addView(quality);
-        TextView hint = text(a, "Ultra: 30 a second, sharpest, soft shadow. High: 60 a second. Power saver: 30 a second, "
-                + "cooler and lighter on the battery.", 12);
+        TextView hint = text(a, "Ultra: 30 a second, soft shadow and shading. High: 60 a second. Power saver: 30 a second, "
+                + "cooler and lighter on the battery. Drag the truck to look round it, pinch to zoom, double-tap to reset.", 12);
         box.addView(hint);
 
         CheckBox effects = check(a, "Hologram effects (scanlines, glow, flicker)", prefs.getBoolean(EFFECTS, true));
@@ -120,6 +129,7 @@ final class HoloSettingsDialog {
                     .putBoolean(EFFECTS, effects.isChecked())
                     .putBoolean(CALM, calm.isChecked())
                     .putBoolean(TabletHealth.PREF_PROTECT, heat.isChecked())
+                    .putBoolean(TRAIL, sceneSpin.getSelectedItemPosition() == 1)
                     .apply();
             act.settingsChanged();
         };
@@ -133,10 +143,12 @@ final class HoloSettingsDialog {
         };
         motion.setOnSeekBarChangeListener(bars);
         light.setOnSeekBarChangeListener(bars);
-        quality.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+        AdapterView.OnItemSelectedListener picked = new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) { save.run(); }
             @Override public void onNothingSelected(AdapterView<?> p) { }
-        });
+        };
+        quality.setOnItemSelectedListener(picked);
+        sceneSpin.setOnItemSelectedListener(picked);
         for (CheckBox c : new CheckBox[]{effects, calm, heat}) c.setOnCheckedChangeListener((b, on) -> save.run());
         loadFull.setOnClickListener(v -> {
             dlg.dismiss();
