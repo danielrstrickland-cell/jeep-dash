@@ -78,7 +78,10 @@ public class VisualizerView extends View {
             try { painter.gpu[VizTune.MILK] = new GpuMilk(motion); } catch (RuntimeException ignored) { }
             try { painter.gpu[VizTune.ROAD] = new GpuRoad(motion); } catch (RuntimeException ignored) { }
             try { painter.gpu[VizTune.MANDEL] = new GpuMandel(); } catch (RuntimeException ignored) { }
+            try { painter.gpu[VizTune.RACER] = new GpuRacer(motion); } catch (RuntimeException ignored) { }
+            try { painter.gpu[VizTune.SUBS] = new GpuSubs(); } catch (RuntimeException ignored) { }
         }
+        painter.gpu[VizTune.DOLPHINS] = new DolphinLook();                // plain drawing: every tablet
         painter.look = VizTune.savedLook(prefs.getInt("look2", 0));      // the old boom meters become Smooth
         painter.color = Math.floorMod(prefs.getInt("color", 1), VizPainter.COLORS.length);
         int bars = prefs.getInt("bars", 32);

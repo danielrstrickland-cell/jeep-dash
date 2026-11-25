@@ -21,7 +21,7 @@ public final class VizPainter {
     public static final int BANDS = 96;                              // how finely the sound is analysed
     public static final int[] COUNTS = {16, 24, 32, 48, 64, 96};    // how many bars are drawn
     /** By look number; number 2 (the boom meters) was taken out, see VizTune.CHOICES. */
-    public static final String[] LOOKS = {"Blocks", "Smooth", "", "Bass ring", "Swirl", "Ferrofluid", "Milk drop", "Road", "Lava lamp", "Mandelbrot"};
+    public static final String[] LOOKS = {"Blocks", "Smooth", "", "Bass ring", "Swirl", "Ferrofluid", "Milk drop", "Road", "Lava lamp", "Mandelbrot", "Street racer", "Sub cam", "Dolphins"};
     public static final String[] COLORS = {"RPM", "Vice", "Factory", "XP", "Fire", "Ice", "Classic"};
     /** low, middle, high, accent. The first profile follows the engine instead. */
     private static final int[][] PROFILES = {
@@ -43,7 +43,7 @@ public final class VizPainter {
 
     public Extra swirl;
     /** The graphics-chip looks, by look number; null where the device cannot run them (smooth bars instead). */
-    public final Extra[] gpu = new Extra[10];
+    public final Extra[] gpu = new Extra[13];
     public float sloshX, sloshY;       // the G-meter's push, from VizMotion
     public float fps = 60;             // frames a second, smoothed, for the optional counter
     public Double speed;                 // mph from the Jeep, null when not connected
