@@ -19,6 +19,7 @@ public final class TestMain {
             DriveLogWriterTest.class,
             ReleaseTagTest.class,
             CrashReportTest.class,
+            TombstoneTest.class,
             SpectrumTest.class,
             VizTuneTest.class,
             MotionTest.class,

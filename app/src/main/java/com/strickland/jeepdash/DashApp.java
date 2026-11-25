@@ -72,7 +72,7 @@ public class DashApp extends Application {
 
     static void clearCrash(Context c) { new java.io.File(c.getFilesDir(), CRASH_FILE).delete(); }
 
-    private static final String EXIT_SEEN = "exit_seen";
+    private static final String EXIT_SEEN = "exit_seen_v2";   // v2: show the last crash again, read properly
 
     /**
      * Android's own record of how the app last ended, when it was a crash not shown yet: this catches native
@@ -113,7 +113,11 @@ public class DashApp extends Application {
                     byte[] chunk = new byte[16384];
                     int n;
                     while (buf.size() < 512 * 1024 && (n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
-                    sb.append("\nTrace:\n").append(com.strickland.jeepdash.core.CrashReport.printable(buf.toByteArray(), 4, 16000));
+                    byte[] trace = buf.toByteArray();
+                    String read = pick.getReason() == android.app.ApplicationExitInfo.REASON_CRASH_NATIVE
+                            ? com.strickland.jeepdash.core.Tombstone.summary(trace, 16000) : null;
+                    sb.append("\nTrace:\n").append(read != null ? read
+                            : com.strickland.jeepdash.core.CrashReport.printable(trace, 4, 16000));
                 }
             } catch (java.io.IOException | RuntimeException e) {
                 sb.append("\n(trace unreadable: ").append(e).append(")");
