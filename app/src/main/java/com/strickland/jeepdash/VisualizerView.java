@@ -78,6 +78,8 @@ public class VisualizerView extends View {
             try { painter.gpu[VizTune.FERRO] = new GpuFerro(motion); } catch (RuntimeException ignored) { }
             try { painter.gpu[VizTune.MILK] = new GpuMilk(motion); } catch (RuntimeException ignored) { }
             try { painter.gpu[VizTune.ROAD] = new GpuRoad(motion); } catch (RuntimeException ignored) { }
+            try { painter.gpu[VizTune.LAVA] = new GpuLava(motion); } catch (RuntimeException ignored) { }
+            try { painter.gpu[VizTune.MANDEL] = new GpuMandel(); } catch (RuntimeException ignored) { }
         }
         painter.look = VizTune.savedLook(prefs.getInt("look2", 0));      // the old boom meters become Smooth
         painter.color = Math.floorMod(prefs.getInt("color", 1), VizPainter.COLORS.length);
@@ -185,6 +187,8 @@ public class VisualizerView extends View {
             sound(s, now);
         }
         motion.step(dt, painter.tune.get(VizTune.GLOBAL, "tilt"));
+        painter.sloshX = motion.sloshX();
+        painter.sloshY = motion.sloshY();
         painter.safeTop = safeTop();
         boolean fade = painter.tune.on(VizTune.GLOBAL, "autohide") && !painter.drawerOpen && !painter.menuOpen
                 && System.currentTimeMillis() - touchedMs > FADE_AFTER_MS;

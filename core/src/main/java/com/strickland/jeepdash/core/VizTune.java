@@ -42,6 +42,7 @@ public final class VizTune {
             slider("bloom", "Glow (bloom)", 0, 1.5f, 0.7f),
             slider("crt", "CRT filter", 0, 1, 0),
             slider("blend", "Blend between looks", 0, 2, 0.6f),
+            slider("storm", "Particle storm", 0, 1, 0.4f),
             slider("delay", "Speaker delay", 0, 0.5f, 0.2f),
             slider("tilt", "G-meter tilt", 0, 2, 1),
             slider("res", "3D detail", 0.35f, 1, 0.6f),
@@ -58,8 +59,8 @@ public final class VizTune {
      * The looks that can be chosen, by number: blocks, smooth, bass ring, swirl. Number 2 was the boom meters,
      * taken out; the numbers stay as they were so every look keeps its saved settings.
      */
-    public static final int[] CHOICES = {0, 1, 3, 4, 5, 6, 7};
-    public static final int FERRO = 5, MILK = 6, ROAD = 7;
+    public static final int[] CHOICES = {0, 1, 3, 4, 5, 6, 7, 8, 9};
+    public static final int FERRO = 5, MILK = 6, ROAD = 7, LAVA = 8, MANDEL = 9;
     public static final int SMOOTH = 1;
 
     /** A saved look, or Smooth when it was the boom meters or makes no sense. */
@@ -77,7 +78,8 @@ public final class VizTune {
     /** Indexed by look: blocks, smooth, (the boom meters' old place), bass ring, swirl. */
     private static final Knob[][] KNOBS = {
             {GAIN, GLOW, slider("width", "Bar width", 0.4f, 0.95f, 0.78f), FALL, CAPS},
-            {GAIN, GLOW, slider("width", "Bar width", 0.4f, 0.95f, 0.72f), FALL, CAPS},
+            {GAIN, GLOW, slider("width", "Bar width", 0.4f, 0.95f, 0.72f), FALL, CAPS, toggle("3d", "3D bars"),
+                    slider("depth", "3D depth", 0.2f, 2, 1)},
             {GAIN, GLOW},
             {GAIN, GLOW, slider("size", "Ring size", 0.6f, 1.4f, 1), slider("pulse", "Pulse", 0, 2, 1), CAPS},
             {GAIN, GLOW, slider("trail", "Trail length", 0.15f, 1.5f, 0.55f), slider("spin", "Spin", 0, 2, 1),
@@ -88,6 +90,10 @@ public final class VizTune {
                     slider("view", "Camera height", 0.6f, 1.6f, 1)},
             {GAIN, GLOW, slider("build", "Building height", 0, 2, 1), slider("turns", "Turn strength", 0, 2, 1),
                     slider("pace", "Speed feel", 0.5f, 2, 1), toggleOff("flip", "Flip turns")},
+            {GAIN, GLOW, slider("blobs", "Blobs", 3, 8, 6), slider("flow", "Flow speed", 0, 2, 1),
+                    slider("heat", "Heat glow", 0, 1.5f, 1)},
+            {GAIN, GLOW, slider("dive", "Dive speed", 0, 2, 1), slider("spin", "Spin", 0, 2, 0.3f),
+                    toggle("rpmdive", "RPM sets dive speed")},
     };
     private static final Knob[] SHARED = {GAIN, GLOW};
 

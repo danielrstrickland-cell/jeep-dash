@@ -21,7 +21,7 @@ public final class VizPainter {
     public static final int BANDS = 96;                              // how finely the sound is analysed
     public static final int[] COUNTS = {16, 24, 32, 48, 64, 96};    // how many bars are drawn
     /** By look number; number 2 (the boom meters) was taken out, see VizTune.CHOICES. */
-    public static final String[] LOOKS = {"Blocks", "Smooth", "", "Bass ring", "Swirl", "Ferrofluid", "Milk drop", "Road"};
+    public static final String[] LOOKS = {"Blocks", "Smooth", "", "Bass ring", "Swirl", "Ferrofluid", "Milk drop", "Road", "Lava lamp", "Mandelbrot"};
     public static final String[] COLORS = {"RPM", "Vice", "Factory", "XP", "Fire", "Ice", "Classic"};
     /** low, middle, high, accent. The first profile follows the engine instead. */
     private static final int[][] PROFILES = {
@@ -43,7 +43,8 @@ public final class VizPainter {
 
     public Extra swirl;
     /** The graphics-chip looks, by look number; null where the device cannot run them (smooth bars instead). */
-    public final Extra[] gpu = new Extra[8];
+    public final Extra[] gpu = new Extra[10];
+    public float sloshX, sloshY;       // the G-meter's push, from VizMotion
     public Double speed;                 // mph from the Jeep, null when not connected
 
     // What to draw; the view fills these in before every frame.
@@ -146,6 +147,130 @@ public final class VizPainter {
             fromLook = -1;
             look(c, look, w, h, dt, seconds);
         }
+        clock = seconds;
+        sparks(c, w, h, dt);
+    }
+
+    // ---- particle storm: sparks thrown up on every bass hit, over any look ----
+
+    private static final int SPARKS = 1200;
+    private final float[] spX = new float[SPARKS], spY = new float[SPARKS], spVx = new float[SPARKS],
+            spVy = new float[SPARKS], spLife = new float[SPARKS];
+    private final float[] spPts = new float[SPARKS * 2];
+    private final java.util.Random spRandom = new java.util.Random(3);
+    private float spBeat, spTrickle, clock;
+    private int spNext;
+
+    private void sparks(Canvas c, int w, int h, float dt) {
+        float storm = tune.get(VizTune.GLOBAL, "storm");
+        boolean hit = beat > 0.9f && spBeat <= 0.9f;
+        spBeat = beat;
+        int emit = 0;
+        if (storm > 0.01f) {
+            if (hit) emit += Math.round(160 * storm * (0.5f + bass));
+            spTrickle += dt * 60 * storm * vu;
+            emit += (int) spTrickle;
+            spTrickle -= (int) spTrickle;
+        }
+        for (int k = 0; k < emit; k++) {
+            int i = spNext;
+            spNext = (spNext + 1) % SPARKS;
+            spX[i] = w * (0.1f + 0.8f * spRandom.nextFloat());
+            spY[i] = h * (0.88f + 0.06f * spRandom.nextFloat());
+            spVx[i] = (spRandom.nextFloat() - 0.5f) * h * 0.6f;
+            spVy[i] = -h * (0.5f + spRandom.nextFloat() * (0.6f + 0.8f * bass));
+            spLife[i] = 1;
+        }
+        // four age groups, each drawn in one go: young sparks bright and pale, old ones dim and coloured
+        for (int group = 0; group < 4; group++) {
+            int n = 0;
+            float hi = 1 - group * 0.25f, lo = hi - 0.25f;
+            for (int i = 0; i < SPARKS; i++) {
+                if (spLife[i] <= 0) continue;
+                if (group == 0) {                                     // move every live spark once a frame
+                    spVx[i] += sloshX * h * 0.9f * dt;
+                    spVy[i] += h * 0.9f * dt;
+                    spVx[i] *= 1 - 0.6f * dt;
+                    spX[i] += spVx[i] * dt;
+                    spY[i] += spVy[i] * dt;
+                    spLife[i] -= dt / 1.4f;
+                    if (spLife[i] <= 0 || spY[i] > h) {
+                        spLife[i] = 0;
+                        continue;
+                    }
+                }
+                if (spLife[i] > lo && spLife[i] <= hi) {
+                    spPts[n++] = spX[i];
+                    spPts[n++] = spY[i];
+                }
+            }
+            if (n == 0) continue;
+            stroke(lerp(mix(1 - hi), pal[3], 0.5f * hi), h / 800f * (5 - group));
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setAlpha(Math.round(255 * Math.min(1, hi * 1.2f)));
+            c.drawPoints(spPts, 0, n, paint);
+        }
+    }
+
+    // ---- 3D bars: solid columns standing on a floor, seen from a camera that drifts and leans ----
+
+    private final android.graphics.Path face = new android.graphics.Path();
+
+    private void bars3d(Canvas c, int w, int h, float width, boolean caps, float depth) {
+        float left = w * 0.06f, right = w * 0.94f, base = h * 0.86f, top = h * 0.18f, full = base - top;
+        float slot = (right - left) / shown, bw = slot * width;
+        float vx = w / 2f + (float) Math.sin(clock * 0.13) * w * 0.12f + sloshX * w * 0.1f;
+        float vy = h * 0.02f + sloshY * h * 0.04f, k = 1 - 0.09f * depth;    // k: how far back the far face sits
+        System.arraycopy(pal, 0, sweep, 0, 3);
+        if (sweepShader == null || sweepTop != top || sweepBase != base || !java.util.Arrays.equals(sweep, sweepMade)) {
+            sweepShader = new LinearGradient(0, base, 0, top, sweep, SWEEP_STOPS, Shader.TileMode.CLAMP);
+            System.arraycopy(sweep, 0, sweepMade, 0, 3);
+            sweepTop = top;
+            sweepBase = base;
+        }
+        stroke(pal[0], h / 800f * 2);                                 // the floor's front edge
+        paint.setAlpha(120);
+        c.drawLine(left, base, right, base, paint);
+        // outside in, so bars nearer the middle cover the sides of the ones beyond them
+        for (int n = 0; n < shown; n++) {
+            int b = n % 2 == 0 ? n / 2 : shown - 1 - n / 2;
+            float x0 = left + b * slot + (slot - bw) / 2, x1 = x0 + bw;
+            float yt = base - Math.max(full * 0.01f, disp[b] * full);
+            int col = mix(disp[b] * 0.7f + (float) b / shown * 0.3f);
+            box(c, x0, x1, yt, base, vx, vy, k, sweepShader, lerp(col, 0xFFFFFFFF, 0.35f), lerp(col, 0xFF000000, 0.5f));
+            if (caps && dpeak[b] > 0.03f) {
+                float py = base - dpeak[b] * full - full * 0.02f;
+                box(c, x0, x1, py - full * 0.012f, py, vx, vy, k, null, pal[3], lerp(pal[3], 0xFF000000, 0.4f));
+            }
+        }
+    }
+
+    /** One box: front face (shaded, or the top colour), top face, and the side facing the middle. */
+    private void box(Canvas c, float x0, float x1, float yt, float yb, float vx, float vy, float k,
+                     Shader front, int topColor, int sideColor) {
+        float bx0 = vx + (x0 - vx) * k, bx1 = vx + (x1 - vx) * k, byt = vy + (yt - vy) * k, byb = vy + (yb - vy) * k;
+        fill(topColor);
+        face.rewind();
+        face.moveTo(x0, yt);
+        face.lineTo(x1, yt);
+        face.lineTo(bx1, byt);
+        face.lineTo(bx0, byt);
+        face.close();
+        c.drawPath(face, paint);
+        if (x1 < vx || x0 > vx) {
+            float fx = x1 < vx ? x1 : x0, bx = x1 < vx ? bx1 : bx0;
+            fill(sideColor);
+            face.rewind();
+            face.moveTo(fx, yt);
+            face.lineTo(bx, byt);
+            face.lineTo(bx, byb);
+            face.lineTo(fx, yb);
+            face.close();
+            c.drawPath(face, paint);
+        }
+        fill(topColor);
+        if (front != null) paint.setShader(front);
+        c.drawRect(x0, yt, x1, yb, paint);
     }
 
     private void look(Canvas c, int which, int w, int h, float dt, float seconds) {
@@ -161,6 +286,7 @@ public final class VizPainter {
         }
         if (which == 4 && swirl != null) swirl.draw(c, w, h, dt, seconds, this);
         else if (which == 3) ring(c, w, h, caps);
+        else if (which == 1 && tune.on(1, "3d")) bars3d(c, w, h, tune.get(1, "width"), caps, tune.get(1, "depth"));
         else if (which == 1 || which >= VizTune.FERRO) smooth(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, tune.get(1, "width"), caps);
         else bars(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, 30, tune.get(0, "width"), caps);
     }
