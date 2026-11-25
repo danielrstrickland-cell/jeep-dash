@@ -28,14 +28,15 @@ final class Ibl {
                 .build(engine);
         for (int level = 0; level < k.levels; level++) {
             int n = k.faceBytes[level];
-            Trail.step("IBL setImage level " + level + " side " + Math.max(1, k.size >> level) + " faceBytes " + n);
+            Trail.step("IBL setImage level " + level + " faceBytes " + n);
             ByteBuffer buf = ByteBuffer.allocateDirect(6 * n);
             buf.put(file, k.offset[level], 6 * n);
             buf.flip();
-            int side = Math.max(1, k.size >> level);
-            // a cube map's six faces follow each other: z is the face, depth the number of faces
-            tex.setImage(engine, level, 0, 0, 0, side, side, 6, new Texture.PixelBufferDescriptor(buf, Texture.Format.RGB,
-                    Texture.Type.UINT_10F_11F_11F_REV));
+            // the six faces follow each other. Not the 3D setImage: Filament's Java binding shrinks its region's
+            // height by the level a second time, so every level past 0 failed its size check (the native crash)
+            int[] faces = {0, n, 2 * n, 3 * n, 4 * n, 5 * n};
+            tex.setImage(engine, level, new Texture.PixelBufferDescriptor(buf, Texture.Format.RGB,
+                    Texture.Type.UINT_10F_11F_11F_REV), faces);
         }
         Trail.step("IBL light");
         IndirectLight light = new IndirectLight.Builder()
