@@ -12,8 +12,8 @@ import android.graphics.Typeface;
 import com.strickland.jeepdash.core.VizTune;
 
 /**
- * Draws the music visualizer: the looks, seven colour profiles, 16 to 96 bars, the drop-down TUNE panel that
- * adjusts the look on screen, and the hidden tune menu (hold TUNE). The picture (drawScene) and the buttons
+ * Draws the music visualizer: the looks, seven colour profiles, 16 to 96 bars, one menu button that opens a
+ * side menu, and the tune window (look, colours, effects, presets) in light or dark XP style. The picture (drawScene) and the buttons
  * (drawChrome) are drawn separately so the GPU glow and CRT filter touch only the picture. Only graphics, no
  * Android views.
  */
@@ -21,7 +21,7 @@ public final class VizPainter {
     public static final int BANDS = 96;                              // how finely the sound is analysed
     public static final int[] COUNTS = {16, 24, 32, 48, 64, 96};    // how many bars are drawn
     /** By look number; number 2 (the boom meters) was taken out, see VizTune.CHOICES. */
-    public static final String[] LOOKS = {"Blocks", "Smooth", "", "Bass ring", "Swirl"};
+    public static final String[] LOOKS = {"Blocks", "Smooth", "", "Bass ring", "Swirl", "Ferrofluid", "Milk drop", "Road"};
     public static final String[] COLORS = {"RPM", "Vice", "Factory", "XP", "Fire", "Ice", "Classic"};
     /** low, middle, high, accent. The first profile follows the engine instead. */
     private static final int[][] PROFILES = {
@@ -42,6 +42,9 @@ public final class VizPainter {
     }
 
     public Extra swirl;
+    /** The graphics-chip looks, by look number; null where the device cannot run them (smooth bars instead). */
+    public final Extra[] gpu = new Extra[8];
+    public Double speed;                 // mph from the Jeep, null when not connected
 
     // What to draw; the view fills these in before every frame.
     public final float[] levels = new float[BANDS], peaks = new float[BANDS];
@@ -49,11 +52,19 @@ public final class VizPainter {
     public Double rpm;                   // null when the Jeep is not connected
     public int look, color, shown = 32;
     public String message;               // shown at the bottom (microphone not allowed yet)
-    public final RectF dashButton = new RectF(), colorButton = new RectF(), slider = new RectF();
-    public VizTune tune = new VizTune(); // per-look settings from the TUNE panel
-    public boolean tuneOpen;
-    public final RectF tuneButton = new RectF(), panel = new RectF(), resetButton = new RectF();
-    public final RectF lookButton = new RectF(), musicButton = new RectF();
+    public final RectF slider = new RectF();
+    public VizTune tune = new VizTune(); // per-look settings from the tune window
+    public final RectF resetButton = new RectF(), musicButton = new RectF();
+    // the side menu and its one button; safeTop keeps it all clear of the status bar
+    public float safeTop, chromeAlpha = 1;
+    public boolean drawerOpen, hidden;
+    public final RectF menuButton = new RectF(), drawerRect = new RectF(), drawerClose = new RectF();
+    public final RectF rowDash = new RectF(), lookPrev = new RectF(), lookNext = new RectF();
+    public final RectF colorPrev = new RectF(), colorNext = new RectF(), rowTune = new RectF();
+    public final RectF rowEffects = new RectF(), rowHide = new RectF();
+    private float sliderX0, sliderX1;
+    private int xpBody, xpInk, xpMuted, xpTitle0, xpTitle1, xpEdge, xpLine, xpTrack, xpFill, xpTabOn, xpTabOff,
+            xpButtonFill, xpButtonEdge;
     public boolean music, musicOpen;     // the music button (set on the dash's menu) and its window
     private final RectF[] rows = new RectF[8];
     private float trackLeft, trackRight;
@@ -139,29 +150,158 @@ public final class VizPainter {
 
     private void look(Canvas c, int which, int w, int h, float dt, float seconds) {
         boolean caps = tune.on(which, "caps");
+        if (which < gpu.length && gpu[which] != null) {
+            try {
+                gpu[which].draw(c, w, h, dt, seconds, this);
+                return;
+            } catch (RuntimeException e) {                         // the graphics chip refused it: use smooth bars
+                gpu[which] = null;
+                message = LOOKS[which] + " could not start on this tablet";
+            }
+        }
         if (which == 4 && swirl != null) swirl.draw(c, w, h, dt, seconds, this);
         else if (which == 3) ring(c, w, h, caps);
-        else if (which == 1) smooth(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, tune.get(1, "width"), caps);
+        else if (which == 1 || which >= VizTune.FERRO) smooth(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, tune.get(1, "width"), caps);
         else bars(c, w * 0.04f, w * 0.96f, h * 0.14f, h * 0.93f, 30, tune.get(0, "width"), caps);
     }
 
-    /** The buttons, slider, labels and panels, drawn over the picture. */
+    /** The menu button, the side menu, the tune window and any message, drawn over the picture. */
     public void drawChrome(Canvas c, int w, int h) {
         float u = h / 800f;
-        pill(c, dashButton, 18 * u, 16 * u, "DASH", u);
-        pill(c, colorButton, dashButton.right + 12 * u, 16 * u, "COLORS: " + COLORS[color].toUpperCase(), u);
-        pill(c, tuneButton, colorButton.right + 12 * u, 16 * u, tuneOpen ? "TUNE \u25B4" : "TUNE \u25BE", u);
-        // looks change only here, on purpose: a tap or swipe on the picture does nothing (brightness swipes)
-        pill(c, lookButton, tuneButton.right + 12 * u, 16 * u, "LOOK: " + LOOKS[look].toUpperCase(), u);
-        if (music) pill(c, musicButton, lookButton.right + 12 * u, 16 * u, musicOpen ? "\u266A MUSIC \u25B4" : "\u266A MUSIC", u);
-        else musicButton.setEmpty();
-        slider(c, w, u);
-        text(c, LOOKS[look].toUpperCase(), w - 22 * u, 46 * u, 24 * u, 0x99FFFFFF, Paint.Align.RIGHT);
-        if (rpm != null)
-            text(c, Math.round(rpm) + " rpm", w - 22 * u, 78 * u, 22 * u, pal[2], Paint.Align.RIGHT);
+        theme(tune.on(VizTune.GLOBAL, "dark"));
         if (message != null) text(c, message, w / 2f, h - 30 * u, 26 * u, 0xFFFFFFFF, Paint.Align.CENTER);
-        if (tuneOpen) tunePanel(c, w, u);
+        if (hidden) {
+            menuButton.setEmpty();
+            return;
+        }
+        float top = safeTop + 14 * u, b = 60 * u;
+        menuButton.set(16 * u, top, 16 * u + b * 1.15f, top + b);
+        if (chromeAlpha > 0.01f) {
+            int a = Math.round(255 * chromeAlpha);
+            fill(0x66000000);
+            paint.setAlpha(Math.round(0x66 * chromeAlpha));
+            c.drawRoundRect(menuButton, 14 * u, 14 * u, paint);
+            stroke(0xFFFFFFFF, 4 * u);
+            paint.setAlpha(a);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            float x0 = menuButton.left + 20 * u, x1 = menuButton.right - 20 * u, cy = menuButton.centerY();
+            for (int i = -1; i <= 1; i++) c.drawLine(x0, cy + i * 12 * u, x1, cy + i * 12 * u, paint);
+        }
+        if (drawerOpen) drawer(c, w, h, u);
         if (menuOpen) menu(c, w, h, u);
+    }
+
+    // ---- the side menu: everything the old top row had, in one panel down the left ----
+
+    private void drawer(Canvas c, int w, int h, float u) {
+        float dw = Math.min(w * 0.34f, 460 * u), x = 0, y = 0, bar = safeTop + 56 * u;
+        drawerRect.set(x, y, x + dw, h);
+        fill(xpBody);
+        c.drawRect(drawerRect, paint);
+        fill(0);
+        paint.setShader(new LinearGradient(0, 0, 0, bar, xpTitle0, xpTitle1, Shader.TileMode.CLAMP));
+        c.drawRect(x, y, x + dw, bar, paint);
+        text(c, "Visualizer", x + 22 * u, bar - 18 * u, 23 * u, 0xFFFFFFFF, Paint.Align.LEFT);
+        float cs = 36 * u;
+        drawerClose.set(x + dw - cs - 12 * u, bar - cs - 10 * u, x + dw - 12 * u, bar - 10 * u);
+        closeBox(c, drawerClose, u);
+        stroke(xpEdge, 2 * u);
+        c.drawLine(x + dw, 0, x + dw, h, paint);
+
+        float rowH = Math.min(78 * u, (h - bar - 20 * u) / 8), left = x + 24 * u, right = x + dw - 24 * u, r = bar + 8 * u;
+        r = row(c, rowDash, left, right, r, rowH, "Dash", "\u203A", u);
+        divider(c, left, right, r, u);
+        r = chooser(c, lookPrev, lookNext, left, right, r, rowH, "Look", LOOKS[look], u);
+        r = chooser(c, colorPrev, colorNext, left, right, r, rowH, "Colors", COLORS[color], u);
+        // bars: a slider with six stops
+        text(c, "Bars", left, r + rowH * 0.42f, 21 * u, xpInk, Paint.Align.LEFT);
+        text(c, String.valueOf(shown), right, r + rowH * 0.42f, 20 * u, xpInk, Paint.Align.RIGHT);
+        int at = 0;
+        for (int i = 0; i < COUNTS.length; i++) if (COUNTS[i] == shown) at = i;
+        sliderX0 = left + 10 * u;
+        sliderX1 = right - 10 * u;
+        float sy = r + rowH * 0.75f, knob = sliderX0 + (sliderX1 - sliderX0) * at / (COUNTS.length - 1);
+        slider.set(left, r + rowH * 0.5f, right, r + rowH);
+        track(c, sliderX0, sliderX1, knob, sy, u);
+        r += rowH;
+        divider(c, left, right, r, u);
+        r = row(c, rowTune, left, right, r, rowH, "Tune this look", "\u203A", u);
+        r = row(c, rowEffects, left, right, r, rowH, "Effects and presets", "\u203A", u);
+        r = row(c, rowHide, left, right, r, rowH, "Hide controls", "3 fingers", u);
+        if (music) row(c, musicButton, left, right, r, rowH, "Music", musicOpen ? "Close" : "\u203A", u);
+        else musicButton.setEmpty();
+    }
+
+    private float row(Canvas c, RectF hit, float left, float right, float top, float rowH, String label, String end, float u) {
+        hit.set(left - 12 * u, top, right + 12 * u, top + rowH);
+        text(c, label, left, top + rowH * 0.6f, 21 * u, xpInk, Paint.Align.LEFT);
+        text(c, end, right, top + rowH * 0.6f, 19 * u, xpMuted, Paint.Align.RIGHT);
+        return top + rowH;
+    }
+
+    /** A row with the choice in the middle and arrows to step back and on. */
+    private float chooser(Canvas c, RectF prev, RectF next, float left, float right, float top, float rowH,
+                          String label, String value, float u) {
+        float y = top + rowH * 0.6f, bw = 48 * u, bh = 44 * u, by = top + (rowH - bh) / 2;
+        text(c, label, left, y, 21 * u, xpInk, Paint.Align.LEFT);
+        next.set(right - bw, by, right, by + bh);
+        float vw = Math.max(150 * u, (right - left) * 0.45f);
+        prev.set(next.left - vw - bw - 8 * u, by, next.left - vw - 8 * u, by + bh);
+        xpBox(c, prev, "\u25C0", u);
+        xpBox(c, next, "\u25B6", u);
+        text(c, value, (prev.right + next.left) / 2, y, 19 * u, xpInk, Paint.Align.CENTER);
+        return top + rowH;
+    }
+
+    private void divider(Canvas c, float left, float right, float y, float u) {
+        stroke(xpLine, 1.5f * u);
+        c.drawLine(left, y, right, y, paint);
+    }
+
+    private void xpBox(Canvas c, RectF where, String label, float u) {
+        fill(xpButtonFill);
+        c.drawRoundRect(where, 5 * u, 5 * u, paint);
+        stroke(xpButtonEdge, 1.5f * u);
+        c.drawRoundRect(where, 5 * u, 5 * u, paint);
+        text(c, label, where.centerX(), where.centerY() + 7 * u, 17 * u, xpInk, Paint.Align.CENTER);
+    }
+
+    private void closeBox(Canvas c, RectF where, float u) {
+        fill(0xFFD9442B);
+        c.drawRoundRect(where, 5 * u, 5 * u, paint);
+        stroke(0xFFFFFFFF, 3.5f * u);
+        float in = where.width() * 0.28f;
+        c.drawLine(where.left + in, where.top + in, where.right - in, where.bottom - in, paint);
+        c.drawLine(where.right - in, where.top + in, where.left + in, where.bottom - in, paint);
+    }
+
+    /** An XP slider: a groove, the filled part, and a blue thumb. */
+    private void track(Canvas c, float x0, float x1, float knob, float y, float u) {
+        fill(xpTrack);
+        c.drawRoundRect(set(x0, y - 3 * u, x1, y + 3 * u), 3 * u, 3 * u, paint);
+        fill(xpFill);
+        c.drawRoundRect(set(x0, y - 3 * u, knob, y + 3 * u), 3 * u, 3 * u, paint);
+        fill(0xFF0A55E0);
+        c.drawRoundRect(set(knob - 9 * u, y - 15 * u, knob + 9 * u, y + 15 * u), 4 * u, 4 * u, paint);
+        stroke(0xFFFFFFFF, 2 * u);
+        c.drawRoundRect(set(knob - 9 * u, y - 15 * u, knob + 9 * u, y + 15 * u), 4 * u, 4 * u, paint);
+    }
+
+    /** Luna (light) or a dark take on it, for the side menu and tune window. */
+    private void theme(boolean dark) {
+        xpBody = dark ? 0xFF1E2129 : 0xFFECE9D8;
+        xpInk = dark ? 0xFFE3E7F0 : 0xFF1D2A4A;
+        xpMuted = dark ? 0xFF9AA3B5 : 0xFF4B5563;
+        xpTitle0 = dark ? 0xFF3A3F4B : 0xFF3D8BFF;
+        xpTitle1 = dark ? 0xFF16181E : 0xFF0A55E0;
+        xpEdge = dark ? 0xFF4A505C : 0xFF919B9C;
+        xpLine = dark ? 0xFF343944 : 0xFFC9C5B4;
+        xpTrack = dark ? 0xFF3A3F4B : 0xFFA7A391;
+        xpFill = dark ? 0xFF4C8DFF : 0xFF316AC5;
+        xpTabOn = dark ? 0xFF2C313C : 0xFFFFFFFF;
+        xpTabOff = dark ? 0xFF15171C : 0xFFD6D2C2;
+        xpButtonFill = dark ? 0xFF2C313C : 0xFFFFFFFF;
+        xpButtonEdge = dark ? 0xFF5A6273 : 0xFF003C74;
     }
 
     private void palette(float dt, float seconds) {
@@ -290,30 +430,24 @@ public final class VizPainter {
 
     // ---- the hidden tune menu: an XP-style window, held open over the picture ----
 
-    private static final int XP_BODY = 0xFFECE9D8, XP_INK = 0xFF1D2A4A, XP_BLUE = 0xFF0A55E0, XP_EDGE = 0xFF919B9C;
 
     private void menu(Canvas c, int w, int h, float u) {
-        float mw = Math.min(w * 0.62f, 940 * u), mh = Math.min(h - 120 * u, 600 * u);
-        float x = (w - mw) / 2, y = 90 * u, bar = 46 * u, r = 10 * u;
+        float mw = Math.min(w * 0.62f, 940 * u), mh = Math.min(h - safeTop - 48 * u, 640 * u);
+        float x = (w - mw) / 2, y = safeTop + 24 * u, bar = 46 * u, r = 10 * u;
         menuWindow.set(x, y, x + mw, y + mh);
-        fill(XP_BODY);
+        fill(xpBody);
         c.drawRoundRect(menuWindow, r, r, paint);
         // title bar
         fill(0);
-        paint.setShader(new LinearGradient(0, y, 0, y + bar, 0xFF3D8BFF, XP_BLUE, Shader.TileMode.CLAMP));
+        paint.setShader(new LinearGradient(0, y, 0, y + bar, xpTitle0, xpTitle1, Shader.TileMode.CLAMP));
         c.drawRoundRect(set(x, y, x + mw, y + bar), r, r, paint);
         c.drawRect(x, y + bar - r, x + mw, y + bar, paint);
         String title = menuTab == TAB_EFFECTS ? "Effects (every look)" : LOOKS[look];
         text(c, "Tune — " + title, x + 18 * u, y + 31 * u, 21 * u, 0xFFFFFFFF, Paint.Align.LEFT);
         float cs = 32 * u;
         menuClose.set(x + mw - cs - 8 * u, y + 7 * u, x + mw - 8 * u, y + 7 * u + cs);
-        fill(0xFFD9442B);
-        c.drawRoundRect(menuClose, 5 * u, 5 * u, paint);
-        stroke(0xFFFFFFFF, 3.5f * u);
-        float in = 9 * u;
-        c.drawLine(menuClose.left + in, menuClose.top + in, menuClose.right - in, menuClose.bottom - in, paint);
-        c.drawLine(menuClose.right - in, menuClose.top + in, menuClose.left + in, menuClose.bottom - in, paint);
-        stroke(XP_BLUE, 2 * u);
+        closeBox(c, menuClose, u);
+        stroke(xpEdge, 2 * u);
         c.drawRoundRect(menuWindow, r, r, paint);
 
         // tabs
@@ -324,11 +458,11 @@ public final class VizPainter {
             paint.setTextSize(18 * u);
             float tw = paint.measureText(TABS[i]) + 36 * u;
             tabRects[i].set(tx, ty, tx + tw, ty + th);
-            fill(i == menuTab ? 0xFFFFFFFF : 0xFFD6D2C2);
+            fill(i == menuTab ? xpTabOn : xpTabOff);
             c.drawRoundRect(tabRects[i], 5 * u, 5 * u, paint);
-            stroke(i == menuTab ? 0xFFFFC73C : XP_EDGE, (i == menuTab ? 3 : 1.5f) * u);
+            stroke(i == menuTab ? 0xFFFFC73C : xpEdge, (i == menuTab ? 3 : 1.5f) * u);
             c.drawRoundRect(tabRects[i], 5 * u, 5 * u, paint);
-            text(c, TABS[i], tx + 18 * u, ty + 27 * u, 18 * u, XP_INK, Paint.Align.LEFT);
+            text(c, TABS[i], tx + 18 * u, ty + 27 * u, 18 * u, xpInk, Paint.Align.LEFT);
             tx += tw + 8 * u;
         }
         float top = ty + th + 14 * u, left = x + 26 * u, right = x + mw - 26 * u, bottom = y + mh - 16 * u;
@@ -348,11 +482,11 @@ public final class VizPainter {
             float rt = top + i * rowH, mid = rt + rowH / 2;
             if (rows[i] == null) rows[i] = new RectF();
             rows[i].set(left, rt, right, rt + rowH);
-            text(c, k.label, left, mid + 7 * u, 19 * u, XP_INK, Paint.Align.LEFT);
+            text(c, k.label, left, mid + 7 * u, 19 * u, xpInk, Paint.Align.LEFT);
             if (k.toggle) {
                 boolean on = tune.on(t, k.id);
                 float b = 26 * u;
-                fill(0xFFFFFFFF);
+                fill(xpButtonFill);
                 c.drawRect(trackLeft, mid - b / 2, trackLeft + b, mid + b / 2, paint);
                 stroke(0xFF1C5180, 1.5f * u);
                 c.drawRect(trackLeft, mid - b / 2, trackLeft + b, mid + b / 2, paint);
@@ -365,17 +499,10 @@ public final class VizPainter {
                 continue;
             }
             float v = tune.get(t, k.id), knob = trackLeft + (trackRight - trackLeft) * tune.at(t, k.id);
-            fill(0xFFA7A391);
-            c.drawRoundRect(set(trackLeft, mid - 3 * u, trackRight, mid + 3 * u), 3 * u, 3 * u, paint);
-            fill(0xFF316AC5);
-            c.drawRoundRect(set(trackLeft, mid - 3 * u, knob, mid + 3 * u), 3 * u, 3 * u, paint);
-            fill(XP_BLUE);
-            c.drawRoundRect(set(knob - 9 * u, mid - 15 * u, knob + 9 * u, mid + 15 * u), 4 * u, 4 * u, paint);
-            stroke(0xFFFFFFFF, 2 * u);
-            c.drawRoundRect(set(knob - 9 * u, mid - 15 * u, knob + 9 * u, mid + 15 * u), 4 * u, 4 * u, paint);
+            track(c, trackLeft, trackRight, knob, mid, u);
             String shows = VizTune.seconds(k.id) ? Math.round(v * 100) / 100f + " s"
                     : k.id.equals("crt") && v < 0.01f ? "Off" : Math.round(v * 100) + "%";
-            text(c, shows, right, mid + 7 * u, 18 * u, XP_INK, Paint.Align.RIGHT);
+            text(c, shows, right, mid + 7 * u, 18 * u, xpInk, Paint.Align.RIGHT);
         }
         xpButton(c, resetButton, left, bottom - 44 * u, "Reset", u);
     }
@@ -386,7 +513,7 @@ public final class VizPainter {
         for (int i = 0; i < COLORS.length; i++) {
             float cx = left + (i % cols) * (cw + gap), cy = top + (i / cols) * (ch + gap);
             colorCells[i].set(cx, cy, cx + cw, cy + ch);
-            fill(0xFFFFFFFF);
+            fill(xpButtonFill);
             c.drawRoundRect(colorCells[i], 6 * u, 6 * u, paint);
             int[] p = PROFILES[i];
             float sw = (cw - 24 * u) / 3;
@@ -394,8 +521,8 @@ public final class VizPainter {
                 fill(p == null ? hsv(200 - k * 90, 1, 0.9f) : p[k]);
                 c.drawRect(cx + 12 * u + k * sw, cy + 12 * u, cx + 12 * u + (k + 1) * sw, cy + 46 * u, paint);
             }
-            text(c, COLORS[i] + (i == 0 ? " (engine)" : ""), cx + 12 * u, cy + 76 * u, 18 * u, XP_INK, Paint.Align.LEFT);
-            stroke(i == color ? XP_BLUE : XP_EDGE, (i == color ? 4 : 1.5f) * u);
+            text(c, COLORS[i] + (i == 0 ? " (engine)" : ""), cx + 12 * u, cy + 76 * u, 18 * u, xpInk, Paint.Align.LEFT);
+            stroke(i == color ? xpFill : xpEdge, (i == color ? 4 : 1.5f) * u);
             c.drawRoundRect(colorCells[i], 6 * u, 6 * u, paint);
         }
     }
@@ -403,22 +530,22 @@ public final class VizPainter {
     private void presetsTab(Canvas c, float left, float top, float right, float u) {
         for (int i = 0; i < PRESETS; i++) {
             float y = top + i * 74 * u;
-            text(c, "Preset " + (i + 1), left, y + 30 * u, 20 * u, XP_INK, Paint.Align.LEFT);
-            text(c, presetInfo[i], left + 120 * u, y + 30 * u, 17 * u, 0xFF4B5563, Paint.Align.LEFT);
+            text(c, "Preset " + (i + 1), left, y + 30 * u, 20 * u, xpInk, Paint.Align.LEFT);
+            text(c, presetInfo[i], left + 120 * u, y + 30 * u, 17 * u, xpMuted, Paint.Align.LEFT);
             xpButton(c, presetLoad[i], right - 110 * u, y, "Load", u);
             xpButton(c, presetSave[i], right - 230 * u, y, "Save", u);
         }
         text(c, "Save keeps the look, colours and every tune setting.", left, top + PRESETS * 74 * u + 20 * u,
-                16 * u, 0xFF4B5563, Paint.Align.LEFT);
+                16 * u, xpMuted, Paint.Align.LEFT);
     }
 
     private void xpButton(Canvas c, RectF where, float x, float y, String label, float u) {
         where.set(x, y, x + 104 * u, y + 42 * u);
-        fill(0xFFFFFFFF);
+        fill(xpButtonFill);
         c.drawRoundRect(where, 5 * u, 5 * u, paint);
-        stroke(0xFF003C74, 1.5f * u);
+        stroke(xpButtonEdge, 1.5f * u);
         c.drawRoundRect(where, 5 * u, 5 * u, paint);
-        text(c, label, where.centerX(), y + 28 * u, 18 * u, XP_INK, Paint.Align.CENTER);
+        text(c, label, where.centerX(), y + 28 * u, 18 * u, xpInk, Paint.Align.CENTER);
     }
 
     private static RectF[] rects(int n) {
@@ -429,76 +556,15 @@ public final class VizPainter {
 
     // ---- small helpers ----
 
-    private void slider(Canvas c, int w, float u) {
-        float x1 = w * 0.60f, x0 = Math.min(x1 - 120 * u, Math.max(w * 0.40f, tuneButton.right + 44 * u)), y = 39 * u;
-        slider.set(x0 - 30 * u, y - 30 * u, x1 + 30 * u, y + 30 * u);
-        int at = 0;
-        for (int i = 0; i < COUNTS.length; i++) if (COUNTS[i] == shown) at = i;
-        float knob = x0 + (x1 - x0) * at / (COUNTS.length - 1);
-        stroke(0x55FFFFFF, 6 * u);
-        paint.setStrokeCap(Paint.Cap.ROUND);
-        c.drawLine(x0, y, x1, y, paint);
-        stroke(0xFFFFFFFF, 6 * u);
-        paint.setStrokeCap(Paint.Cap.ROUND);
-        c.drawLine(x0, y, knob, y, paint);
-        fill(0xFFFFFFFF);
-        c.drawCircle(knob, y, 13 * u, paint);
-        text(c, shown + " BARS", x1 + 26 * u, y + 7 * u, 20 * u, 0xCCFFFFFF, Paint.Align.LEFT);
-    }
-
-    /** A finger on the slider at x picks the nearest bar count. */
+    /** A finger at x on the side menu's bar slider picks the nearest bar count. */
     public void slide(float x) {
-        float t = clamp((x - (slider.left + slider.height() / 2)) / (slider.width() - slider.height()));
+        float t = clamp((x - sliderX0) / Math.max(1, sliderX1 - sliderX0));
         shown = COUNTS[Math.round(t * (COUNTS.length - 1))];
-    }
-
-    // ---- the TUNE panel: one row per setting of the look on screen ----
-
-    private void tunePanel(Canvas c, int w, float u) {
-        VizTune.Knob[] knobs = VizTune.knobs(look);
-        float rowH = 62 * u, pw = Math.min(w * 0.5f, 560 * u), x = dashButton.left, y = tuneButton.bottom + 12 * u;
-        panel.set(x, y, x + pw, y + rowH * knobs.length + 78 * u);
-        fill(0xE6101114);
-        c.drawRoundRect(panel, 20 * u, 20 * u, paint);
-        stroke(0x33FFFFFF, 1.5f * u);
-        c.drawRoundRect(panel, 20 * u, 20 * u, paint);
-        trackLeft = x + 26 * u;
-        trackRight = x + pw - 26 * u;
-        for (int i = 0; i < knobs.length && i < rows.length; i++) {
-            VizTune.Knob k = knobs[i];
-            float top = y + 12 * u + i * rowH;
-            if (rows[i] == null) rows[i] = new RectF();
-            rows[i].set(x, top, x + pw, top + rowH);
-            text(c, k.label, trackLeft, top + 26 * u, 19 * u, 0xDDFFFFFF, Paint.Align.LEFT);
-            if (k.toggle) {
-                boolean on = tune.on(look, k.id);
-                float sw = 62 * u, sh = 30 * u, sx = trackRight - sw, sy = top + 16 * u;
-                fill(on ? pal[1] : 0x44FFFFFF);
-                c.drawRoundRect(set(sx, sy, sx + sw, sy + sh), sh / 2, sh / 2, paint);
-                fill(0xFFFFFFFF);
-                c.drawCircle(on ? sx + sw - sh / 2 : sx + sh / 2, sy + sh / 2, sh * 0.38f, paint);
-                continue;
-            }
-            float v = tune.get(look, k.id), ty = top + 46 * u, knob = trackLeft + (trackRight - trackLeft) * tune.at(look, k.id);
-            String shows = VizTune.seconds(k.id) ? Math.round(v * 100) / 100f + " s" : Math.round(v * 100) + "%";
-            text(c, shows, trackRight, top + 26 * u, 19 * u, 0x99FFFFFF, Paint.Align.RIGHT);
-            stroke(0x44FFFFFF, 5 * u);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            c.drawLine(trackLeft, ty, trackRight, ty, paint);
-            stroke(pal[1], 5 * u);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            c.drawLine(trackLeft, ty, knob, ty, paint);
-            fill(0xFFFFFFFF);
-            c.drawCircle(knob, ty, 11 * u, paint);
-        }
-        float by = panel.bottom - 58 * u;
-        pill(c, resetButton, trackLeft, by, "RESET", u);
-        text(c, LOOKS[look].toUpperCase() + "  \u00B7  tap outside to close", trackRight, by + 30 * u, 17 * u, 0x88FFFFFF, Paint.Align.RIGHT);
     }
 
     /** Which row of the open panel is at this point, or -1. */
     public int rowAt(float x, float y) {
-        if (menuOpen && menuTab != TAB_LOOK && menuTab != TAB_EFFECTS) return -1;
+        if (!menuOpen || (menuTab != TAB_LOOK && menuTab != TAB_EFFECTS)) return -1;
         int n = Math.min(VizTune.knobs(target()).length, rows.length);
         for (int i = 0; i < n; i++) if (rows[i] != null && rows[i].contains(x, y)) return i;
         return -1;

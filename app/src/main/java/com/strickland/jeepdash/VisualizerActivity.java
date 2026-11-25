@@ -262,7 +262,7 @@ public class VisualizerActivity extends Activity
     @Override
     public void onServiceConnected(ComponentName name, IBinder binder) {
         service = ((LinkService.LocalBinder) binder).service();
-        service.setActiveParams(new LinkedHashSet<>(Arrays.asList("rpm", "throttle")));
+        service.setActiveParams(new LinkedHashSet<>(Arrays.asList("rpm", "throttle", "speed")));
         service.addListener(this);
     }
 
@@ -270,7 +270,10 @@ public class VisualizerActivity extends Activity
     public void onServiceDisconnected(ComponentName name) { service = null; }
 
     @Override
-    public void onValues(LiveValues v) { view.painter.rpm = v.get("rpm", LinkService.now()); }
+    public void onValues(LiveValues v) {
+        view.painter.rpm = v.get("rpm", LinkService.now());
+        view.painter.speed = v.get("speed", LinkService.now());       // for the road look
+    }
 
     @Override
     public void onStatus(LinkService.Status s, String detail) { }
