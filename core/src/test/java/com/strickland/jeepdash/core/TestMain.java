@@ -18,6 +18,7 @@ public final class TestMain {
             LayoutCodecTest.class,
             DriveLogWriterTest.class,
             ReleaseTagTest.class,
+            CrashReportTest.class,
             SpectrumTest.class,
             VizTuneTest.class,
             MotionTest.class,

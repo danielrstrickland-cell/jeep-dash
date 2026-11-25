@@ -58,16 +58,55 @@ public class SplashActivity extends Activity implements ServiceConnection, LinkS
     private LinkService service;
     private volatile LinkService.Status status = LinkService.Status.SEARCHING;
 
+    private boolean crashShown;     // the last crash's report is up: nothing starts until it is dismissed
+
     @Override
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        String crash = DashApp.lastCrash(this);
+        if (crash != null) {
+            showCrash(crash);
+            return;
+        }
         setContentView(Catalog.porsche() ? new CarBoot(this) : new Intro(this));
+    }
+
+    /** The app crashed last time: show what happened, with Share, before starting anything again. */
+    private void showCrash(String report) {
+        crashShown = true;
+        android.widget.TextView text = new android.widget.TextView(this);
+        text.setText(report);
+        text.setTextIsSelectable(true);
+        text.setTextSize(11);
+        text.setTypeface(Typeface.MONOSPACE);
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        text.setPadding(pad, pad, pad, pad);
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.addView(text);
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Jeep Dash crashed last time")
+                .setView(scroll)
+                .setCancelable(false)
+                .setPositiveButton("Share", (d, w) -> {
+                    Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain")
+                            .putExtra(Intent.EXTRA_SUBJECT, "Jeep Dash crash report")
+                            .putExtra(Intent.EXTRA_TEXT, report);
+                    DashApp.clearCrash(this);
+                    startActivity(Intent.createChooser(send, "Send the crash report"));
+                    finish();
+                })
+                .setNegativeButton("Open the dash", (d, w) -> {
+                    DashApp.clearCrash(this);
+                    recreate();
+                })
+                .show();
     }
 
     @Override
     protected void onStart() {
         super.onStart();
+        if (crashShown) return;
         try {
             startService(new Intent(this, LinkService.class));
         } catch (RuntimeException ignored) {
