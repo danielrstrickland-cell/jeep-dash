@@ -7,7 +7,8 @@ import com.strickland.jeepdash.core.VizTune;
 
 /**
  * The music road: a night road running toward a striped sun, with equalizer sidewalks (each slab lights with
- * its band) and buildings on both sides that rise and pulse with the music. It moves at the Jeep's real speed
+ * its band) and buildings that rise and pulse with the music: the bass on the left, the treble on the right,
+ * with different building shapes and spacing so the two sides never mirror each other. It moves at the Jeep's real speed
  * and bends the moment you turn: speed comes from the Jeep (read only, through the link that already runs),
  * smoothed between readings with the G-meter so there is no lag, and turns come straight from the gyro.
  * Without the Jeep it cruises at a pace set by the music. Drawn by the graphics chip.
@@ -23,7 +24,8 @@ final class GpuRoad extends GpuLook {
             + "uniform float beat;\n"
             + "uniform float build;\n"
             + "uniform float tilt;\n"
-            + "uniform float lv[16];\n"
+            + "uniform float bassLv[16];\n"
+            + "uniform float trebleLv[16];\n"
             + "half4 main(float2 p) {\n"
             + "    float2 q = (p - 0.5 * size) / size.y;\n"
             + "    float a = tilt * 0.08;\n"
@@ -55,7 +57,7 @@ final class GpuRoad extends GpuLook {
             + "        } else if (ax < 1.5) {\n"
             + "            float k = mod(floor(wz * 2.0), 16.0);\n"
             + "            float level = 0.0;\n"
-            + "            for (int i = 0; i < 16; i++) if (abs(float(i) - k) < 0.5) level = lv[i];\n"
+            + "            for (int i = 0; i < 16; i++) if (abs(float(i) - k) < 0.5) level = x < 0.0 ? bassLv[i] : trebleLv[i];\n"
             + "            half3 tint = x < 0.0 ? c0.rgb : c2.rgb;\n"
             + "            float tile = step(0.08, fract(wz * 2.0)) * step(0.04, fract(ax * 4.0));\n"
             + "            g = tint * half(0.12 + 1.1 * level * tile);\n"
@@ -66,35 +68,37 @@ final class GpuRoad extends GpuLook {
             + "        col = mix(g, col, half(clamp(z / 14.0, 0.0, 1.0)));\n"
             + "    }\n"
             + "    for (int i = 15; i >= 0; i--) {\n"
-            + "        float zi = 1.0 + float(i) * 0.9 - fract(travel / 0.9) * 0.9;\n"
+            // left side: the bass, right side: the treble, set half a block apart so they never mirror
+            + "        for (int side = 0; side < 2; side++) {\n"
+            + "        bool isLeft = side == 0;\n"
+            + "        float zi = 1.0 + float(i) * 0.9 - fract(travel / 0.9 + (isLeft ? 0.0 : 0.5)) * 0.9 + (isLeft ? 0.0 : 0.45);\n"
+            + "        float level = isLeft ? bassLv[i] : trebleLv[i];\n"
             + "        if (zi > 0.3) {\n"
-            + "            float bh = (0.4 + 2.6 * lv[i]) * build;\n"
+            + "            float bh = (isLeft ? 0.5 + 2.8 * level : 0.3 + 2.2 * level) * build;\n"
             + "            float yb = hor + 0.25 / zi;\n"
             + "            float yt = yb - bh * 0.25 / zi;\n"
             + "            float off = curve * zi * zi * 0.02;\n"
-            + "            float xl0 = (-3.2 + off) / zi;\n"
-            + "            float xl1 = (-1.8 + off) / zi;\n"
-            + "            float xr0 = (1.8 + off) / zi;\n"
-            + "            float xr1 = (3.2 + off) / zi;\n"
-            + "            bool left = q.x > xl0 && q.x < xl1;\n"
-            + "            bool right = q.x > xr0 && q.x < xr1;\n"
-            + "            if (q.y < yb && q.y > yt && (left || right)) {\n"
-            + "                float u = left ? (q.x - xl0) / (xl1 - xl0) : (q.x - xr0) / (xr1 - xr0);\n"
+            + "            float x0 = isLeft ? (-3.2 + off) / zi : (1.8 + off) / zi;\n"
+            + "            float x1 = isLeft ? (-1.8 + off) / zi : (2.9 + off) / zi;\n"
+            + "            if (q.y < yb && q.y > yt && q.x > x0 && q.x < x1) {\n"
+            + "                float u = (q.x - x0) / (x1 - x0);\n"
             + "                float v = (yb - q.y) / (yb - yt);\n"
-            + "                half3 tint = left ? c0.rgb : c2.rgb;\n"
-            + "                float win = step(0.35, fract(u * 5.0)) * step(0.4, fract(v * bh * 3.0));\n"
-            + "                half3 b = half3(0.03, 0.03, 0.05) + tint * half(win * (0.3 + 0.9 * lv[i]));\n"
+            + "                half3 tint = isLeft ? c0.rgb : c2.rgb;\n"
+            + "                float win = isLeft ? step(0.35, fract(u * 4.0)) * step(0.45, fract(v * bh * 2.5))\n"
+            + "                                   : step(0.5, fract(u * 7.0)) * step(0.3, fract(v * bh * 4.0));\n"
+            + "                half3 b = half3(0.03, 0.03, 0.05) + tint * half(win * (0.3 + 0.9 * level));\n"
             + "                float rim = step(0.95, v) + step(u, 0.04) + step(0.96, u);\n"
             + "                b += tint * half(min(rim, 1.0) * (0.5 + beat));\n"
             + "                col = mix(b, col, half(clamp(zi / 14.0, 0.0, 1.0)));\n"
             + "            }\n"
+            + "        }\n"
             + "        }\n"
             + "    }\n"
             + "    return half4(col, 1.0);\n"
             + "}\n";
 
     private static final float MPH_PER_G_SECOND = 21.94f, MPS_PER_MPH = 0.44704f;
-    private final float[] lv = new float[BANDS];
+    private final float[] bassLv = new float[BANDS], trebleLv = new float[BANDS];
     private final VizMotion motion;
     private float mph, travel, curve;
 
@@ -119,7 +123,11 @@ final class GpuRoad extends GpuLook {
         float sign = p.tune.on(look, "flip") ? 1 : -1;
         float want = Math.max(-6, Math.min(6, sign * motion.yaw / Math.max(4, mps) * 60 * p.tune.get(look, "turns")));
         curve += (want - curve) * Math.min(1, dt * 8);
-        for (int i = 0; i < BANDS; i++) lv[i] = p.bar(i * p.shown / BANDS);
+        int half = p.shown / 2;                                         // low half of the bars left, high half right
+        for (int i = 0; i < BANDS; i++) {
+            bassLv[i] = p.bar(i * half / BANDS);
+            trebleLv[i] = p.bar(half + i * half / BANDS);
+        }
         shader.setFloatUniform("time", seconds);
         shader.setFloatUniform("travel", travel % 1000f);
         shader.setFloatUniform("curve", curve);
@@ -127,6 +135,7 @@ final class GpuRoad extends GpuLook {
         shader.setFloatUniform("beat", p.beat);
         shader.setFloatUniform("build", p.tune.get(look, "build"));
         shader.setFloatUniform("tilt", motion.sloshX());
-        shader.setFloatUniform("lv", lv);
+        shader.setFloatUniform("bassLv", bassLv);
+        shader.setFloatUniform("trebleLv", trebleLv);
     }
 }
