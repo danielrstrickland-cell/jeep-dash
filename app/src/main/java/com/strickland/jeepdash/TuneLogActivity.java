@@ -26,14 +26,18 @@ import com.strickland.jeepdash.core.Catalog;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.LogProfile;
 import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.core.SpeedCalibration;
 import com.strickland.jeepdash.core.TuneLog;
 
 import java.io.IOException;
 import java.io.Writer;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * The Tune log screen: pick one of the four profiles, follow the on-screen steps while the readings are written
@@ -58,6 +62,9 @@ public class TuneLogActivity extends Activity implements ServiceConnection, Link
     private Uri file;
     private String fileName;
     private LogProfile logging;
+    private GpsFeed gps;
+    private boolean askedLocation;
+    private String speedCard;                // the speedometer result (or why there is none) shown on the picker
     private long startedAt;
     private int sinceFlush;
     private long lastLiveMs = Long.MIN_VALUE / 2;
@@ -208,6 +215,14 @@ public class TuneLogActivity extends Activity implements ServiceConnection, Link
         title.setText("Tune log");
         col.addView(title);
 
+        if (speedCard != null) {
+            TextView card = text(16, Color.WHITE, true);
+            card.setPadding(dp(14), dp(10), dp(14), dp(10));
+            card.setBackground(box(Color.rgb(24, 70, 52), 8));
+            card.setText(speedCard);
+            col.addView(card, full(8));
+        }
+
         int n = 0;
         for (LogProfile p : LogProfile.all()) {
             n++;
@@ -277,6 +292,16 @@ public class TuneLogActivity extends Activity implements ServiceConnection, Link
             note.setText(problem);
             return;
         }
+        boolean wantsGps = false;
+        for (LogProfile.Want w : selected.channels) if (w.paramId.equals("gps_mph")) wantsGps = true;
+        if (wantsGps && !askedLocation && !GpsFeed.usable(this)
+                && checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            // asked once, only now that a log needing GPS is starting; a refusal just leaves the GPS channels out
+            askedLocation = true;
+            requestPermissions(new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION}, 7);
+            return;
+        }
         long wall = System.currentTimeMillis();
         fileName = selected.fileName(wall, java.time.ZoneId.systemDefault());
         try {
@@ -286,17 +311,24 @@ public class TuneLogActivity extends Activity implements ServiceConnection, Link
                 return;
             }
             writer = DriveLogStore.writer(this, file);
-            log = new TuneLog(writer, selected, wall, Catalog::byId);
+            Set<String> tablet = GpsFeed.usable(this) ? new HashSet<>(Arrays.asList("gps_mph", "gps_accuracy_m")) : new HashSet<String>();
+            log = new TuneLog(writer, selected, wall, Catalog::byId, tablet);
         } catch (IOException e) {
             note.setText("Could not create the log file: " + e.getMessage());
             return;
         }
         logging = selected;
+        speedCard = null;
+        gps = null;
+        if (log.channelIds().contains("gps_mph")) {
+            gps = new GpsFeed();
+            if (!gps.start(this, service.values())) gps = null;
+        }
         step = 0;
         startedAt = LinkService.now();
         sinceFlush = 0;
         // ask the link for this profile's values, the way the dash asks for its gauges
-        service.setActiveParams(new LinkedHashSet<>(log.paramIds()));
+        service.setActiveParams(new LinkedHashSet<>(log.paramIds()));      // engine values only: GPS comes from GpsFeed
         buildLogging();
     }
 
@@ -324,7 +356,7 @@ public class TuneLogActivity extends Activity implements ServiceConnection, Link
         grid.setColumnCount(2);
         tileParams.clear();
         tileValues.clear();
-        for (String id : log.paramIds()) {
+        for (String id : log.channelIds()) {
             Param p = Catalog.byId(id);
             if (p == null) continue;
             LinearLayout tile = new LinearLayout(this);
@@ -388,16 +420,31 @@ public class TuneLogActivity extends Activity implements ServiceConnection, Link
         nextStep.setEnabled(step < logging.steps.size() - 1);
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 7 && logging == null && !isFinishing()) start();      // allowed or not, the log goes ahead
+    }
+
     /** Closes the CSV, goes back to the picker and, when asked, opens the share sheet for the file. */
     private void stopAndSave(boolean share, String message) {
         if (logging == null) return;
         int rows = log.rowCount();
+        if (gps != null) gps.stop();
+        gps = null;
         Uri saved = file;
         String name = fileName;
         try {
             log.close();
         } catch (IOException ignored) {
             // what was flushed is in the file
+        }
+        if (log.measuresSpeed()) {
+            SpeedCalibration.Result r = log.speedResult();
+            speedCard = r != null ? r.summary()
+                    : "Speedometer check: not enough steady GPS data (" + log.speedSamples() + " samples). Hold each speed steady for a few seconds with a good GPS fix.";
+        } else if (logging.id.equals("cruise")) {
+            speedCard = "Speedometer check skipped: GPS was not available (location not allowed).";
         }
         logging = null;
         log = null;

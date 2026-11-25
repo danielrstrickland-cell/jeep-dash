@@ -24,7 +24,7 @@ import java.util.Map;
 public final class XpTheme implements Theme {
 
     public static final String[] SCHEMES = {"Blue", "Olive", "Silver"};
-    /** Light, Dark, or Auto (dark from 7 pm to 7 am by the tablet's clock; see NightHours). */
+    /** Light, Dark, or Auto (the light sensor, else sunset and sunrise; see AutoNight). */
     public static final String[] MODES = {NightHours.LIGHT, NightHours.DARK, NightHours.AUTO};
     static final float TASKBAR = 42;
 
@@ -215,20 +215,28 @@ public final class XpTheme implements Theme {
         pick(true);
     }
 
+    private Boolean autoDark;
+
+    /** What Auto follows (the light sensor, else sunset): true dark, false light; null (nothing known) stays light. */
+    public void setAutoDark(Boolean dark) {
+        autoDark = dark;
+        pick(true);
+    }
+
     public void setMode(String m) {
         mode = m;
         pick(true);
     }
 
     /**
-     * Light or dark for now. On Auto this follows the tablet's clock: looked at when the dash is drawn, at most
-     * every few seconds (DashView draws at least twice a minute even with nothing changing).
+     * Light or dark for now. On Auto this follows setAutoDark (the screen's light sensor, else sunset).
      */
     private void pick(boolean now) {
         long t = System.currentTimeMillis();
         if (!now && pal != null && Math.abs(t - pickedAt) < PICK_EVERY_MS) return;
         pickedAt = t;
-        pal = NightHours.dark(mode, Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) ? darkSet : lightSet;
+        boolean dark = NightHours.AUTO.equals(mode) ? Boolean.TRUE.equals(autoDark) : NightHours.dark(mode, 0);
+        pal = dark ? darkSet : lightSet;
     }
 
     @Override

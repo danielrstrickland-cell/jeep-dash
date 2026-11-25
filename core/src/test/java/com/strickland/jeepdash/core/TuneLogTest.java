@@ -36,7 +36,7 @@ public class TuneLogTest {
         T.eq(15, LogProfile.byId("coldstart").minutes, "coldstart 15 min");
         T.eq(LogProfile.MAX_HZ, LogProfile.byId("pull").hz, "pull fastest");
         T.eq(1, LogProfile.byId("pull").minutes, "pull 1 min");
-        T.eq(9, LogProfile.byId("cruise").channels.size(), "cruise channels");
+        T.eq(11, LogProfile.byId("cruise").channels.size(), "cruise channels, GPS speed and accuracy included");
     }
 
     public static void fileNameCarriesProfileAndTime() {
@@ -122,5 +122,54 @@ public class TuneLogTest {
     private static boolean menuHas(DashMenu.State s) {
         for (DashMenu.Group g : DashMenu.build(s)) for (DashMenu.Entry e : g.entries) if (e.id.equals(DashMenu.TUNE_LOG)) return true;
         return false;
+    }
+
+    public static void cruiseGpsChannelsAreMissingWithoutPermission() throws Exception {
+        StringWriter out = new StringWriter();
+        TuneLog log = new TuneLog(out, LogProfile.byId("cruise"), START);
+        T.ok(out.toString().contains("# missing=GPS speed;GPS accuracy\n"), out.toString());
+        T.ok(!log.measuresSpeed(), "no pairing without GPS");
+        log.close();
+        T.ok(!out.toString().contains("speed_ratio"), "no footer without GPS");
+    }
+
+    public static void cruiseWithGpsHasColumnsAndFooter() throws Exception {
+        StringWriter out = new StringWriter();
+        java.util.Set<String> tablet = new java.util.HashSet<>(java.util.Arrays.asList("gps_mph", "gps_accuracy_m"));
+        TuneLog log = new TuneLog(out, LogProfile.byId("cruise"), START, Catalog::jeep, tablet);
+        T.ok(!out.toString().contains("# missing"), out.toString());
+        T.ok(out.toString().contains("Speed (mph),GPS speed (mph),GPS accuracy (m)\n"), out.toString());
+        T.ok(!log.paramIds().contains("gps_mph"), "the dongle is never asked for GPS");
+        T.ok(log.channelIds().contains("gps_mph"), "but it is a channel");
+        T.ok(log.measuresSpeed(), "pairs");
+        LiveValues v = new LiveValues();
+        v.setScale("speed", 1.036);                      // the dash's correction must not leak into the comparison
+        for (int i = 0; i < 30; i++) {
+            long t = 1000L * i;
+            v.put("speed", 55, t);
+            v.put("gps_mph", 57, t);
+            v.put("gps_accuracy_m", 4, t);
+            log.row(t, t, v);
+            log.row(t + 200, t + 200, v);               // same fix at the next row: not counted twice
+        }
+        log.close();
+        SpeedCalibration.Result r = log.speedResult();
+        T.ok(r != null, "result");
+        T.eq(27, r.samples, "one pair per fix");
+        T.near(57 / 55.0, r.ratio, 1e-9, "raw speed used");
+        String s = out.toString();
+        T.ok(s.contains("# speed_ratio=1.0364\n"), s);
+        T.ok(s.contains("# speed_samples=27\n"), s);
+        T.ok(s.contains("# suggested_constant=0x"), s);
+        T.ok(s.endsWith("\n") && s.lastIndexOf("# speed_ratio") > s.lastIndexOf("\n3"), "footer after the rows");
+    }
+
+    public static void footerSaysNoneWithTooFewSamples() throws Exception {
+        StringWriter out = new StringWriter();
+        java.util.Set<String> tablet = new java.util.HashSet<>(java.util.Arrays.asList("gps_mph", "gps_accuracy_m"));
+        TuneLog log = new TuneLog(out, LogProfile.byId("cruise"), START, Catalog::jeep, tablet);
+        log.close();
+        T.ok(log.speedResult() == null, "none");
+        T.ok(out.toString().endsWith("# speed_ratio=none\n# speed_samples=0\n"), out.toString());
     }
 }

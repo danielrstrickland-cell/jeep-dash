@@ -65,8 +65,10 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     private long sweepStart;
     private final LiveValues sweepValues = new LiveValues();
     private final TabletSensors tablet = new TabletSensors(this::onTabletValues);
+    private final NightSensor night = new NightSensor(this::onNightChanged);
     private boolean asking;                            // Android drops a permission request made during another
     private boolean askedToLook;                       // asked once for leave to search for an unpaired dongle
+    private static final String[] MODE_LABELS = {"Auto", "Always light", "Always dark"};
     private boolean askedLocation;                     // asked once; a refusal is not argued with
     private MusicSession music;                        // what the music app plays, for the music button's window
 
@@ -78,7 +80,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         look = prefs.getString(lookKey(), looks[0]);
         if (!Arrays.asList(looks).contains(look)) look = looks[0];
         xp = new XpTheme(prefs.getString("xp_scheme", "Blue"));
-        xp.setMode(prefs.getString("xp_mode", NightHours.LIGHT));
+        xp.setMode(prefs.getString("xp_mode", NightHours.AUTO));
         jeep = new JeepTheme(prefs.getString("jeep_backlight", "White"));
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         view = new DashView(this, this);
@@ -86,11 +88,23 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         view.chrome.snap = prefs.getBoolean("snap", true);
         applyLook();
         setContentView(view);
+        syncNight();
         music = new MusicSession(this, this::onMusic);
         view.chrome.music = MusicSession.buttonOn(this);
         askPermissions();
         sweepPending = b == null && getIntent().getBooleanExtra("sweep", false);
         if (b == null) UpdateChecker.check(this, buildNumber(), false);
+    }
+
+    /** Auto brightness: the light sensor (or sunset) runs only while the XP look is in front and set to Auto. */
+    private void syncNight() {
+        if ("xp".equals(look) && NightHours.AUTO.equals(prefs.getString("xp_mode", NightHours.AUTO))) night.start(this);
+        else night.stop();
+    }
+
+    private void onNightChanged() {
+        xp.setAutoDark(night.dark());
+        view.invalidate();
     }
 
     /** Each car remembers its own look. */
@@ -121,6 +135,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         String next = lookName(nextLook());
         view.chrome.nextLook = "xp".equals(look) ? next.charAt(0) + next.substring(1).toLowerCase(java.util.Locale.US) : next;
         view.setTheme(theme());
+        syncNight();
     }
 
     @Override
@@ -181,6 +196,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     @Override
     protected void onStart() {
         super.onStart();
+        syncNight();
         startLink();
         bound = bindService(new Intent(this, LinkService.class), this, Context.BIND_AUTO_CREATE);
         if (view.chrome.music) {
@@ -194,6 +210,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     protected void onStop() {
         music.stop();
         tablet.stop();
+        night.stop();
         if (service != null) service.removeListener(this);
         service = null;
         if (bound) {
@@ -468,7 +485,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             s.fast = f == PollRunner.Fast.ON ? "on" : f == PollRunner.Fast.OFF ? "off" : "backed_off";
         }
         s.xpScheme = prefs.getString("xp_scheme", "Blue");
-        s.xpMode = prefs.getString("xp_mode", NightHours.LIGHT);
+        s.xpMode = prefs.getString("xp_mode", NightHours.AUTO);
         s.jeepBacklight = prefs.getString("jeep_backlight", "White");
         s.musicButton = view.chrome.music;
         if (service != null) s.volume = service.volumeFollowsSpeed().name();
@@ -523,9 +540,13 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                 });
                 break;
             case DashMenu.XP_MODE:
-                pick("Brightness (Auto: dark from 7 pm to 7 am)", XpTheme.MODES, prefs.getString("xp_mode", NightHours.LIGHT), v -> {
-                    prefs.edit().putString("xp_mode", v).apply();
-                    xp.setMode(v);
+                pick("Brightness (Auto: light sensor, else sunset and sunrise)", MODE_LABELS,
+                        NightHours.label(prefs.getString("xp_mode", NightHours.AUTO)), v -> {
+                    String m = NightHours.fromLabel(v);
+                    if (m == null) return;
+                    prefs.edit().putString("xp_mode", m).apply();
+                    xp.setMode(m);
+                    syncNight();
                 });
                 break;
             case DashMenu.JEEP_BACKLIGHT:

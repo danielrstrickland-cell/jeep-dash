@@ -48,6 +48,8 @@ public final class LogProfile {
             IAC = new Want("iac", "Idle air control"),
             TPS = new Want("throttle", "TPS"),
             SPEED = new Want("speed", "Speed"),
+            GPS_SPEED = new Want("gps_mph", "GPS speed"),
+            GPS_ACC = new Want("gps_accuracy_m", "GPS accuracy"),
             KNOCK_RETARD = new Want("knock_retard", "Knock retard");   // not mapped on the Jeep line yet
 
     private static List<Want> w(Want... ws) { return new ArrayList<>(Arrays.asList(ws)); }
@@ -55,7 +57,7 @@ public final class LogProfile {
     private static final List<LogProfile> ALL = Collections.unmodifiableList(Arrays.asList(
             new LogProfile("idle", "Idle", "Warm \u00b7 Park, Drive, lights on/off \u00b7 3 min", w(RPM, TARGET_IDLE, SPARK, MAP, COOLANT, IAT, STFT, LTFT, BATTERY, IAC),
                     10, 3, "Warm engine, Park 1 min", "Drive, foot on brake 1 min", "Toggle headlights and blower"),
-            new LogProfile("cruise", "Cruise", "Hold 35, 45, 55, 65 mph \u00b7 10 min", w(RPM, MAP, SPARK, IAT, COOLANT, STFT, LTFT, TPS, SPEED),
+            new LogProfile("cruise", "Cruise", "Hold 35, 45, 55, 65 mph \u00b7 10 min", w(RPM, MAP, SPARK, IAT, COOLANT, STFT, LTFT, TPS, SPEED, GPS_SPEED, GPS_ACC),
                     5, 10, "Hold 35 mph 1 min", "Hold 45 mph 1 min", "Hold 55 mph 1 min", "Hold 65 mph 1 min"),
             new LogProfile("coldstart", "Cold start", "After sitting 6+ hrs \u00b7 15 min", w(COOLANT, IAT, RPM, TARGET_IDLE, SPARK, STFT, LTFT, BATTERY),
                     2, 15, "Start from cold (sat 6+ hours), idle 2 min, then drive normally"),

@@ -43,6 +43,8 @@ public final class TestMain {
             RollingCaptureTest.class,
             MisfireCodesTest.class,
             TuneLogTest.class,
+            SpeedCalibrationTest.class,
+            AutoNightTest.class,
     };
 
     public static void main(String[] args) {

@@ -71,8 +71,8 @@ public final class DashMenu {
         look.add(new Entry(SWITCH_LOOK, s.nextLook == null ? "Switch look" : "Switch look: " + s.nextLook));
         if ("xp".equals(s.look)) {
             look.add(new Entry(XP_SCHEME, "Window colour: " + s.xpScheme));
-            look.add(new Entry(XP_MODE, "Brightness: " + s.xpMode
-                    + (NightHours.AUTO.equals(s.xpMode) ? " (dark from 7 pm to 7 am)" : "")));
+            look.add(new Entry(XP_MODE, "Brightness: " + NightHours.label(s.xpMode)
+                    + (NightHours.AUTO.equals(s.xpMode) ? " (light sensor, else sunset)" : "")));
         } else if ("jeep".equals(s.look)) {
             look.add(new Entry(JEEP_BACKLIGHT, "Backlight: " + s.jeepBacklight));
         }

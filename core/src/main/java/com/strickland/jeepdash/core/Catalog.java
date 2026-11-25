@@ -74,6 +74,7 @@ public final class Catalog {
 
         // From the tablet's GPS and accelerometer (see Motion); the dongle is never asked for these.
         add(Param.tablet("gps_mph", "GPS speed", "mph", 0, 110));
+        add(Param.tablet("gps_accuracy_m", "GPS accuracy", "m", 0, 50));
         add(Param.tablet("g_force", "G-force", "g", 0, 1.2));
         add(Param.tablet("g_accel", "Pull / braking", "g", -1, 1));
         add(Param.tablet("zero_sixty", "0-60 time", "s", 0, 20));

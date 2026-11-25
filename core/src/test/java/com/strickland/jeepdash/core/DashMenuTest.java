@@ -79,7 +79,7 @@ public class DashMenuTest {
         T.eq("Speed correction: +3.6%", find(m, DashMenu.SPEED_CORRECTION).label, "correction");
         T.eq("Snap to grid: off", find(m, DashMenu.SNAP).label, "snap");
         T.eq("Window colour: Blue", find(m, DashMenu.XP_SCHEME).label, "scheme");
-        T.eq("Brightness: Auto (dark from 7 pm to 7 am)", find(m, DashMenu.XP_MODE).label, "brightness");
+        T.eq("Brightness: Auto (light sensor, else sunset)", find(m, DashMenu.XP_MODE).label, "brightness");
         T.eq("Switch look: Jeep style", find(m, DashMenu.SWITCH_LOOK).label, "next look");
         T.eq("Vehicle: Jeep Grand Cherokee", find(m, DashMenu.VEHICLE).label, "vehicle");
         T.eq("Fast refresh (experimental): off", find(m, DashMenu.FAST).label, "fast");
