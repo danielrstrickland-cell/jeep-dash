@@ -6,9 +6,9 @@ import android.os.Build;
 import com.strickland.jeepdash.core.VizTune;
 
 /**
- * The music road: a night road running toward a striped sun, with equalizer sidewalks (each slab lights with
- * its band) and buildings that rise and pulse with the music: the bass on the left, the treble on the right,
- * with different building shapes and spacing so the two sides never mirror each other. It moves at the Jeep's real speed
+ * The music road: a night road running toward a striped sun, past sidewalks and street lamps, between
+ * buildings that are the equalizer: the bass on the left, the treble on the right, with different shapes and
+ * spacing so the two sides never mirror. Each building keeps its band the whole way past. It moves at the Jeep's real speed
  * and bends the moment you turn: speed comes from the Jeep (read only, through the link that already runs),
  * smoothed between readings with the G-meter so there is no lag, and turns come straight from the gyro.
  * Without the Jeep it cruises at a pace set by the music. Drawn by the graphics chip.
@@ -54,17 +54,17 @@ final class GpuRoad extends GpuLook {
             + "            float dash = step(0.5, fract(wz * 0.5));\n"
             + "            g += half3(0.9, 0.85, 0.5) * half(dash * (1.0 - smoothstep(0.03, 0.03 + px, ax)));\n"
             + "            g += c1.rgb * half(0.6 * (1.0 - smoothstep(0.02, 0.02 + px, abs(ax - 0.97))));\n"
-            + "        } else if (ax < 1.5) {\n"
-            + "            float k = mod(floor(wz * 2.0), 16.0);\n"
-            + "            float level = 0.0;\n"
-            + "            for (int i = 0; i < 16; i++) if (abs(float(i) - k) < 0.5) level = x < 0.0 ? bassLv[i] : trebleLv[i];\n"
-            + "            half3 tint = x < 0.0 ? c0.rgb : c2.rgb;\n"
-            + "            float tile = step(0.08, fract(wz * 2.0)) * step(0.04, fract(ax * 4.0));\n"
-            + "            g = tint * half(0.12 + 1.1 * level * tile);\n"
+            + "        } else if (ax < 1.6) {\n"
+            + "            float joint = step(0.94, fract(wz * 1.2));\n"
+            + "            g = half3(0.11, 0.11, 0.13) * half(1.0 - 0.45 * joint);\n"
+            + "            g += half3(0.35, 0.35, 0.4) * half(1.0 - smoothstep(0.0, 0.03 + px, ax - 1.0));\n"
             + "        } else {\n"
             + "            float line = step(0.95, fract(wz)) + step(0.95, fract(x * 0.5));\n"
             + "            g += c0.rgb * half(0.45 * min(line, 1.0));\n"
             + "        }\n"
+            + "        float dz = (fract(wz / 1.5) - 0.5) * 1.5;\n"                      // street-lamp light on the ground
+            + "        float pool = exp(-(dz * dz + (ax - 1.15) * (ax - 1.15)) * 2.5);\n"
+            + "        g += half3(1.0, 0.78, 0.45) * half(pool * 0.22 * (ax < 1.6 ? 1.0 : 0.4));\n"
             + "        col = mix(g, col, half(clamp(z / 14.0, 0.0, 1.0)));\n"
             + "    }\n"
             + "    for (int i = 15; i >= 0; i--) {\n"
@@ -78,8 +78,8 @@ final class GpuRoad extends GpuLook {
             + "            float yb = hor + 0.25 / zi;\n"
             + "            float yt = yb - bh * 0.25 / zi;\n"
             + "            float off = curve * zi * zi * 0.02;\n"
-            + "            float x0 = isLeft ? (-3.2 + off) / zi : (1.8 + off) / zi;\n"
-            + "            float x1 = isLeft ? (-1.8 + off) / zi : (2.9 + off) / zi;\n"
+            + "            float x0 = isLeft ? (-3.4 + off) / zi : (1.9 + off) / zi;\n"
+            + "            float x1 = isLeft ? (-1.9 + off) / zi : (3.0 + off) / zi;\n"
             + "            if (q.y < yb && q.y > yt && q.x > x0 && q.x < x1) {\n"
             + "                float u = (q.x - x0) / (x1 - x0);\n"
             + "                float v = (yb - q.y) / (yb - yt);\n"
@@ -94,10 +94,32 @@ final class GpuRoad extends GpuLook {
             + "        }\n"
             + "        }\n"
             + "    }\n"
+            + "    for (int n = 11; n >= 0; n--) {\n"                                     // light posts, both sides
+            + "        float zk = float(n + 1) * 1.5 - fract(travel / 1.5) * 1.5;\n"
+            + "        if (zk > 0.35) {\n"
+            + "            float off = curve * zk * zk * 0.02;\n"
+            + "            float yb = hor + 0.25 / zk;\n"
+            + "            float yt = yb - 1.35 * 0.25 / zk;\n"
+            + "            float fog = clamp(zk / 14.0, 0.0, 1.0);\n"
+            + "            for (int side = 0; side < 2; side++) {\n"
+            + "                float sx = side == 0 ? -1.35 : 1.35;\n"
+            + "                float px0 = (sx + off) / zk;\n"
+            + "                float hw = 0.022 / zk;\n"
+            + "                if (abs(q.x - px0) < hw && q.y < yb && q.y > yt) col = mix(half3(0.16, 0.16, 0.19), col, half(fog));\n"
+            + "                float lx = (sx * 0.86 + off) / zk;\n"                           // the arm and lamp over the road
+            + "                if (q.y < yt + 0.02 / zk && q.y > yt - 0.005 / zk && (q.x - px0) * (lx - px0) > 0.0\n"
+            + "                    && abs(q.x - px0) < abs(lx - px0)) col = mix(half3(0.16, 0.16, 0.19), col, half(fog));\n"
+            + "                float2 lamp = (q - float2(lx, yt + 0.02 / zk)) * zk;\n"
+            + "                float glow = exp(-dot(lamp, lamp) * 900.0) + 0.25 * exp(-dot(lamp, lamp) * 60.0);\n"
+            + "                col += half3(1.0, 0.82, 0.5) * half(glow * (1.0 - fog));\n"
+            + "            }\n"
+            + "        }\n"
+            + "    }\n"
             + "    return half4(col, 1.0);\n"
             + "}\n";
 
     private static final float MPH_PER_G_SECOND = 21.94f, MPS_PER_MPH = 0.44704f;
+    private static final float LOOP = 720;                              // whole buildings, posts and bands: no jump
     private final float[] bassLv = new float[BANDS], trebleLv = new float[BANDS];
     private final VizMotion motion;
     private float mph, travel, curve;
@@ -123,13 +145,17 @@ final class GpuRoad extends GpuLook {
         float sign = p.tune.on(look, "flip") ? 1 : -1;
         float want = Math.max(-6, Math.min(6, sign * motion.yaw / Math.max(4, mps) * 60 * p.tune.get(look, "turns")));
         curve += (want - curve) * Math.min(1, dt * 8);
+        // each building keeps one band for as long as it is on screen: building number (counted along the
+        // road) picks the band, so heights only change with the music, never as it scrolls
+        travel %= LOOP;
         int half = p.shown / 2;                                         // low half of the bars left, high half right
+        long left = (long) Math.floor(travel / 0.9f), right = (long) Math.floor(travel / 0.9f + 0.5f);
         for (int i = 0; i < BANDS; i++) {
-            bassLv[i] = p.bar(i * half / BANDS);
-            trebleLv[i] = p.bar(half + i * half / BANDS);
+            bassLv[i] = p.bar((int) Math.floorMod(left + i, (long) BANDS) * half / BANDS);
+            trebleLv[i] = p.bar(half + (int) Math.floorMod(right + i, (long) BANDS) * half / BANDS);
         }
         shader.setFloatUniform("time", seconds);
-        shader.setFloatUniform("travel", travel % 1000f);
+        shader.setFloatUniform("travel", travel);
         shader.setFloatUniform("curve", curve);
         shader.setFloatUniform("bass", p.bass);
         shader.setFloatUniform("beat", p.beat);

@@ -73,7 +73,8 @@ public final class VizTune {
      * The looks that can be chosen, by number: blocks, smooth, bass ring, swirl. Number 2 was the boom meters,
      * taken out; the numbers stay as they were so every look keeps its saved settings.
      */
-    public static final int[] CHOICES = {0, 1, 3, 4, 5, 6, 7, 8, 9};
+    /** Ferrofluid (5) and lava lamp (8) were taken out too; their numbers stay so the rest keep their settings. */
+    public static final int[] CHOICES = {0, 1, 3, 4, 6, 7, 9};
     public static final int FERRO = 5, MILK = 6, ROAD = 7, LAVA = 8, MANDEL = 9;
     public static final int SMOOTH = 1;
 

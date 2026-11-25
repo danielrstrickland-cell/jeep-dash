@@ -75,10 +75,8 @@ public class VisualizerView extends View {
         prefs = context.getSharedPreferences("viz", Context.MODE_PRIVATE);
         painter.swirl = new SwirlLook();
         if (GpuLook.supported()) {                           // a shader that does not build leaves smooth bars
-            try { painter.gpu[VizTune.FERRO] = new GpuFerro(motion); } catch (RuntimeException ignored) { }
             try { painter.gpu[VizTune.MILK] = new GpuMilk(motion); } catch (RuntimeException ignored) { }
             try { painter.gpu[VizTune.ROAD] = new GpuRoad(motion); } catch (RuntimeException ignored) { }
-            try { painter.gpu[VizTune.LAVA] = new GpuLava(motion); } catch (RuntimeException ignored) { }
             try { painter.gpu[VizTune.MANDEL] = new GpuMandel(); } catch (RuntimeException ignored) { }
         }
         painter.look = VizTune.savedLook(prefs.getInt("look2", 0));      // the old boom meters become Smooth
