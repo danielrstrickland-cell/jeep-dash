@@ -38,6 +38,7 @@ public final class TestMain {
             GravityTest.class,
             DashMenuTest.class,
             VizLooksTest.class,
+            ListenLogTest.class,
     };
 
     public static void main(String[] args) {

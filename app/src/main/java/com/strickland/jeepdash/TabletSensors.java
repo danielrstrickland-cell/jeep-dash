@@ -34,6 +34,8 @@ final class TabletSensors implements SensorEventListener, LocationListener {
     private final Motion motion = new Motion();            // fed the car's raw speed, so Speedo vs GPS shows its error
     private final Gravity gravity = new Gravity();         // for a plain accelerometer (no gyroscope)
     private boolean plainAccelerometer;
+    private int linearEvents, linearLive;                  // linear-acceleration readings seen, and how many were not all zero
+    private final Runnable watchdog = this::checkLinear;
     private LinkService link;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable onPublished;
@@ -67,6 +69,11 @@ final class TabletSensors implements SensorEventListener, LocationListener {
                 plainAccelerometer = s != null;
             }
             if (s != null) sensors.registerListener(this, s, SensorManager.SENSOR_DELAY_GAME, main);
+            linearEvents = 0;
+            linearLive = 0;
+            // Some tablets list a linear-acceleration sensor that never reports or only ever reports zeros (it is
+            // worked out from a gyroscope they lack): that left G-force blank or stuck at 0. Check, then fall back.
+            if (s != null && !plainAccelerometer) main.postDelayed(watchdog, 2500);
             if (link != null) link.noteFromScreen("tablet motion sensor: " + (s == null ? "none found (G-force stays blank)"
                     : plainAccelerometer ? "accelerometer, gravity taken out in software" : "linear acceleration")
                     + (s == null ? "" : " (" + s.getName() + ")"));
@@ -80,8 +87,21 @@ final class TabletSensors implements SensorEventListener, LocationListener {
         if (!running) return;
         running = false;
         main.removeCallbacks(tick);
+        main.removeCallbacks(watchdog);
         if (sensors != null) sensors.unregisterListener(this);
         stopGps();
+    }
+
+    /** The linear-acceleration sensor reported nothing useful: use the plain accelerometer, gravity taken out here. */
+    private void checkLinear() {
+        if (!running || plainAccelerometer || linearLive > 0) return;
+        Sensor a = sensors == null ? null : sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        if (a == null) return;
+        sensors.unregisterListener(this);
+        plainAccelerometer = true;
+        sensors.registerListener(this, a, SensorManager.SENSOR_DELAY_GAME, main);
+        if (link != null) link.noteFromScreen("tablet motion sensor: linear acceleration gave " + linearEvents
+                + " readings, all zero or none; switched to the accelerometer (" + a.getName() + ")");
     }
 
     private void startGps(Context app) {
@@ -144,6 +164,10 @@ final class TabletSensors implements SensorEventListener, LocationListener {
         feedDash();        // first, so a speed reading and the shove that follows it stay in order
         long now = LinkService.now();
         double x = e.values[0], y = e.values[1], z = e.values[2];
+        if (e.sensor != null && e.sensor.getType() == Sensor.TYPE_LINEAR_ACCELERATION) {
+            linearEvents++;
+            if (x != 0 || y != 0 || z != 0) linearLive++;
+        }
         if (plainAccelerometer) {
             double[] a = gravity.linear(x, y, z, now);
             x = a[0];

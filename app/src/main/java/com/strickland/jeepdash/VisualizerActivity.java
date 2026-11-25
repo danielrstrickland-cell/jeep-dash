@@ -79,7 +79,10 @@ public class VisualizerActivity extends Activity
         if (music == null) music = new MusicSession(this, this::onMusicChanged);
         view.painter.music = MusicSession.buttonOn(this);
         if (!view.painter.music) view.painter.musicOpen = false;
-        else music.start();
+        else {
+            music.start();
+            if (!MusicSession.hasAccess(this)) view.post(() -> { if (!isFinishing() && !music.access()) MusicSession.promptAccess(this); });
+        }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startMic();
         else requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1);
         try {
@@ -283,7 +286,9 @@ public class VisualizerActivity extends Activity
 
     @Override
     public void onMusic(String part) {
-        if (music != null) music.transport("prev".equals(part) ? -1 : "next".equals(part) ? 1 : 0);
+        if (music == null) return;
+        if ("window".equals(part)) music.windowTap();
+        else music.transport("prev".equals(part) ? -1 : "next".equals(part) ? 1 : 0);
     }
 
     @Override

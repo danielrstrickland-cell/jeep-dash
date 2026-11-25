@@ -165,7 +165,7 @@ public class DashView extends View {
             if (musicDown.equals(part)) {
                 performClick();
                 if ("close".equals(part)) host.onDashAction("music");
-                else if (!"window".equals(part)) host.onDashAction("music:" + part);
+                else host.onDashAction("music:" + part);
             }
             musicDown = null;
         } else if (a == MotionEvent.ACTION_CANCEL) {

@@ -131,7 +131,7 @@ public class VisualizerView extends View {
             String part = music == null ? null : music.hit(x, y);
             if (musicDown.equals(part)) {
                 if ("close".equals(part)) painter.musicOpen = false;
-                else if (!"window".equals(part)) host.onMusic(part);
+                else host.onMusic(part);
                 invalidate();
             }
             musicDown = null;

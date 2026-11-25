@@ -1,5 +1,7 @@
 package com.strickland.jeepdash;
 
+import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.NotificationManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -10,6 +12,7 @@ import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -77,18 +80,61 @@ final class MusicSession implements MediaSessionManager.OnActiveSessionsChangedL
         return on != null && on.contains(me.flattenToString());
     }
 
-    /** The system screen where notification access is given. */
+    /** The system screen where notification access is given (this app's own switch where Android has one). */
     static void openAccessSettings(Context c) {
         try {
-            c.startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
-        } catch (RuntimeException ignored) {
-            // this device has no such screen
+            Intent i = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+            if (Build.VERSION.SDK_INT >= 30) {
+                i = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                        .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, MediaListener.component(c).flattenToString());
+            }
+            if (!(c instanceof Activity)) i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            c.startActivity(i);
+        } catch (RuntimeException e) {
+            try {
+                c.startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (RuntimeException ignored) {
+                // this device has no such screen
+            }
         }
+    }
+
+    /** This app's own info screen: where Android 13+ lets a side-loaded app's "restricted settings" be allowed. */
+    static void openAppInfo(Context c) {
+        try {
+            c.startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + c.getPackageName()))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (RuntimeException ignored) { }
+    }
+
+    /**
+     * Tells the owner notification access is missing and takes them there. An app installed from a downloaded
+     * APK has the switch greyed out on Android 13+ until "Allow restricted settings" is chosen on its app info
+     * screen, which is the usual reason the music window stays empty, so that is offered too.
+     */
+    static void promptAccess(Context c) {
+        if (!(c instanceof Activity) || ((Activity) c).isFinishing()) { openAccessSettings(c); return; }
+        new AlertDialog.Builder(c)
+                .setTitle("Notification access needed")
+                .setMessage("The music window needs notification access for Jeep Dash to see and control Spotify.\n\n"
+                        + "1. Tap \"Open access screen\" and switch Jeep Dash on.\n"
+                        + "2. If the switch is greyed out (Android 13+, app installed from a download), tap \"App info\", "
+                        + "open the three-dot menu, choose \"Allow restricted settings\", then try step 1 again.")
+                .setPositiveButton("Open access screen", (d, w) -> openAccessSettings(c))
+                .setNeutralButton("App info", (d, w) -> openAppInfo(c))
+                .setNegativeButton("Not now", null)
+                .show();
+    }
+
+    /** A tap on the window's own text: with no access it asks for it. */
+    void windowTap() {
+        if (!access) promptAccess(context);
     }
 
     void start() {
         if (running) return;
         running = true;
+        MediaListener.enable(context, true);      // the listener must be switched on whatever path turned the button on
         sessions = context.getSystemService(MediaSessionManager.class);
         try {
             if (sessions == null) throw new SecurityException("no media sessions");
@@ -179,7 +225,7 @@ final class MusicSession implements MediaSessionManager.OnActiveSessionsChangedL
     /** -1 previous, 0 play/pause, 1 next. Without access it opens the screen where access is given. */
     void transport(int which) {
         if (!access) {
-            openAccessSettings(context);
+            promptAccess(context);
             return;
         }
         MediaController c = followed;

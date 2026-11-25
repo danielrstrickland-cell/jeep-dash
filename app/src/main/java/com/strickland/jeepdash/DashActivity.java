@@ -183,7 +183,11 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         super.onStart();
         startLink();
         bound = bindService(new Intent(this, LinkService.class), this, Context.BIND_AUTO_CREATE);
-        if (view.chrome.music) music.start();
+        if (view.chrome.music) {
+            music.start();
+            // Ask for notification access whenever the button is on without it (once per screen visit).
+            if (!MusicSession.hasAccess(this)) view.post(() -> { if (!isFinishing() && !music.access()) MusicSession.promptAccess(this); });
+        }
     }
 
     @Override
@@ -362,6 +366,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case "music:prev": music.transport(-1); break;
             case "music:play": music.transport(0); break;
             case "music:next": music.transport(1); break;
+            case "music:window": music.windowTap(); break;
             default: break;
         }
     }
@@ -535,6 +540,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case DashMenu.FUEL: FuelDialog.show(this, this::pushActiveParams); break;
             case DashMenu.CODES: if (service != null) CodesDialog.show(this, service); break;
             case DashMenu.LOGS: showLogs(); break;
+            case DashMenu.LISTEN: startActivity(new Intent(this, ListenActivity.class)); break;
             case DashMenu.AUTO_START: chooseAutoStart(); break;
             case DashMenu.UPDATE: UpdateChecker.check(this, buildNumber(), true); break;
             default: break;
@@ -565,12 +571,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             if (on) music.start();
             else music.stop();
             if (on && !MusicSession.hasAccess(this)) {
-                new AlertDialog.Builder(this)
-                        .setTitle("Notification access")
-                        .setMessage("Android only lets an app see and control another app's music (like Spotify) when it has notification access, so turn it on for Jeep Dash on the next screen.")
-                        .setPositiveButton("Open settings", (d, w) -> MusicSession.openAccessSettings(this))
-                        .setNegativeButton("Not now", null)
-                        .show();
+                MusicSession.promptAccess(this);
             }
         });
     }
