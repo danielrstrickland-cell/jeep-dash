@@ -52,6 +52,7 @@ abstract class GpuLook implements VizPainter.Extra {
         if (skip && node.hasDisplayList()) {
             uniforms(p, node.getWidth(), node.getHeight(), dt, seconds); // the look still moves on in time
             show(c, w, h);
+            overlay(c, w, h, p);
             return;
         }
         float scale = Math.min(want, auto);
@@ -70,7 +71,11 @@ abstract class GpuLook implements VizPainter.Extra {
             node.endRecording();
         }
         show(c, w, h);
+        overlay(c, w, h, p);
     }
+
+    /** Anything drawn crisp over the shader picture at full resolution (a car, a readout); nothing by default. */
+    protected void overlay(Canvas c, int w, int h, VizPainter p) { }
 
     /** Draws the last picture, stretched to the screen. */
     private void show(Canvas c, int w, int h) {

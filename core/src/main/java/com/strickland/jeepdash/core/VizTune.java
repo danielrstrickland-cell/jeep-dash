@@ -73,8 +73,9 @@ public final class VizTune {
      * The looks that can be chosen, by number: blocks, smooth, bass ring, swirl. Number 2 was the boom meters,
      * taken out; the numbers stay as they were so every look keeps its saved settings.
      */
-    public static final int[] CHOICES = {0, 1, 3, 4, 5, 6, 7, 8, 9};
-    public static final int FERRO = 5, MILK = 6, ROAD = 7, LAVA = 8, MANDEL = 9;
+    /** Ferrofluid (5) and lava lamp (8) were taken out too; their numbers stay so the rest keep their settings. */
+    public static final int[] CHOICES = {0, 1, 3, 4, 6, 7, 9, 10, 11, 12};
+    public static final int FERRO = 5, MILK = 6, ROAD = 7, LAVA = 8, MANDEL = 9, RACER = 10, SUBS = 11, DOLPHINS = 12;
     public static final int SMOOTH = 1;
 
     /** A saved look, or Smooth when it was the boom meters or makes no sense. */
@@ -108,6 +109,12 @@ public final class VizTune {
                     slider("heat", "Heat glow", 0, 1.5f, 1)},
             {GAIN, GLOW, slider("dive", "Dive speed", 0, 2, 1), slider("spin", "Spin", 0, 2, 0.3f),
                     toggle("rpmdive", "RPM sets dive speed")},
+            {GAIN, GLOW, slider("under", "Underglow", 0, 2, 1), slider("pace", "Speed feel", 0.5f, 2, 1),
+                    toggle("hud", "Racing overlay")},
+            {GAIN, GLOW, slider("throw", "Cone throw", 0, 2, 1), slider("pan", "Camera pan", 0, 2, 1),
+                    toggle("rings", "LED rings")},
+            {GAIN, GLOW, slider("jump", "Jump height", 0, 2, 1), toggle("grid", "LCD grid"),
+                    toggleOff("profile", "Use colour profile")},
     };
     private static final Knob[] SHARED = {GAIN, GLOW};
 
