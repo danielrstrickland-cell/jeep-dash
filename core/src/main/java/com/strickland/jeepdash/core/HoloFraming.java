@@ -35,9 +35,15 @@ public final class HoloFraming {
 
     /** The same, with the camera swung round the truck by the parallax angles (degrees; see Parallax). */
     public static HoloFraming fit(double aspect, double length, double width, double height, double yawDeg, double pitchDeg) {
+        return fit(aspect, length, width, height, yawDeg, pitchDeg, 1);
+    }
+
+    /** The same, closer in (zoom over 1) or further out (under 1). */
+    public static HoloFraming fit(double aspect, double length, double width, double height, double yawDeg, double pitchDeg,
+                                  double zoom) {
         double radius = 0.5 * Math.sqrt(length * length + width * width + height * height);
         double half = Math.toRadians(FOV_DEG / 2), halfH = Math.atan(Math.tan(half) * aspect);
-        double dist = MARGIN * radius / Math.sin(Math.min(half, halfH));
+        double dist = MARGIN * radius / Math.sin(Math.min(half, halfH)) / Math.max(0.1, zoom);
         double e = Math.toRadians(ELEVATION_DEG + pitchDeg), a = Math.toRadians(yawDeg);
         double[] target = {0, height / 2, 0};
         double[] eye = {dist * Math.cos(e) * Math.sin(a), target[1] + dist * Math.sin(e), dist * Math.cos(e) * Math.cos(a)};

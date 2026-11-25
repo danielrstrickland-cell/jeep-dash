@@ -17,6 +17,8 @@ public final class Motion {
     static final double G = 9.80665, MPH = 0.44704;                // m/s² in one g; m/s in one mph
     static final double G_FORCE_SMOOTH_MS = 250, PULL_SMOOTH_MS = 400;
     static final double STOPPED_MPH = 1, SHOVE_G = 0.08, RUN_LIMIT_MS = 60000;
+    /** Speed lost from a run's best that ends it: lifting off or slowing in traffic (a gear change dips less). */
+    static final double DROP_MPH = 3;
     static final double CRUISE_MPH = 30, STEADY_G = 0.05;          // when the two speeds are fair to compare
     static final int ERROR_SAMPLES = 10, ERROR_MEMORY = 300;
     private static final long NEVER = Long.MIN_VALUE / 2;          // halved so "now - NEVER" cannot overflow
@@ -33,6 +35,7 @@ public final class Motion {
     private boolean armed, running;                // the 0-60 timer
     private long stoppedMs, shoveMs = NEVER, startMs;
     private Double lastRun;
+    private double runPeak;
 
     private double errorPct;
     private int errorSamples;
@@ -160,8 +163,14 @@ public final class Motion {
             armed = false;
             running = true;
             startMs = shoveMs > stoppedMs && shoveMs <= t ? shoveMs : stoppedMs;
+            runPeak = mph;
         }
         if (!running) return;
+        if (mph < runPeak - DROP_MPH) {
+            running = false;       // lifted or slowed: not a run, the last full one stays on screen
+            return;
+        }
+        runPeak = Math.max(runPeak, mph);
         // Sixty falls between two readings: work out where.
         double end = mph < 60 ? t : roadMs + (t - roadMs) * (60 - roadMph) / (mph - roadMph);
         if (end - startMs > RUN_LIMIT_MS) {

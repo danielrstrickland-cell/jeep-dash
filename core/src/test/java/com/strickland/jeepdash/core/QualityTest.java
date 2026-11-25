@@ -25,7 +25,7 @@ public final class QualityTest {
     public static void eachModeHasItsFrameRatesScaleAndFeatures() {
         QualityMode u = QualityMode.of(QualityMode.ULTRA), h = QualityMode.of(QualityMode.HIGH), s = QualityMode.of(QualityMode.SAVER);
         T.eq(30, u.fps(true), "Ultra: 30 a second");
-        T.near(1.4, u.renderScale, 1e-6, "Ultra: supersampled");
+        T.near(1.0, u.renderScale, 1e-6, "Ultra: native with MSAA (supersampling cost twice the pixels)");
         T.ok(u.msaa && u.shadow && u.ssao && u.multiPassBloom && u.fullTextures, "Ultra: everything");
         T.eq(60, h.fps(true), "High: 60 while moving");
         T.eq(30, h.fps(false), "High: 30 when still");

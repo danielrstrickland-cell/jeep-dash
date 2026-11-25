@@ -23,6 +23,7 @@ public final class TestMain {
             SpectrumTest.class,
             VizTuneTest.class,
             MotionTest.class,
+            OrbitViewTest.class,
             KwpTest.class,
             SciCodesTest.class,
             FastRefreshTest.class,

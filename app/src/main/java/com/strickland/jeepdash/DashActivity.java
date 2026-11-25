@@ -578,6 +578,15 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     public void onTruckTap() { if (stage != null) stage.spin(); }
 
     @Override
+    public void onTruckDrag(float dxDp, float dyDp) { if (stage != null) stage.drag(dxDp, -dyDp); }
+
+    @Override
+    public void onTruckPinch(float ratio) { if (stage != null) stage.pinch(ratio); }
+
+    @Override
+    public void onTruckDoubleTap() { if (stage != null) stage.resetView(); }
+
+    @Override
     public void onTruckHold() {
         if (stage != null && !stage.toggleOpen())
             Toast.makeText(this, "This truck model has no hood or liftgate that opens.", Toast.LENGTH_SHORT).show();

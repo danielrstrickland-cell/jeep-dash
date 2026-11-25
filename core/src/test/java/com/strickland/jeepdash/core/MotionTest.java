@@ -219,4 +219,19 @@ public class MotionTest {
         T.ok(Motion.needsGps(java.util.Arrays.asList("speedo_err")), "speedo check");
         T.ok(!Motion.needsGps(java.util.Arrays.asList("rpm", "g_force", "g_accel", "zero_sixty")), "the rest work without");
     }
+
+    public static void slowingInTrafficEndsTheRun() {
+        Motion m = new Motion();
+        for (long t = 0; t <= 2000; t += 250) m.dash(0, t);
+        long t = drive(m, 2250, 0.125, 8, 50);
+        t = drive(m, t, 50, -8, 20);                         // traffic: back down to 20
+        t = drive(m, t, 20, 8, 62);
+        T.ok(m.zeroSixty(t) == null, "a launch that slowed before sixty is no time, not 0-60 across the traffic");
+        Motion shift = new Motion();
+        for (long u = 0; u <= 2000; u += 250) shift.dash(0, u);
+        long u = drive(shift, 2250, 0.125, 10, 40);
+        u = drive(shift, u, 40, -4, 38.5);                   // the 2-3 shift dips a mph or two
+        u = drive(shift, u, 38.5, 10, 61);
+        T.ok(shift.zeroSixty(u) != null, "a gear change dip keeps the run");
+    }
 }

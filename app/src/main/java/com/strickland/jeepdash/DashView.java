@@ -51,6 +51,11 @@ public class DashView extends View implements HoloLoop.Layers {
         /** Holo look: the truck was tapped, or held. */
         default void onTruckTap() { }
         default void onTruckHold() { }
+        /** Finger dragged on the truck, dp. */
+        default void onTruckDrag(float dxDp, float dyDp) { }
+        /** Two fingers on the truck: their spread now over before. */
+        default void onTruckPinch(float ratio) { }
+        default void onTruckDoubleTap() { }
     }
 
     private static final float HANDLE = 48;           // dp: the resize corner
@@ -94,7 +99,10 @@ public class DashView extends View implements HoloLoop.Layers {
     private final Map<String, String> ghostParam = new HashMap<>();
     private GaugeSpec truckRect;
     private boolean holoMoving;
-    private boolean truckDown, holdFired;
+    private boolean truckDown, holdFired, truckDragged;
+    private float pinchSpread;
+    private long lastTruckTapMs;
+    private static final long DOUBLE_TAP_MS = 300;
     private final Runnable hold = this::fireHold;
 
     // the tablet heat icon (any look), shown at moderate heat and above
@@ -523,7 +531,10 @@ public class DashView extends View implements HoloLoop.Layers {
         host.onTruckHold();
     }
 
-    /** Holo look, not editing: a tap on the truck spins it, a hold opens its hood. */
+    /**
+     * Holo look, not editing: a tap on the truck spins it, a hold opens its hood, a drag swings the view round it,
+     * a pinch moves the view in or out and a double tap puts the view back.
+     */
     private boolean truckTouch(MotionEvent e, float x, float y) {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
@@ -531,24 +542,55 @@ public class DashView extends View implements HoloLoop.Layers {
                         || y < truckRect.y || y > truckRect.y + truckRect.h) return false;
                 truckDown = true;
                 holdFired = false;
-                downX = x;
-                downY = y;
+                truckDragged = false;
+                pinchSpread = 0;
+                downX = lastX = x;
+                downY = lastY = y;
                 postDelayed(hold, HOLD_MS);
+                return true;
+            case MotionEvent.ACTION_POINTER_DOWN:
+                if (!truckDown || e.getPointerCount() < 2) return truckDown;
+                removeCallbacks(hold);
+                truckDragged = true;
+                pinchSpread = spread(e);
+                return true;
+            case MotionEvent.ACTION_POINTER_UP:
+                if (!truckDown) return false;
+                pinchSpread = 0;            // one finger left: it drags on from where it is
+                int left = e.getActionIndex() == 0 ? 1 : 0;
+                lastX = e.getX(left) / density;
+                lastY = e.getY(left) / density;
                 return true;
             case MotionEvent.ACTION_MOVE:
                 if (!truckDown) return false;
-                if (Math.hypot(x - downX, y - downY) > SLOP * 2) {
-                    truckDown = false;
+                if (e.getPointerCount() >= 2 && pinchSpread > 0) {
+                    float now = spread(e);
+                    if (now > 0) host.onTruckPinch(now / pinchSpread);
+                    pinchSpread = now;
+                    return true;
+                }
+                if (!truckDragged && Math.hypot(x - downX, y - downY) > SLOP) {
+                    truckDragged = true;
                     removeCallbacks(hold);
                 }
+                if (truckDragged && !holdFired) host.onTruckDrag(x - lastX, y - lastY);
+                lastX = x;
+                lastY = y;
                 return true;
             case MotionEvent.ACTION_UP:
                 if (!truckDown) return false;
                 truckDown = false;
                 removeCallbacks(hold);
-                if (!holdFired) {
+                if (!holdFired && !truckDragged) {
                     performClick();
-                    host.onTruckTap();
+                    long now = android.os.SystemClock.uptimeMillis();
+                    if (now - lastTruckTapMs < DOUBLE_TAP_MS) {
+                        lastTruckTapMs = 0;
+                        host.onTruckDoubleTap();
+                    } else {
+                        lastTruckTapMs = now;
+                        host.onTruckTap();
+                    }
                 }
                 return true;
             case MotionEvent.ACTION_CANCEL:
@@ -558,6 +600,12 @@ public class DashView extends View implements HoloLoop.Layers {
             default:
                 return truckDown;
         }
+    }
+
+    /** dp between the first two fingers. */
+    private float spread(MotionEvent e) {
+        if (e.getPointerCount() < 2) return 0;
+        return (float) Math.hypot(e.getX(0) - e.getX(1), e.getY(0) - e.getY(1)) / density;
     }
 
     @Override

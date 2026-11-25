@@ -45,7 +45,8 @@ public final class HoloStage implements Stage {
     private String kind = QualityMode.STAND_IN, mode = QualityMode.HIGH;
     private boolean loading, attached, shadow;
     private int loadSerial;
-    private double wheel, lastYaw = Double.NaN, lastPitch = Double.NaN;
+    private double wheel, lastYaw = Double.NaN, lastPitch = Double.NaN, lastZoom = 1;
+    private final com.strickland.jeepdash.core.OrbitView orbit = new com.strickland.jeepdash.core.OrbitView();
     private int width = 1, height = 1;
     private float exposureEv;
 
@@ -207,6 +208,25 @@ public final class HoloStage implements Stage {
         host.requestFrame();
     }
 
+    /** Drag on the truck: swing the view round it (dp moved). */
+    public void drag(float dxDp, float dyDp) {
+        orbit.drag(dxDp, dyDp);
+        if (host != null) host.requestFrame();
+    }
+
+    /** Pinch on the truck: the fingers' spread now over before. */
+    public void pinch(float ratio) {
+        orbit.pinch(ratio);
+        if (host != null) host.requestFrame();
+    }
+
+    /** Double tap: the view and the truck back where they started. */
+    public void resetView() {
+        orbit.reset();
+        spin.setTarget(360 * Math.round(spin.value() / 360));
+        if (host != null) host.requestFrame();
+    }
+
     /** Tap: one turn round, then back where it was. */
     public void spin() {
         spin.setTarget(spin.target() + 360);
@@ -242,14 +262,18 @@ public final class HoloStage implements Stage {
         wheel = (wheel + speed / com.strickland.jeepdash.core.TruckMotion.TIRE_RADIUS_M * dt) % (2 * Math.PI);
 
         // the camera, swung a little by the parallax
-        double py = feed.parallax.yawDeg(), pp = feed.parallax.pitchDeg();
+        double py = feed.parallax.yawDeg() + orbit.yawDeg(), pp = orbit.pitchWith(feed.parallax.pitchDeg());
+        double zoom = orbit.zoom();
         state.parallaxYaw = py;
         state.parallaxPitch = pp;
-        boolean camMoved = Double.isNaN(lastYaw) || Math.abs(py - lastYaw) > 0.01 || Math.abs(pp - lastPitch) > 0.01;
+        // under a twentieth of a degree is less than a pixel: the sensor's jitter alone must not keep the GPU drawing
+        boolean camMoved = Double.isNaN(lastYaw) || Math.abs(py - lastYaw) > 0.05 || Math.abs(pp - lastPitch) > 0.05
+                || zoom != lastZoom;
         if (camMoved) {
             lastYaw = py;
             lastPitch = pp;
-            HoloFraming f = HoloFraming.fit(width / (double) height, TruckModel.LENGTH, state.truckWidth, state.truckHeight, py, pp);
+            lastZoom = zoom;
+            HoloFraming f = HoloFraming.fit(width / (double) height, TruckModel.LENGTH, state.truckWidth, state.truckHeight, py, pp, zoom);
             state.framing = f;
             host.camera.setProjection(f.fovDeg, f.aspect, f.near, f.far, com.google.android.filament.Camera.Fov.VERTICAL);
             host.camera.lookAt(f.eye[0], f.eye[1], f.eye[2], f.target[0], f.target[1], f.target[2], 0, 1, 0);

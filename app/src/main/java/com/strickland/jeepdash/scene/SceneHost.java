@@ -52,9 +52,11 @@ public final class SceneHost implements UiHelper.RendererCallback {
     private final UiHelper ui = new UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK);
     private SwapChain swapChain;
     private Stage stage;
-    private boolean destroyed, failed, moving = true;
+    private boolean destroyed, failed, moving = true, wasMoving = true;
     private QualityMode quality = QualityMode.of(QualityMode.HIGH);
     private int viewW, viewH, framesMarked;
+    /** Frames still to draw though nothing moves (a new size, surface or setting); the last picture stays up otherwise. */
+    private int dirtyFrames = 2;
 
     /** Call only when available() is true. */
     public SceneHost(Context c) {
@@ -102,7 +104,7 @@ public final class SceneHost implements UiHelper.RendererCallback {
             int[] size = bufferSize();
             if (size[0] > 0) s.resize(size[0], size[1]);
         }
-        moving = true;
+        requestFrame();
     }
 
     /** The Quality mode's settings for the 3D view. */
@@ -116,20 +118,34 @@ public final class SceneHost implements UiHelper.RendererCallback {
         View.BloomOptions b = new View.BloomOptions();
         b.enabled = q.bloom;
         b.strength = 0.10f;
-        b.levels = q.multiPassBloom ? 7 : 4;
-        b.resolution = q.multiPassBloom ? 512 : 256;
+        // 5 levels at 384 look the same as 7 at 512 on this screen for under half the work
+        b.levels = q.multiPassBloom ? 5 : 4;
+        b.resolution = q.multiPassBloom ? 384 : 256;
         b.quality = q.multiPassBloom ? View.QualityLevel.HIGH : View.QualityLevel.LOW;
         filamentView.setBloomOptions(b);
         filamentView.setShadowingEnabled(q.shadow);
-        if (q.shadow) filamentView.setShadowType(View.ShadowType.DPCF);
+        // filtered (PCF) shadow: soft enough on the base, a fraction of DPCF's cost on this tablet's GPU
+        if (q.shadow) filamentView.setShadowType(View.ShadowType.PCF);
         View.AmbientOcclusionOptions ao = new View.AmbientOcclusionOptions();
         ao.enabled = q.ssao;
         ao.intensity = 0.6f;
         ao.radius = 0.3f;
+        ao.resolution = 0.5f;
+        ao.quality = View.QualityLevel.LOW;
         filamentView.setAmbientOcclusionOptions(ao);
+        // while the GPU falls behind (a spin), Filament draws a little smaller and scales up; full size when still
+        View.DynamicResolutionOptions dr = new View.DynamicResolutionOptions();
+        dr.enabled = true;
+        dr.minScale = 0.7f;
+        dr.maxScale = 1.0f;
+        dr.quality = View.QualityLevel.MEDIUM;
+        filamentView.setDynamicResolutionOptions(dr);
+        Renderer.FrameRateOptions fr = new Renderer.FrameRateOptions();
+        fr.interval = Math.max(1f, 60f / Math.max(1, q.maxFps));
+        renderer.setFrameRateOptions(fr);
         applySize();
         Trail.step("setQuality done");
-        moving = true;
+        requestFrame();
     }
 
     public QualityMode quality() { return quality; }
@@ -146,7 +162,10 @@ public final class SceneHost implements UiHelper.RendererCallback {
     }
 
     /** Something changed (a tap, a new model): treat the scene as moving. */
-    public void requestFrame() { moving = true; }
+    public void requestFrame() {
+        moving = true;
+        dirtyFrames = 2;
+    }
 
     /** True while the stage has something moving (HoloLoop keeps the full frame rate). */
     public boolean moving() { return moving; }
@@ -157,6 +176,12 @@ public final class SceneHost implements UiHelper.RendererCallback {
         try {
             if (framesMarked < 3) Trail.step("frame " + framesMarked + ": stage.frame");
             moving = stage == null || stage.frame(SystemClock.elapsedRealtime(), dt);
+            // Nothing in the 3D view moved: the TextureView keeps showing the last picture, so a new reading
+            // redraws only the 2D gauges and the GPU stays free. One more frame after motion stops settles it.
+            boolean draw = moving || dirtyFrames > 0 || wasMoving;
+            wasMoving = moving;
+            if (!draw) return true;
+            if (dirtyFrames > 0) dirtyFrames--;
             boolean mark = framesMarked < 3;
             if (mark) Trail.step("frame " + framesMarked + ": stage moved; swapChain=" + (swapChain != null) + " ready=" + ui.isReadyToRender());
             if (swapChain != null && ui.isReadyToRender() && renderer.beginFrame(swapChain, frameNs)) {
@@ -187,7 +212,7 @@ public final class SceneHost implements UiHelper.RendererCallback {
                 // a hint only
             }
         }
-        moving = true;
+        requestFrame();
     }
 
     @Override
@@ -204,7 +229,7 @@ public final class SceneHost implements UiHelper.RendererCallback {
         Trail.step("resized " + w + "x" + h);
         filamentView.setViewport(new Viewport(0, 0, w, h));
         if (stage != null) stage.resize(w, h);
-        moving = true;
+        requestFrame();
     }
 
     /** Frees the engine and everything in it. The host cannot be used after. */

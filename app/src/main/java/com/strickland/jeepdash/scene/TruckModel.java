@@ -145,11 +145,28 @@ public final class TruckModel {
             materials.destroy();
             throw new IllegalArgumentException("That model needs files beside it. Export it as one .glb with everything packed in.");
         }
+        bothSides(asset);
         Trail.step("gltf asyncBeginLoad");
         resources.asyncBeginLoad(asset);
         Trail.step("gltf releaseSourceData");
         asset.releaseSourceData();
         return new TruckModel(engine, scene, materials, loader, resources, asset);
+    }
+
+    /**
+     * Draws both faces of every surface. A panel whose faces point inward (a mirrored or flipped part in the source
+     * model) was culled from some angles, so a quarter panel vanished as the truck turned. Materials built able to
+     * be two-sided also light the far face properly; the others just stop culling.
+     */
+    private static void bothSides(FilamentAsset asset) {
+        try {
+            for (com.google.android.filament.MaterialInstance mi : asset.getInstance().getMaterialInstances()) {
+                if (mi.getMaterial().isDoubleSided()) mi.setDoubleSided(true);
+                else mi.setCullingMode(com.google.android.filament.Material.CullingMode.NONE);
+            }
+        } catch (RuntimeException e) {
+            // a model that will not take it still shows as before
+        }
     }
 
     /** Call every frame while loading: finishes textures and adds parts to the scene as they become ready. */
