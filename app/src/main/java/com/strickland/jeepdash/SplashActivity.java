@@ -68,7 +68,7 @@ public class SplashActivity extends Activity implements ServiceConnection, LinkS
         String exit = DashApp.lastExit(this);       // read either way, so a Java crash's exit is not shown again
         if (crash == null) crash = exit;
         if (crash != null) {
-            showCrash(crash);
+            showCrash(crash + DashApp.safeAfterCrash(this));
             return;
         }
         setContentView(Catalog.porsche() ? new CarBoot(this) : new Intro(this));

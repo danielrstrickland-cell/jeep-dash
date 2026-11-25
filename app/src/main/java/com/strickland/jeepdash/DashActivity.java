@@ -111,7 +111,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
 
     // the 3D view's crash guard: "scene_live" is on disk while Filament runs on screen; still there at the next
     // start means the app died with it up (a native crash Java cannot catch), so 3D stays off for this build
-    private static final String SCENE_LIVE = "scene_live", SCENE_OFF = "scene_off_build";
+    static final String SCENE_LIVE = "scene_live", SCENE_OFF = "scene_off_build";
 
     @Override
     protected void onCreate(Bundle b) {

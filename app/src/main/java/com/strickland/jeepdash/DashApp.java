@@ -72,6 +72,24 @@ public class DashApp extends Application {
 
     static void clearCrash(Context c) { new java.io.File(c.getFilesDir(), CRASH_FILE).delete(); }
 
+    /**
+     * After any crash: 3D off for this build, and a Jeep dash left on Holo goes back to Jeep style, so the next
+     * start opens whatever broke. Returns a line for the crash box saying what was changed.
+     */
+    static String safeAfterCrash(Context c) {
+        android.content.SharedPreferences p = c.getSharedPreferences(PREFS, MODE_PRIVATE);
+        android.content.SharedPreferences.Editor e = p.edit()
+                .putLong(DashActivity.SCENE_OFF, build(c))
+                .remove(DashActivity.SCENE_LIVE);
+        String note = "\n\nSafe start: the 3D view is off until the next update.";
+        if ("holo".equals(p.getString("look", null))) {
+            e.putString("look", "jeep");
+            note += " The dash was switched from Holo to Jeep style; the look button switches back.";
+        }
+        e.commit();
+        return note;
+    }
+
     private static final String EXIT_SEEN = "exit_seen_v2";   // v2: show the last crash again, read properly
 
     /**
