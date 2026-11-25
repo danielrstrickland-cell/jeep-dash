@@ -31,6 +31,17 @@ public final class VizTune {
 
     private static Knob toggle(String id, String label) { return new Knob(id, label, 0, 1, 1, true); }
 
+    /**
+     * Not a look: the settings every look shares, on the hidden menu's Effects tab. Kept under its own number
+     * so it saves and loads with the looks' settings.
+     */
+    public static final int GLOBAL = 9;
+    private static final Knob[] EFFECTS = {
+            slider("bloom", "Glow (bloom)", 0, 1.5f, 0.7f),
+            slider("crt", "CRT filter", 0, 1, 0),
+            slider("blend", "Blend between looks", 0, 2, 0.6f),
+    };
+
     private static final Knob GAIN = slider("gain", "Sensitivity", 0.5f, 2, 1);
     private static final Knob GLOW = slider("glow", "Background glow", 0, 1.5f, 1);
     private static final Knob FALL = slider("fall", "Fall speed", 0.4f, 3, 1);
@@ -67,7 +78,13 @@ public final class VizTune {
 
     private final Map<String, Float> values = new HashMap<>();
 
-    public static Knob[] knobs(int look) { return look >= 0 && look < KNOBS.length ? KNOBS[look] : SHARED; }
+    public static Knob[] knobs(int look) {
+        if (look == GLOBAL) return EFFECTS;
+        return look >= 0 && look < KNOBS.length ? KNOBS[look] : SHARED;
+    }
+
+    /** True for knobs measured in seconds rather than percent. */
+    public static boolean seconds(String id) { return id.equals("trail") || id.equals("blend"); }
 
     private static Knob knob(int look, String id) {
         for (Knob k : knobs(look)) if (k.id.equals(id)) return k;

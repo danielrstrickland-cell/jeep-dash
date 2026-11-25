@@ -37,3 +37,8 @@ The XP look's Brightness setting is Auto (default), Always light or Always dark.
 **Misfire catcher.** When you read codes and a misfire code is present, the app saves the 30 seconds before and after the event as a CSV file. You don't need to start anything.
 
 **Auto night mode.** In the Brightness setting, choose Auto, Always light, or Always dark. Auto uses the light sensor if the tablet has one. Otherwise it uses sunset time.
+
+
+**Visualizer glow and CRT filter.** The picture now runs through the tablet's graphics chip. Bright parts glow, and an optional old-TV filter adds curved glass and scanlines. Set both on the hidden menu's Effects tab. The glow needs Android 12, and the CRT filter needs Android 13.
+
+**Visualizer hidden menu.** Hold TUNE for half a second. The Look tab tunes the look on screen. Colors picks a colour profile. Effects sets the glow, the CRT filter and how long one look blends into the next. Presets saves and loads up to 3 full setups, each with its look, colours and settings. Tap the red X or outside the window to close it. A short tap on TUNE still opens the quick panel.

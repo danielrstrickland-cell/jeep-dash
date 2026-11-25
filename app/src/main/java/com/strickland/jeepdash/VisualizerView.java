@@ -19,7 +19,8 @@ import com.strickland.jeepdash.theme.Theme;
 
 /**
  * The visualizer screen: LOOK for the next look, COLORS for the next colour profile, drag the BARS slider,
- * TUNE for a drop-down panel that adjusts the look on screen (every look remembers its own settings). A tap or
+ * TUNE for a drop-down panel that adjusts the look on screen (every look remembers its own settings); hold TUNE
+ * for the hidden tune menu (look, colours, effects, presets). A tap or
  * swipe on the picture itself does nothing, so brightness swipes cannot change the look. MUSIC (when on) opens
  * the plain music window.
  */
@@ -43,6 +44,15 @@ public class VisualizerView extends View {
     private long lastNs, startNs;
     private boolean running, sliding;
     private int tuneRow = -1;
+    private final VizEffects effects = VizEffects.supported() ? new VizEffects() : null;
+    private boolean held;                                   // the long press on TUNE opened the menu
+    private final Runnable holdTune = () -> {
+        held = true;
+        painter.tuneOpen = false;
+        painter.menuOpen = true;
+        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+        invalidate();
+    };
 
     public VisualizerView(Context context, Host host) {
         super(context);
@@ -55,6 +65,38 @@ public class VisualizerView extends View {
         int bars = prefs.getInt("bars", 32);
         for (int n : VizPainter.COUNTS) if (n == bars) painter.shown = n;
         painter.tune = VizTune.load(prefs.getString("tune", null));
+        for (int i = 0; i < VizPainter.PRESETS; i++) painter.presetInfo[i] = describe(prefs.getString("preset" + i, null));
+    }
+
+    /** "Swirl · Vice" for a saved preset, or "Empty". */
+    private static String describe(String preset) {
+        String[] part = preset == null ? null : preset.split("\\|", 3);
+        if (part == null || part.length < 3) return "Empty";
+        try {
+            int look = VizTune.savedLook(Integer.parseInt(part[0]));
+            int color = Math.floorMod(Integer.parseInt(part[1]), VizPainter.COLORS.length);
+            return VizPainter.LOOKS[look] + " \u00B7 " + VizPainter.COLORS[color];
+        } catch (NumberFormatException e) {
+            return "Empty";
+        }
+    }
+
+    private void savePreset(int i) {
+        String preset = painter.look + "|" + painter.color + "|" + painter.tune.save();
+        prefs.edit().putString("preset" + i, preset).apply();
+        painter.presetInfo[i] = describe(preset);
+    }
+
+    private void loadPreset(int i) {
+        String[] part = prefs.getString("preset" + i, "").split("\\|", 3);
+        if (part.length < 3) return;
+        try {
+            painter.changeLook(VizTune.savedLook(Integer.parseInt(part[0])));
+            painter.color = Math.floorMod(Integer.parseInt(part[1]), VizPainter.COLORS.length);
+            painter.tune = VizTune.load(part[2]);
+        } catch (NumberFormatException ignored) {
+            // a damaged preset is left alone
+        }
     }
 
     void setSpectrum(Spectrum s) { spectrum = s; }
@@ -96,7 +138,11 @@ public class VisualizerView extends View {
             painter.bass = s.bass();
             painter.beat = s.beat();
         }
-        painter.draw(canvas, getWidth(), getHeight(), dt, (now - startNs) / 1e9f);
+        int w = getWidth(), h = getHeight();
+        float seconds = (now - startNs) / 1e9f;
+        if (effects != null && canvas.isHardwareAccelerated()) effects.draw(canvas, painter, w, h, dt, seconds);
+        else painter.drawScene(canvas, w, h, dt, seconds);
+        painter.drawChrome(canvas, w, h);
         drawMusic(canvas);
         if (running) postInvalidateOnAnimation();
     }
@@ -155,9 +201,24 @@ public class VisualizerView extends View {
             return true;
         }
         float x = e.getX(), y = e.getY();
-        if (action == MotionEvent.ACTION_DOWN) tuneRow = painter.tuneOpen ? painter.rowAt(x, y) : -1;
+        if (action == MotionEvent.ACTION_DOWN) {
+            held = false;
+            if (painter.tuneButton.contains(x, y)) postDelayed(holdTune, 450);
+            tuneRow = painter.tuneOpen || painter.menuOpen ? painter.rowAt(x, y) : -1;
+        }
+        if (action == MotionEvent.ACTION_MOVE && !painter.tuneButton.contains(x, y)) removeCallbacks(holdTune);
         if (tuneRow >= 0 && !painter.rowIsSwitch(tuneRow)) painter.dragRow(tuneRow, x);
+        if (action == MotionEvent.ACTION_CANCEL) {
+            removeCallbacks(holdTune);
+            tuneRow = -1;
+        }
         if (action != MotionEvent.ACTION_UP) return true;
+        removeCallbacks(holdTune);
+        if (held) {
+            held = false;
+            save();
+            return true;
+        }
         if (tuneRow >= 0) {
             if (painter.rowIsSwitch(tuneRow) && painter.rowAt(x, y) == tuneRow) painter.flipRow(tuneRow);
             tuneRow = -1;
@@ -166,17 +227,40 @@ public class VisualizerView extends View {
         } else if (painter.colorButton.contains(x, y)) {
             painter.color = (painter.color + 1) % VizPainter.COLORS.length;
         } else if (painter.tuneButton.contains(x, y)) {
-            painter.tuneOpen = !painter.tuneOpen;
+            if (painter.menuOpen) painter.menuOpen = false;
+            else painter.tuneOpen = !painter.tuneOpen;
         } else if (painter.lookButton.contains(x, y)) {
-            painter.look = VizTune.nextLook(painter.look);
+            painter.changeLook(VizTune.nextLook(painter.look));
         } else if (painter.music && painter.musicButton.contains(x, y)) {
             painter.musicOpen = !painter.musicOpen;
+        } else if (painter.menuOpen) {
+            menuTap(x, y);
         } else if (painter.tuneOpen) {
             if (painter.resetButton.contains(x, y)) painter.tune.reset(painter.look);
             else if (!painter.panel.contains(x, y)) painter.tuneOpen = false;      // a tap outside closes the panel
         }
         save();
         return true;
+    }
+
+    /** A tap inside the hidden menu; a tap outside it closes it. */
+    private void menuTap(float x, float y) {
+        VizPainter p = painter;
+        if (!p.menuWindow.contains(x, y) || p.menuClose.contains(x, y)) {
+            p.menuOpen = false;
+            return;
+        }
+        for (int i = 0; i < p.tabRects.length; i++) if (p.tabRects[i].contains(x, y)) p.menuTab = i;
+        if (p.menuTab == VizPainter.TAB_COLORS) {
+            for (int i = 0; i < p.colorCells.length; i++) if (p.colorCells[i].contains(x, y)) p.color = i;
+        } else if (p.menuTab == VizPainter.TAB_PRESETS) {
+            for (int i = 0; i < VizPainter.PRESETS; i++) {
+                if (p.presetSave[i].contains(x, y)) savePreset(i);
+                else if (p.presetLoad[i].contains(x, y)) loadPreset(i);
+            }
+        } else if (p.resetButton.contains(x, y)) {
+            p.tune.reset(p.target());
+        }
     }
 
     private void save() {

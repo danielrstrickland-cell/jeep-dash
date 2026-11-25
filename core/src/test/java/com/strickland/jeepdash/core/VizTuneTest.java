@@ -72,4 +72,16 @@ public class VizTuneTest {
         T.near(2, u.get(0, "gain"), 1e-6, "out of range clamped");
         T.near(1, VizTune.load(null).get(0, "gain"), 1e-6, "nothing saved yet");
     }
+
+    public static void effectsAreSharedByEveryLook() {
+        VizTune t = new VizTune();
+        T.near(0.7, t.get(VizTune.GLOBAL, "bloom"), 1e-6, "glow starts on");
+        T.near(0, t.get(VizTune.GLOBAL, "crt"), 1e-6, "CRT filter starts off");
+        T.near(0.6, t.get(VizTune.GLOBAL, "blend"), 1e-6, "looks blend over 0.6 s");
+        t.set(VizTune.GLOBAL, "crt", 0.8f);
+        t.reset(0);
+        T.near(0.8, VizTune.load(t.save()).get(VizTune.GLOBAL, "crt"), 1e-6, "saved, and kept when a look resets");
+        T.ok(!has(VizTune.GLOBAL, "gain"), "effects are not per-look knobs");
+        T.ok(VizTune.seconds("blend") && !VizTune.seconds("crt"), "blend time reads in seconds");
+    }
 }
