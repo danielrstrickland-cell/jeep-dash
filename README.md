@@ -75,6 +75,10 @@ notification.
 drops to Power saver; very hot, the 3D truck pauses and the face shows plain gauges. Your mode comes back after
 the tablet has been cool for 2 minutes.
 
+**After a crash.** The next start shows what went wrong, with Share to send it, then starts safely: the 3D
+truck is off until the next update, and a dash left on Holo comes back in Jeep style (Switch look returns to
+Holo, flat). **Last crash report (Menu > App)** shows the most recent crash Android remembers at any time.
+
 **Visualizer glow and CRT filter.** The picture now runs through the tablet's graphics chip. Bright parts glow, and an optional old-TV filter adds curved glass and scanlines. Set both on the hidden menu's Effects tab. The glow needs Android 12, and the CRT filter needs Android 13.
 
 **Visualizer menu.** The visualizer has one button, top left, set below the status bar. Tap it for the side menu: Dash, Look and Colors (with arrows), Bars, Tune this look, Effects and presets, Hide controls, and Music. The button fades after 10 seconds untouched; touch its corner to bring it back. A three-finger tap hides everything, and another three-finger tap (or holding the top-left corner) brings it back. The tune window has four tabs: Look tunes the look on screen, Colors picks a profile, Effects holds settings shared by every look, and Presets saves and loads 3 full setups. Turn on Dark menus in Effects for a dark style.

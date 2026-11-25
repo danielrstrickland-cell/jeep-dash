@@ -691,6 +691,32 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         return "°C".equals(t) ? "°C" : "°F";
     }
 
+    /** The most recent crash Android remembers, with Share, so it can be sent for a fix. */
+    private void showLastCrash() {
+        String r = DashApp.latestCrash(this);
+        if (r == null) {
+            showMessage("Last crash report", "No crash on record. Android keeps a short history; it may have been cleared.");
+            return;
+        }
+        android.widget.TextView text = new android.widget.TextView(this);
+        text.setText(r);
+        text.setTextIsSelectable(true);
+        text.setTextSize(11);
+        text.setTypeface(android.graphics.Typeface.MONOSPACE);
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        text.setPadding(pad, pad, pad, pad);
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.addView(text);
+        new AlertDialog.Builder(this)
+                .setTitle("Last crash report")
+                .setView(scroll)
+                .setPositiveButton("Share", (d, w) -> startActivity(Intent.createChooser(new Intent(Intent.ACTION_SEND)
+                        .setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, "Jeep Dash crash report")
+                        .putExtra(Intent.EXTRA_TEXT, r), "Send the crash report")))
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
     /** Once a second while the dash is up: the tablet's heat and battery, from the link service's watch. */
     private void everySecond() {
         ui.postDelayed(everySecond, 1000);
@@ -1024,6 +1050,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
                 break;
             case DashMenu.AUTO_START: chooseAutoStart(); break;
             case DashMenu.UPDATE: UpdateChecker.check(this, buildNumber(), true); break;
+            case DashMenu.CRASH: showLastCrash(); break;
             case DashMenu.TRUCK: showHoloSettings(); break;
             case DashMenu.ADD_TRUCK: addTruck(); break;
             case DashMenu.QUALITY:

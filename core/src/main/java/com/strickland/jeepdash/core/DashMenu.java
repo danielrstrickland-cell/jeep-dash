@@ -22,7 +22,7 @@ public final class DashMenu {
             CODES = "codes", LOGS = "logs", NORMAL = "normal", SCAN = "scan",
             AUTO_START = "auto_start", UPDATE = "update", LISTEN = "listen", TUNE_LOG = "tune_log",
             TRUCK = "truck", ADD_TRUCK = "add_truck", QUALITY = "quality", EFFECTS = "effects", CALM = "calm",
-            HEAT = "heat";
+            HEAT = "heat", CRASH = "crash";
 
     /** What the menu needs to know, filled in by the dash each time it opens. */
     public static final class State {
@@ -121,6 +121,7 @@ public final class DashMenu {
         List<Entry> app = new ArrayList<>();
         app.add(new Entry(AUTO_START, "Auto-start with Bluetooth device: " + (s.autoStart == null ? "off" : s.autoStart)));
         app.add(new Entry(UPDATE, "Check for update"));
+        app.add(new Entry(CRASH, "Last crash report (to send for a fix)"));
         add(out, "App", app);
         return out;
     }

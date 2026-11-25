@@ -63,6 +63,7 @@ public class DashMenuTest {
         T.eq("Diagnostics", groupOf(m, DashMenu.LOGS), "drive logs");
         T.eq("App", groupOf(m, DashMenu.AUTO_START), "auto-start");
         T.eq("App", groupOf(m, DashMenu.UPDATE), "update");
+        T.eq("App", groupOf(m, DashMenu.CRASH), "last crash report");
     }
 
     public static void settingsShowBesideTheirEntries() {

@@ -97,22 +97,36 @@ public class DashApp extends Application {
      * crashes (the 3D engine) that the Java handler above never sees. Its trace is the crash "tombstone" (or the
      * not-responding trace); its readable text is included. Null when there is nothing new.
      */
-    static String lastExit(Context c) {
+    static String lastExit(Context c) { return exitReport(c, true); }
+
+    private static boolean better(android.app.ApplicationExitInfo a, android.app.ApplicationExitInfo b, boolean newestOnly) {
+        if (!newestOnly) {
+            boolean ca = a.getReason() >= 4 && a.getReason() <= 7, cb = b.getReason() >= 4 && b.getReason() <= 7;
+            if (ca != cb) return ca;
+        }
+        return a.getTimestamp() > b.getTimestamp();
+    }
+
+    /** The most recent crash Android remembers, shown or not (the menu's Last crash report); null when none. */
+    static String latestCrash(Context c) { return exitReport(c, false); }
+
+    private static String exitReport(Context c, boolean onlyNew) {
         if (android.os.Build.VERSION.SDK_INT < 30) return null;
         try {
             android.app.ActivityManager am = c.getSystemService(android.app.ActivityManager.class);
             if (am == null) return null;
             java.util.List<android.app.ApplicationExitInfo> list = am.getHistoricalProcessExitReasons(null, 0, 8);
             android.content.SharedPreferences p = c.getSharedPreferences(PREFS, MODE_PRIVATE);
-            long seen = p.getLong(EXIT_SEEN, 0), newest = seen;
+            long seen = onlyNew ? p.getLong(EXIT_SEEN, 0) : 0, newest = p.getLong(EXIT_SEEN, 0);
             android.app.ApplicationExitInfo pick = null;
             for (android.app.ApplicationExitInfo e : list) {
                 if (e.getTimestamp() <= seen) continue;
                 newest = Math.max(newest, e.getTimestamp());
                 boolean worth = com.strickland.jeepdash.core.CrashReport.worthShowing(e.getReason());
-                if (worth && (pick == null || e.getTimestamp() > pick.getTimestamp())) pick = e;
+                // the menu's report prefers a real crash over a memory or signal kill that came after it
+                if (worth && (pick == null || better(e, pick, onlyNew))) pick = e;
             }
-            p.edit().putLong(EXIT_SEEN, newest).apply();
+            if (onlyNew) p.edit().putLong(EXIT_SEEN, newest).apply();
             if (pick == null) return null;
             StringBuilder sb = new StringBuilder();
             String when = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(new java.util.Date(pick.getTimestamp()));
