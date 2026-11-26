@@ -54,7 +54,7 @@ public final class KenwoodProbe {
                 p.cmdId[2] & 0xFF, p.cmdId[3] & 0xFF, p.cmdId[4] & 0xFF, p.payload.length, hex(p.payload));
     }
 
-    static String hex(byte[] b) {
+    public static String hex(byte[] b) {
         StringBuilder s = new StringBuilder(b.length * 3);
         for (int i = 0; i < b.length; i++) {
             if (i > 0) s.append(' ');
