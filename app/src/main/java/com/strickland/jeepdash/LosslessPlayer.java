@@ -76,6 +76,8 @@ final class LosslessPlayer {
     private volatile boolean refilter, playing, filtering, resumeOnGain;
     private volatile String title = "", artist = "", format = "";
     private volatile long positionMs, durationMs;
+    private volatile int rate;
+    private volatile Chain current;
     private MediaSession session;
     private AudioFocusRequest focus;
 
@@ -103,6 +105,18 @@ final class LosslessPlayer {
     long positionMs() { return positionMs; }
 
     long durationMs() { return durationMs; }
+
+    /** The sample rate of the song in hand, 0 before one has started. */
+    int rate() { return rate; }
+
+    /**
+     * Fills out with the sound leaving the tablet at this moment (left and right mixed, at the song's rate),
+     * for the screen's spectrum. False when nothing is playing.
+     */
+    boolean scope(short[] out) {
+        Chain c = current;
+        return c != null && playing && c.scope(out);
+    }
 
     List<Track> queue() { synchronized (lock) { return new ArrayList<>(queue); } }
 
@@ -147,6 +161,18 @@ final class LosslessPlayer {
         synchronized (lock) { on = wantPlay; }
         if (on) pause();
         else play();
+    }
+
+    /** Starts the song at this place in the queue. */
+    void playAt(int place) {
+        synchronized (lock) {
+            if (queue.isEmpty()) return;
+            index = Math.max(0, Math.min(queue.size() - 1, place));
+            serial++;
+            seekMs = -1;
+            lock.notifyAll();
+        }
+        play();
     }
 
     void next() { step(1); }
@@ -372,6 +398,8 @@ final class LosslessPlayer {
                             ? of.getInteger(MediaFormat.KEY_PCM_ENCODING) : AudioFormat.ENCODING_PCM_16BIT;
                     if (chain != null) chain.release();
                     chain = new Chain(rate);
+                    current = chain;
+                    this.rate = rate;
                     format = formatName(mime, rate, bits);
                 } else if (ob >= 0) {
                     if (info.size > 0 && chain != null) {
@@ -398,6 +426,7 @@ final class LosslessPlayer {
             Diag.error(DiagLog.APP, "Player could not play " + t.path + ": " + e);
             return !moved(mine);                              // a bad file: on to the next one
         } finally {
+            current = null;
             if (chain != null) chain.release();
             if (codec != null) {
                 try { codec.stop(); } catch (RuntimeException ignored) { }
@@ -441,7 +470,9 @@ final class LosslessPlayer {
         private Convolver left, right;
         private float gain = 1;
         private int fill;
-        private long written, shortUntil;
+        private final float[] ring = new float[1 << 16];     // the last second or so of output, for the screen
+        private volatile long written;
+        private long shortUntil;
         private boolean paused;
 
         Chain(int rate) {
@@ -523,6 +554,7 @@ final class LosslessPlayer {
             for (int i = 0; i < frames; i++) {
                 mix[2 * i] = Math.max(-1f, Math.min(1f, l[i] * gain));
                 mix[2 * i + 1] = Math.max(-1f, Math.min(1f, r[i] * gain));
+                ring[(int) ((written + i) & 0xFFFF)] = 0.5f * (mix[2 * i] + mix[2 * i + 1]);
             }
             for (int off = 0; off < frames * 2; ) {
                 int w = track.write(mix, off, frames * 2 - off, AudioTrack.WRITE_BLOCKING);
@@ -545,6 +577,20 @@ final class LosslessPlayer {
                 track.stop();
                 shortUntil = android.os.SystemClock.elapsedRealtime() + written * 1000 / rate + 150;
             }
+        }
+
+        /** The stretch of output being played right now, from the ring; false if it is not there (yet). */
+        boolean scope(short[] out) {
+            long head;
+            try {
+                head = track.getPlaybackHeadPosition() & 0xFFFFFFFFL;
+            } catch (RuntimeException e) {
+                return false;
+            }
+            long done = written, end = Math.min(head, done), start = end - out.length;
+            if (start < 0 || done - start > ring.length) return false;
+            for (int i = 0; i < out.length; i++) out[i] = (short) (ring[(int) ((start + i) & 0xFFFF)] * 32767);
+            return true;
         }
 
         /** True once everything written has been played. */

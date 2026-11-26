@@ -1102,6 +1102,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case DashMenu.VOLUME: chooseVolume(); break;
             case DashMenu.VISUALIZER: openVisualizer(); break;
             case DashMenu.SOUND: startActivity(new Intent(this, SoundActivity.class)); break;
+            case DashMenu.PLAYER: startActivity(new Intent(this, PlayerActivity.class)); break;
             case DashMenu.FUEL: FuelDialog.show(this, this::pushActiveParams); break;
             case DashMenu.CODES: if (service != null) CodesDialog.show(this, service); break;
             case DashMenu.LOGS: showLogs(); break;

@@ -136,6 +136,13 @@ public class DashMenuTest {
         T.eq("Vehicle: Porsche Cayenne", find(m, DashMenu.VEHICLE).label, "vehicle");
     }
 
+    public static void theLosslessPlayerIsInTheMusicMenuOnTheJeepOnly() {
+        T.eq("Music", groupOf(DashMenu.build(jeepXp()), DashMenu.PLAYER), "the player sits with the music entries");
+        DashMenu.State p = jeepXp();
+        p.porsche = true;
+        T.ok(find(DashMenu.build(p), DashMenu.PLAYER) == null, "and is not on the Porsche");
+    }
+
     public static void editHidesWhereTheLookCannotEdit() {
         DashMenu.State s = jeepXp();
         s.canEdit = false;

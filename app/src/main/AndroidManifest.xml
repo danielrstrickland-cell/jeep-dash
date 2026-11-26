@@ -68,6 +68,12 @@
             android:exported="false"
             android:label="Sound"
             android:windowSoftInputMode="adjustPan" />
+        <activity
+            android:name=".PlayerActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:exported="false"
+            android:label="Lossless player"
+            android:screenOrientation="sensorLandscape" />
         <service
             android:name=".LinkService"
             android:exported="false"

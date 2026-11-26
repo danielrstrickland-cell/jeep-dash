@@ -400,6 +400,10 @@ public class SoundActivity extends Activity implements ServiceConnection {
         loud = label("", 12, DIM);
         sc.addView(loud);
 
+        LinearLayout lp = card(col, "Lossless player");
+        lp.addView(label("Plays your own files (the USB stick) with the room correction applied as an exact filter.", 12, DIM));
+        lp.addView(button("Open player", v -> startActivity(new Intent(this, PlayerActivity.class))));
+
         LinearLayout hu = card(col, "Head unit");
         hu.addView(label("Kenwood link: mute, volume and preset EQ. Not tried on the stereo yet, so every command and "
                 + "answer goes in the diagnostics log. The first time, send a low volume and check the stereo shows the same "
@@ -784,7 +788,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
     }
 
     /** A band curve moved so its 300 Hz to 3 kHz average sits at 0, for drawing. */
-    private static double[] centred(double[] bands) {
+    static double[] centred(double[] bands) {
         double[] c = SoundTune.bandCentres();
         double sum = 0;
         int n = 0;
