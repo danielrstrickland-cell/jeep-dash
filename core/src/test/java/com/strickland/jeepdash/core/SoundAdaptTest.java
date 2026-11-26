@@ -40,6 +40,13 @@ public class SoundAdaptTest {
         T.ok(SoundAdapt.noiseBoostDb(100, 0, 4000, 1) > 0, "a revved engine counts when stopped");
     }
 
+    public static void voiceLiftSitsWhereSpeechIs() {
+        T.near(4, SoundAdapt.voiceLiftDb(2500), 1e-9, "most at 2.5 kHz");
+        T.near(SoundAdapt.voiceLiftDb(1250), SoundAdapt.voiceLiftDb(5000), 1e-9, "the same an octave either side");
+        T.ok(SoundAdapt.voiceLiftDb(1250) > 1 && SoundAdapt.voiceLiftDb(1250) < 3, "easing off through the speech range");
+        T.ok(SoundAdapt.voiceLiftDb(100) < 0.05 && SoundAdapt.voiceLiftDb(16000) < 0.2, "none in the bass or the very top");
+    }
+
     public static void engineNoiseOnItsOwn() {
         T.near(3, SoundAdapt.engineBoostDb(100, 4000, 1), 1e-9, "a fully revved engine is worth half the road's most");
         T.near(0, SoundAdapt.engineBoostDb(100, 1200, 1), 1e-9, "nothing at a normal idle");

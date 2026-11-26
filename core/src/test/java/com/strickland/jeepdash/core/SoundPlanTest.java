@@ -86,6 +86,16 @@ public class SoundPlanTest {
         T.near(3, SoundPlan.gains(s, l).bandDb[band(100)], 1e-9, "stopped and revving: the engine's share");
     }
 
+    public static void movieModeLiftsVoices() {
+        SoundPlan.Settings s = new SoundPlan.Settings();
+        T.near(0, SoundPlan.gains(s, new SoundPlan.Live()).bandDb[band(2500)], 1e-9, "music mode adds nothing");
+        s.movie = true;
+        SoundPlan.Gains g = SoundPlan.gains(s, new SoundPlan.Live());
+        T.near(4, g.bandDb[band(2500)], 0.05, "voices lifted for a movie or a show");
+        T.near(0, g.bandDb[band(63)], 0.05, "bass left alone");
+        T.near(-4, g.headroomDb, 0.05, "with headroom for the lift");
+    }
+
     public static void protectionAppliesEvenWhenHandsOff() {
         SoundPlan.Settings s = new SoundPlan.Settings();
         s.tuneHz = 34;

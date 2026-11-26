@@ -12,8 +12,15 @@ package com.strickland.jeepdash.core;
  * a step is about 12 Hz, and each cutoff moved down half a step, so a step takes the band its centre is in.
  */
 public final class DspBands {
-    /** The block length asked of the effect, in milliseconds: 4096 samples at 44.1 and 48 kHz. */
+    /** The block length asked of the effect for music, in milliseconds: 4096 samples at 44.1 and 48 kHz. */
     public static final float FRAME_MS = 80;
+    /**
+     * And for a movie or a show: 1024 samples, so the sound is about 20 ms behind the picture instead of 85.
+     * The price is 47 Hz steps, which is plenty for lifting voices but coarse for bass correction.
+     */
+    public static final float MOVIE_FRAME_MS = 20;
+
+    public static float frameMs(boolean movie) { return movie ? MOVIE_FRAME_MS : FRAME_MS; }
 
     private DspBands() { }
 
@@ -26,11 +33,12 @@ public final class DspBands {
 
     /**
      * The cutoff to give the effect for band i: the band's top edge, less half a step, which makes Android's
-     * rounding give each step to the band that holds the step's centre.
+     * rounding give each step to the band that holds the step's centre. Kept above zero and rising, for the
+     * low bands a short block cannot tell apart.
      */
-    public static float cutoff(int band, double rate) {
-        double step = rate / blockFor(rate, FRAME_MS);
-        return (float) (SoundTune.bandCentres()[band] * Math.pow(2, 1 / 6.0) - step / 2);
+    public static float cutoff(int band, double rate, float frameMs) {
+        double step = rate / blockFor(rate, frameMs);
+        return (float) Math.max(SoundTune.bandCentres()[band] * Math.pow(2, 1 / 6.0) - step / 2, 1 + band * 0.1);
     }
 
     /**

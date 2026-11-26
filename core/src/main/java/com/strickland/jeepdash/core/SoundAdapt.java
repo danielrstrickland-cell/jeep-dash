@@ -107,5 +107,17 @@ public final class SoundAdapt {
         return 24 * Math.log(hz / f) / Math.log(2);
     }
 
+    static final double VOICE_DB = 4, VOICE_HZ = 2500, VOICE_OCTAVES = 0.8;
+
+    /**
+     * Movie and TV mode's lift for voices, in dB at a pitch: 4 dB at 2.5 kHz, where speech is told apart,
+     * easing off to nothing about two octaves either side.
+     */
+    public static double voiceLiftDb(double hz) {
+        if (hz <= 0) return 0;
+        double octaves = Math.log(hz / VOICE_HZ) / Math.log(2);
+        return VOICE_DB * Math.exp(-octaves * octaves / (2 * VOICE_OCTAVES * VOICE_OCTAVES));
+    }
+
     static double clamp(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
 }

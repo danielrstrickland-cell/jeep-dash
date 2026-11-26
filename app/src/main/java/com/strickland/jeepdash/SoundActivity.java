@@ -309,6 +309,8 @@ public class SoundActivity extends Activity implements ServiceConnection {
         toggle(dsp, "On (EQ and limiter on everything the tablet plays)", SoundPrefs.ENABLED, false);
         dspState = label("", 12, GOOD);
         dsp.addView(dspState);
+        picker(dsp, "Listening to", new String[]{"Music", "Movie or TV show (voices lifted, sound in step with the picture)"},
+                new String[]{"MUSIC", "MOVIE"}, SoundPrefs.MODE, "MUSIC");
 
         LinearLayout tune = card(col, "EQ and live RTA");
         tune.addView(label("Bars: what the mic hears.  Yellow: target.  Green: gains applied.", 12, DIM));
@@ -988,9 +990,12 @@ public class SoundActivity extends Activity implements ServiceConnection {
         }
         prefs.edit().putString(SoundPrefs.MEASURED, SoundPlan.toText(measured))
                 .putInt(SoundPrefs.VALID_LO, lo).putInt(SoundPrefs.VALID_HI, hi).apply();
+        int reach = SoundTune.reach(measured, SoundPrefs.targetBands(prefs))[0];
         final String done = String.format(Locale.US, "Calibrated with the %s (noise %.0f dB above the cabin). Correcting %d Hz to %s.",
                 trusted ? "measurement mic" : usb ? "USB mic, no cal file loaded" : "built-in mic",
-                over, (int) Math.round(c[lo]), hiHz >= 16000 ? "16 kHz" : "12.5 kHz");
+                over, (int) Math.round(c[lo]), hiHz >= 16000 ? "16 kHz" : "12.5 kHz")
+                + (c[reach] > 150 ? String.format(Locale.US, " These speakers start at about %d Hz, so nothing is boosted "
+                + "below that.", (int) Math.round(c[reach])) : "");
         Diag.info(DiagLog.CAL, done);
         Diag.info(DiagLog.CAL, "Measured (dB, 20 Hz to 20 kHz): " + SoundPlan.toText(measured));
         double[] fix = SoundPrefs.correction(prefs);

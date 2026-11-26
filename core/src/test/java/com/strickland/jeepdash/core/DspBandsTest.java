@@ -31,16 +31,30 @@ public class DspBandsTest {
         T.ok(step <= 12, "steps no wider than the 50 Hz band (11.6 Hz), but they are " + step + " Hz");
     }
 
-    public static void everyStepTakesTheGainOfTheBandItSitsIn() {
-        int block = DspBands.blockFor(RATE, DspBands.FRAME_MS);
+    public static void movieBlocksKeepSoundInStepWithThePicture() {
+        double late = DspBands.blockFor(RATE, DspBands.MOVIE_FRAME_MS) / RATE;
+        T.ok(late <= 0.025, "sound no more than 25 ms behind the picture, but it is " + late * 1000 + " ms");
+        T.ok(DspBands.frameMs(true) < DspBands.frameMs(false), "movie mode uses the shorter block");
+    }
+
+    private static void everyStepSitsInItsBand(float frameMs) {
+        int block = DspBands.blockFor(RATE, frameMs);
         float[] cut = new float[31];
-        for (int i = 0; i < 31; i++) cut[i] = DspBands.cutoff(i, RATE);
+        for (int i = 0; i < 31; i++) {
+            cut[i] = DspBands.cutoff(i, RATE, frameMs);
+            T.ok(cut[i] > 0 && (i == 0 || cut[i] > cut[i - 1]), "cutoffs rise from above zero, band " + i);
+        }
         int[] of = DspBands.bandOfBin(cut, RATE, block);
         double step = RATE / block;
         for (int k = 1; k * step <= 20000; k++) {
             double hz = k * step;
             if (hz < 20 / EDGE) continue;
-            T.eq(bandHolding(hz), of[k], "the step at " + Math.round(hz) + " Hz");
+            T.eq(bandHolding(hz), of[k], "the step at " + Math.round(hz) + " Hz, " + frameMs + " ms blocks");
         }
+    }
+
+    public static void everyStepTakesTheGainOfTheBandItSitsIn() {
+        everyStepSitsInItsBand(DspBands.FRAME_MS);
+        everyStepSitsInItsBand(DspBands.MOVIE_FRAME_MS);
     }
 }

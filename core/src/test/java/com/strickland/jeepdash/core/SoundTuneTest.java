@@ -71,4 +71,38 @@ public class SoundTuneTest {
         T.ok(fixed[0] > 1.9, "the mic's bass droop is added back");
         T.eq(0, SoundTune.parseMicCal(null).hz.length, "no file, no points");
     }
+
+    /** What the tablet's own mic heard of the tablet's own speakers (the owner's log, build 79). */
+    private static final double[] TABLET_SPEAKERS = {-86.15, -86.15, -85.56, -85.56, -84.16, -83.86, -86.22, -73.47,
+            -63.29, -73.77, -71.32, -68.39, -64.05, -63.46, -59.88, -56.79, -55.91, -55.81, -49.17, -50.19, -47.27,
+            -49.93, -46.53, -49.64, -52.15, -45.23, -45.97, -46.29, -51.19, -57.6, -58.17};
+
+    public static void smallSpeakersAreLevelledOnWhatTheyPlayAndNotBoostedBelowIt() {
+        double[] target = SoundTune.targetBands(SoundTune.Target.HARMAN);
+        int[] reach = SoundTune.reach(TABLET_SPEAKERS, target);
+        T.near(1250, SoundTune.bandCentres()[reach[0]], 20, "these speakers start at about 1.25 kHz");
+        double[] c = SoundTune.correction(TABLET_SPEAKERS, target, 6, 12);
+        for (int i = 0; i < reach[0]; i++)
+            T.near(0, c[i], 1e-9, "no boost at " + Math.round(SoundTune.bandCentres()[i]) + " Hz, below what they play");
+        double top = 0, bottom = 0;
+        for (int i = 0; i <= 28; i++) {                                 // the built-in mic is trusted up to 12.5 kHz
+            top = Math.max(top, c[i]);
+            bottom = Math.min(bottom, c[i]);
+        }
+        T.ok(top <= 2, "nothing much to boost in what they do play, so little headroom is spent: " + top);
+        T.ok(bottom >= -8, "and the treble is trimmed, not buried (build 79 took 12 dB off): " + bottom);
+        T.ok(c[26] < -3, "the Harman target still eases the top down: " + c[26]);
+    }
+
+    public static void aFullRangeSystemWithHeavyBassIsStillLevelledOnItsMids() {
+        double[] target = SoundTune.targetBands(SoundTune.Target.FLAT);
+        double[] m = new double[31];
+        for (int i = 0; i <= 7; i++) m[i] = 10;                         // a big sub: 10 dB hot up to 100 Hz
+        int[] reach = SoundTune.reach(m, target);
+        T.eq(0, reach[0], "it plays from the bottom");
+        T.eq(30, reach[1], "to the top");
+        double[] c = SoundTune.correction(m, target, 6, 12);
+        T.near(-10, c[3], 1e-9, "the bass is brought down to the mids");
+        T.near(0, c[17], 1e-9, "the mids are the reference and stay put");
+    }
 }

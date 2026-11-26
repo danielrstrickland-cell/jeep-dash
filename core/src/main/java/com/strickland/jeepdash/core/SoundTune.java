@@ -102,28 +102,65 @@ public final class SoundTune {
         return out;
     }
 
+    static final double REACH_DB = 6;
+
+    /**
+     * The bands a system actually plays, as {first, last}: out from the middle to the last band at each end
+     * that is within 6 dB of the system's level through the mids (against the target). Small speakers stop
+     * well short of the bottom; a full system reaches both ends. The level is taken from the stronger mid
+     * bands, so a roll-off that starts inside the mids does not drag it down.
+     */
+    public static int[] reach(double[] measuredDb, double[] targetDb) {
+        double[] c = bandCentres();
+        int n = Math.min(c.length, Math.min(measuredDb.length, targetDb.length));
+        double[] mids = new double[n];
+        int count = 0;
+        double strong = -1e9;
+        for (int i = 0; i < n; i++) {
+            double d = measuredDb[i] - targetDb[i];
+            if (c[i] >= 300 && c[i] <= 3000) mids[count++] = d;
+            strong = Math.max(strong, d);
+        }
+        if (count > 0) {
+            java.util.Arrays.sort(mids, 0, count);
+            strong = mids[Math.max(0, count - 3)];              // the third strongest: one peak does not set it
+        }
+        int lo = 0, hi = n - 1;
+        while (lo < hi && measuredDb[lo] - targetDb[lo] < strong - REACH_DB) lo++;
+        while (hi > lo && measuredDb[hi] - targetDb[hi] < strong - REACH_DB) hi--;
+        return new int[]{lo, hi};
+    }
+
     /**
      * The correction per band, in dB, that moves a measurement toward a target. The two are first lined up
-     * on their average between 300 Hz and 3 kHz, so overall loudness does not count as an error. Each band's
-     * gain is then averaged with its neighbours, and held to at most maxBoost up and maxCut down: a deep dip
-     * is usually a cancellation in the cabin that more power cannot fill, so boost is kept small.
+     * on their average between 300 Hz and 3 kHz, over the bands the system actually plays (see
+     * {@link #reach}), so overall loudness does not count as an error and neither does a small speaker's
+     * missing low end. Each band's gain is then averaged with its neighbours, and held to at most maxBoost
+     * up and maxCut down: a deep dip is usually a cancellation in the cabin that more power cannot fill, so
+     * boost is kept small. Outside what the system plays nothing is boosted at all: power sent where a
+     * speaker cannot play only costs headroom and adds distortion.
      */
     public static double[] correction(double[] measuredDb, double[] targetDb, double maxBoost, double maxCut) {
         double[] c = bandCentres();
         int n = Math.min(c.length, Math.min(measuredDb.length, targetDb.length));
-        double m = 0, t = 0;
+        int[] reach = reach(measuredDb, targetDb);
+        int lo = reach[0], hi = reach[1];
+        double sum = 0;
         int count = 0;
-        for (int i = 0; i < n; i++) if (c[i] >= 300 && c[i] <= 3000) { m += measuredDb[i]; t += targetDb[i]; count++; }
-        double shift = count > 0 ? (m - t) / count : 0;
+        for (int i = lo; i <= hi; i++) if (c[i] >= 300 && c[i] <= 3000) { sum += measuredDb[i] - targetDb[i]; count++; }
+        if (count == 0) for (int i = lo; i <= hi; i++) { sum += measuredDb[i] - targetDb[i]; count++; }
+        double shift = count > 0 ? sum / count : 0;
         double[] raw = new double[n];
         for (int i = 0; i < n; i++) raw[i] = targetDb[i] - (measuredDb[i] - shift);
         double[] out = new double[n];
         for (int i = 0; i < n; i++) {
-            double sum = raw[i];
+            boolean in = i >= lo && i <= hi;
+            double total = raw[i];
             int k = 1;
-            if (i > 0) { sum += raw[i - 1]; k++; }
-            if (i < n - 1) { sum += raw[i + 1]; k++; }
-            out[i] = SoundAdapt.clamp(sum / k, -Math.abs(maxCut), Math.abs(maxBoost));
+            if (i > 0 && (!in || i - 1 >= lo)) { total += raw[i - 1]; k++; }
+            if (i < n - 1 && (!in || i + 1 <= hi)) { total += raw[i + 1]; k++; }
+            double v = SoundAdapt.clamp(total / k, -Math.abs(maxCut), Math.abs(maxBoost));
+            out[i] = in ? v : Math.min(v, 0);
         }
         return out;
     }

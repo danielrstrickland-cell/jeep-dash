@@ -18,11 +18,11 @@ final class SoundPrefs {
             PORT = "port_guard", TUNE = "tune_hz", DROP = "bass_drop", AUTO = "auto_mode",
             MEASURED = "measured", VALID_LO = "valid_lo", VALID_HI = "valid_hi",
             MIC_USB = "mic_usb", MIC_CAL = "mic_cal", PEAK_BEST = "peak_best",
-            NOISE_PROFILE = "noise_profile", LEARNING = "noise_learning",
+            NOISE_PROFILE = "noise_profile", LEARNING = "noise_learning", MODE = "listen_mode",
             STEREO_ADDR = "stereo_addr", STEREO_NAME = "stereo_name",
             PLAYER_TREE = "player_tree", PLAYER_FILTER = "player_filter";
     /** The settings a scene snapshot carries. */
-    private static final String[] SCENE_KEYS = {ENABLED, TARGET, BASS, TREBLE, SCENE_EQ, NOISE, STRENGTH, VOLT, PORT, DROP};
+    private static final String[] SCENE_KEYS = {ENABLED, TARGET, BASS, TREBLE, SCENE_EQ, NOISE, STRENGTH, VOLT, PORT, DROP, MODE};
     static final String[] SCENE_NAMES = {"Solo drive", "Full car", "Bass demo"};
     static final double MAX_BOOST = 6, MAX_CUT = 12;
 
@@ -76,6 +76,7 @@ final class SoundPrefs {
         s.tuneHz = p.getFloat(TUNE, 0);
         s.bassDrop = p.getBoolean(DROP, false);
         s.noise = noise(p);
+        s.movie = "MOVIE".equals(p.getString(MODE, "MUSIC"));
         return s;
     }
 

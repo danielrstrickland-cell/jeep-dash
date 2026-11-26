@@ -15,6 +15,7 @@ public final class SoundPlan {
         public boolean sceneEq = true, noiseComp = true, voltSafeSub = true, portGuard = true, bassDrop;
         public double noiseStrength = 0.6;      // 0..1
         public double tuneHz;                   // the ported box's tuning; 0 = not known
+        public boolean movie;                   // a movie or a show is on: lift voices
         public NoiseProfile noise;              // the cabin's measured noise; null or not ready = starting model
     }
 
@@ -53,6 +54,7 @@ public final class SoundPlan {
             double hz = c[i], g = 0;
             if (s.correction != null && i < s.correction.length) g += s.correction[i];
             if (s.bassDrop) g += bassDropDb(hz);
+            if (s.movie) g += SoundAdapt.voiceLiftDb(hz);
             if (s.portGuard) g += Math.max(MIN_DB, SoundAdapt.portGuardDb(hz, s.tuneHz));   // protection: always on
             if (l.mayAdjust && s.sceneEq) g += SoundAdapt.sceneOffsetDb(l.scene, hz);
             if (learned != null) g += Math.max(learned[i], SoundAdapt.engineBoostDb(hz, l.rpm, s.noiseStrength));
