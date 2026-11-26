@@ -46,17 +46,52 @@ public final class SoundTune {
         return out;
     }
 
+    /** Harman's in-car shape as this app draws it: bass shelf in dB, and the level at 20 kHz in dB. */
+    public static final double HARMAN_BASS_DB = 7, HARMAN_TREBLE_DB = -6;
+
+    /**
+     * A target of the Harman shape with its two ends adjustable: bassDb of shelf under 60 Hz easing to level
+     * by 200 Hz, level to 1 kHz, then a straight fall (on a log-pitch scale) to trebleDb at 20 kHz.
+     */
+    public static double shapedDb(double hz, double bassDb, double trebleDb) {
+        if (hz <= 0) return 0;
+        if (hz <= 60) return bassDb;
+        if (hz < 200) return bassDb * (1 - Math.log(hz / 60.0) / Math.log(200.0 / 60.0));
+        if (hz <= 1000) return 0;
+        return trebleDb * Math.min(1, Math.log(hz / 1000.0) / Math.log(20.0));
+    }
+
     /**
      * The target level in dB at a pitch. HARMAN approximates Harman's in-car curve: about 7 dB of bass shelf
      * under 60 Hz easing to level by 200 Hz, level to 1 kHz, then a gentle fall to -6 dB at 20 kHz. FLAT is
-     * 0 everywhere. CUSTOM is the owner's own curve, held elsewhere, and reads as flat here.
+     * 0 everywhere. CUSTOM is the owner's own bass and treble on the same shape (see {@link #shapedDb}) and
+     * reads as flat here.
      */
     public static double targetDb(Target t, double hz) {
-        if (t != Target.HARMAN || hz <= 0) return 0;
-        if (hz <= 60) return 7;
-        if (hz < 200) return 7 * (1 - Math.log(hz / 60.0) / Math.log(200.0 / 60.0));
-        if (hz <= 1000) return 0;
-        return -6 * Math.min(1, Math.log(hz / 1000.0) / Math.log(20.0));
+        return t == Target.HARMAN ? shapedDb(hz, HARMAN_BASS_DB, HARMAN_TREBLE_DB) : 0;
+    }
+
+    /** The owner's custom target sampled at each band centre. */
+    public static double[] customBands(double bassDb, double trebleDb) {
+        double[] c = bandCentres();
+        double[] out = new double[c.length];
+        for (int i = 0; i < c.length; i++) out[i] = shapedDb(c[i], bassDb, trebleDb);
+        return out;
+    }
+
+    /**
+     * The magnitude spectrum of a block of 16-bit samples (a power-of-two count), Hann-windowed so a steady
+     * tone does not smear across bands. Bin k is k * sampleRate / samples.length Hz; half the block comes back.
+     */
+    public static double[] magnitudes(short[] samples) {
+        int n = samples.length;
+        float[] re = new float[n], im = new float[n];
+        for (int i = 0; i < n; i++)
+            re[i] = (float) (samples[i] / 32768.0 * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1))));
+        Spectrum.fft(re, im);
+        double[] mag = new double[n / 2];
+        for (int k = 0; k < n / 2; k++) mag[k] = Math.hypot(re[k], im[k]) / (n / 4.0);
+        return mag;
     }
 
     /** The target sampled at each band centre. */

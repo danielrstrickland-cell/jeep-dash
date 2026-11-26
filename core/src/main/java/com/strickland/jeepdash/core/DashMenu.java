@@ -17,7 +17,7 @@ public final class DashMenu {
             BLUETOOTH = "bluetooth", LINK_LOG = "link_log",
             EDIT = "edit", ADD = "add", SNAP = "snap", RESET = "reset",
             SWITCH_LOOK = "switch_look", XP_SCHEME = "xp_scheme", XP_MODE = "xp_mode", JEEP_BACKLIGHT = "jeep_backlight",
-            MUSIC_BUTTON = "music_button", VOLUME = "volume", VISUALIZER = "visualizer",
+            MUSIC_BUTTON = "music_button", VOLUME = "volume", VISUALIZER = "visualizer", SOUND = "sound",
             FUEL = "fuel",
             CODES = "codes", LOGS = "logs", NORMAL = "normal", SCAN = "scan",
             AUTO_START = "auto_start", UPDATE = "update", LISTEN = "listen", PROBE = "probe", TUNE_LOG = "tune_log",
@@ -100,6 +100,7 @@ public final class DashMenu {
         if (s.linked)
             music.add(new Entry(VOLUME, "Volume follows speed (experimental): " + SpeedVolume.Strength.of(s.volume).name().toLowerCase(Locale.US)));
         if (!s.porsche) music.add(new Entry(VISUALIZER, "Music visualizer"));
+        if (!s.porsche) music.add(new Entry(SOUND, "Sound (EQ, Calibrate, adaptive; or two-finger swipe up)"));
         add(out, "Music", music);
 
         List<Entry> fuel = new ArrayList<>();

@@ -227,7 +227,8 @@ public class LinkService extends Service {
         ids = TimingPulled.withInputs(ids, dashShown, Catalog.porsche());     // timing pulled, likewise
         // the learning alerts: engine speed, then road speed and coolant near idle, the idle values at warm idle
         if (normal != null) ids = NormalReadings.withInputs(ids, Catalog.porsche(), learnNearIdle, learnStoppedWarm);
-        active = SpeedVolume.withSpeed(ids, volumeStrength);      // speed is read while volume follows it
+        ids = SpeedVolume.withSpeed(ids, volumeStrength);         // speed is read while volume follows it
+        active = SoundEngine.withInputs(ids, this, Catalog.porsche());   // and what the Sound hub's DSP follows
         activeDirty = true;
     }
 
@@ -323,6 +324,18 @@ public class LinkService extends Service {
      * Ticker thread, twice a second: while the link is up and the setting is on, sets the media volume
      * SpeedVolume asks for; otherwise gives back the owner's own level once.
      */
+    // ---------------- the Sound hub's tablet DSP ----------------
+
+    private final SoundEngine sound = new SoundEngine();
+
+    SoundEngine sound() { return sound; }
+
+    /** A Sound hub setting changed: read what it now needs and re-apply at once. */
+    void soundChanged() {
+        refreshActive();
+        sound.tick(this, values, now());
+    }
+
     private void followSpeed() {
         SpeedVolume.Strength s = volumeStrength;
         if (s == SpeedVolume.Strength.OFF || status != Status.LIVE || runner == null) {
@@ -656,6 +669,7 @@ public class LinkService extends Service {
 
     @Override
     public void onDestroy() {
+        sound.release();
         if (tablet != null) tablet.stop();
         stopWorker();
         try {
@@ -1167,6 +1181,7 @@ public class LinkService extends Service {
         workOutTiming();
         sampleMisfire();
         if (++tickCount % 5 == 0) followSpeed();
+        if (tickCount % 5 == 0 && !Catalog.porsche()) sound.tick(this, values, now());
         if (tickCount % 10 != 0) return;
 
         // once a second

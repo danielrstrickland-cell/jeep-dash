@@ -882,6 +882,42 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
     }
 
     /** The visualizer is its own screen with its own app icon; this brings it up from the dash. */
+    // ---- two fingers swiped up anywhere on the dash open the Sound hub (Jeep only) ----
+
+    private float swipeStartY = -1, swipeStartSpread;
+    private boolean swipeFired;
+
+    @Override
+    public boolean dispatchTouchEvent(android.view.MotionEvent e) {
+        if (!Catalog.porsche()) watchSoundSwipe(e);
+        return super.dispatchTouchEvent(e);
+    }
+
+    private static float spreadOf(android.view.MotionEvent e) {
+        return (float) Math.hypot(e.getX(0) - e.getX(1), e.getY(0) - e.getY(1));
+    }
+
+    /** Only watches; the touches still go to the dash, so a pinch (fingers moving apart) is left alone. */
+    private void watchSoundSwipe(android.view.MotionEvent e) {
+        int action = e.getActionMasked();
+        if (action == android.view.MotionEvent.ACTION_POINTER_DOWN && e.getPointerCount() == 2) {
+            swipeStartY = (e.getY(0) + e.getY(1)) / 2;
+            swipeStartSpread = spreadOf(e);
+            swipeFired = false;
+        } else if (action == android.view.MotionEvent.ACTION_MOVE && e.getPointerCount() == 2
+                && swipeStartY >= 0 && !swipeFired) {
+            float d = getResources().getDisplayMetrics().density;
+            float y = (e.getY(0) + e.getY(1)) / 2;
+            if (swipeStartY - y > 120 * d && Math.abs(spreadOf(e) - swipeStartSpread) < 60 * d) {
+                swipeFired = true;
+                startActivity(new Intent(this, SoundActivity.class));
+            }
+        } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL
+                || action == android.view.MotionEvent.ACTION_POINTER_UP) {
+            swipeStartY = -1;
+        }
+    }
+
     private void openVisualizer() {
         startActivity(new Intent(this, VisualizerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
     }
@@ -1065,6 +1101,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case DashMenu.MUSIC_BUTTON: chooseMusicButton(); break;
             case DashMenu.VOLUME: chooseVolume(); break;
             case DashMenu.VISUALIZER: openVisualizer(); break;
+            case DashMenu.SOUND: startActivity(new Intent(this, SoundActivity.class)); break;
             case DashMenu.FUEL: FuelDialog.show(this, this::pushActiveParams); break;
             case DashMenu.CODES: if (service != null) CodesDialog.show(this, service); break;
             case DashMenu.LOGS: showLogs(); break;
