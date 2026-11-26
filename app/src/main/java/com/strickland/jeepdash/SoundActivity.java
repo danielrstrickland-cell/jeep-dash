@@ -3,6 +3,9 @@ package com.strickland.jeepdash;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -40,7 +43,10 @@ import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
+import com.strickland.jeepdash.core.BoxTune;
 import com.strickland.jeepdash.core.DiagLog;
+import com.strickland.jeepdash.core.KenwoodLink;
+import com.strickland.jeepdash.core.NoiseProfile;
 import com.strickland.jeepdash.core.SoundAdapt;
 import com.strickland.jeepdash.core.SoundPlan;
 import com.strickland.jeepdash.core.SoundTune;
@@ -49,20 +55,24 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 
 /**
  * The Sound hub: one clean screen for everything about how the system sounds. It switches the tablet DSP
  * ({@link SoundEngine}) on and off, shows what the mic hears against the target, runs Calibrate (pink noise
- * out, mic in, correction stored), and holds the adaptive settings, the scenes and the diagnostics log.
+ * out, mic in, correction stored), and holds the adaptive settings, the scenes and the diagnostics log. It
+ * also learns the cabin's own noise for noise compensation, measures the sub box's tuning with a sweep, and
+ * holds the Kenwood link (mute, capped volume, preset EQ).
  *
  * The DSP itself lives in the link service, so it carries on when this screen is closed; this screen only
  * changes saved settings and asks the engine to re-apply. The mic is open only while the screen is showing.
  */
 public class SoundActivity extends Activity implements ServiceConnection {
-    private static final int RATE = 48000, BLOCK = 4096, REQ_MIC = 3, REQ_CAL_FILE = 4;
+    private static final int RATE = 48000, BLOCK = 4096, REQ_MIC = 3, REQ_CAL_FILE = 4, REQ_BT = 5;
     private static final double AMBIENT_S = 1.5, SETTLE_S = 0.8, MEASURE_S = 8;
     private static final int BG = Color.rgb(12, 16, 24), CARD = Color.rgb(22, 28, 40), LINE = Color.rgb(40, 50, 68),
             INK = Color.rgb(226, 232, 242), DIM = Color.rgb(138, 150, 170), GOOD = Color.rgb(96, 214, 150),
@@ -73,7 +83,14 @@ public class SoundActivity extends Activity implements ServiceConnection {
     private LinkService service;
     private boolean bound;
     private volatile Thread mic;
-    private volatile boolean calibrating, noiseOn;
+    private volatile boolean calibrating, noiseOn, learning, boxTuning;
+    private volatile String learnNote = "";
+    private volatile NoiseProfile profile;             // the cabin noise learned so far, or null
+    private final StereoLink stereo = new StereoLink();
+    private AudioManager audio;
+    private TextView noiseState, boxState, huState;
+    private Button learnButton;
+    private EditText tuneField;
     private volatile double[] liveBands;
     private volatile double peakNow = -120;
     private RtaView graph;
@@ -85,6 +102,8 @@ public class SoundActivity extends Activity implements ServiceConnection {
             SoundEngine e = service == null ? null : service.sound();
             graph.set(liveBands, SoundPrefs.targetBands(prefs), e == null ? null : e.applied());
             dspState.setText("Tablet DSP: " + (e == null ? "starting" : e.state()));
+            noiseState.setText(noiseText());
+            huState.setText(stereo.state());
             float best = prefs.getFloat(SoundPrefs.PEAK_BEST, -120);
             if (peakNow > best) {
                 best = (float) peakNow;
@@ -102,6 +121,9 @@ public class SoundActivity extends Activity implements ServiceConnection {
         prefs = SoundPrefs.of(this);
         density = getResources().getDisplayMetrics().density;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        audio = getSystemService(AudioManager.class);
+        profile = SoundPrefs.noise(prefs);
+        prefs.edit().putBoolean(SoundPrefs.LEARNING, false).apply();    // learning only runs with this screen open
         buildScreen();
     }
 
@@ -117,9 +139,12 @@ public class SoundActivity extends Activity implements ServiceConnection {
     @Override
     protected void onStop() {
         main.removeCallbacks(refresh);
+        if (learning) stopLearning();
         mic = null;
         noiseOn = false;
         calibrating = false;
+        boxTuning = false;
+        stereo.close();
         if (service != null) service.sound().setBypass(false);
         if (bound) {
             unbindService(this);
@@ -132,6 +157,11 @@ public class SoundActivity extends Activity implements ServiceConnection {
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         super.onRequestPermissionsResult(code, perms, results);
+        if (code == REQ_BT) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) connectStereo(false);
+            else Toast.makeText(this, "Bluetooth was not allowed, so the stereo cannot be reached", Toast.LENGTH_LONG).show();
+            return;
+        }
         if (code != REQ_MIC) return;
         if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) startMic();
         else {
@@ -312,10 +342,20 @@ public class SoundActivity extends Activity implements ServiceConnection {
         toggle(ad, "Scene-linked EQ (idle / cruise / highway)", SoundPrefs.SCENE_EQ, true);
         toggle(ad, "Noise compensation", SoundPrefs.NOISE, true);
         slider(ad, "Noise compensation strength", SoundPrefs.STRENGTH, 0, 100, 60, " %");
+        noiseState = label(noiseText(), 12, GOOD);
+        ad.addView(noiseState);
+        LinearLayout noiseRow = row(ad);
+        learnButton = button(learning ? "Stop learning" : "Learn cabin noise", v -> {
+            if (learning) stopLearning();
+            else askLearn();
+        });
+        noiseRow.addView(learnButton);
+        noiseRow.addView(button("Forget", v -> askForgetNoise()));
         toggle(ad, "Voltage-safe sub", SoundPrefs.VOLT, true);
         toggle(ad, "Port / unloading guard", SoundPrefs.PORT, true);
         LinearLayout tuneRow = row(ad);
         final EditText hz = new EditText(this);
+        tuneField = hz;
         hz.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         hz.setTextColor(INK);
         hz.setHintTextColor(DIM);
@@ -331,7 +371,10 @@ public class SoundActivity extends Activity implements ServiceConnection {
                     Toast.LENGTH_SHORT).show();
             changed();
         }));
-        ad.addView(label("The port guard needs the box's tuning frequency; it does nothing until one is set.", 12, DIM));
+        tuneRow.addView(button("Measure", v -> askBoxTune()));
+        boxState = label("The port guard needs the box's tuning frequency; it does nothing until one is set. "
+                + "Type it in, or Measure finds it with a sweep and the mic.", 12, DIM);
+        ad.addView(boxState);
 
         LinearLayout sc = card(col, "Scenes");
         sc.addView(label("Tap to recall, hold to save the current settings.", 12, DIM));
@@ -358,7 +401,46 @@ public class SoundActivity extends Activity implements ServiceConnection {
         sc.addView(loud);
 
         LinearLayout hu = card(col, "Head unit");
-        hu.addView(label("Kenwood controls (volume, source, preset EQ) are waiting on the stereo probe log.", 12, DIM));
+        hu.addView(label("Kenwood link: mute, volume and preset EQ. Not tried on the stereo yet, so every command and "
+                + "answer goes in the diagnostics log. Volume is held to " + KenwoodLink.VOLUME_CAP + " until the probe "
+                + "log shows the stereo's own scale. Source, custom EQ, filters, sub level and fader wait on that log.", 12, DIM));
+        LinearLayout huRow = row(hu);
+        huRow.addView(button("Connect", v -> connectStereo(false)));
+        huRow.addView(button("Disconnect", v -> stereo.close()));
+        huRow.addView(button("Change stereo", v -> connectStereo(true)));
+        huState = label(stereo.state(), 12, GOOD);
+        hu.addView(huState);
+        Switch mute = new Switch(this);
+        mute.setText("Mute");
+        mute.setTextColor(INK);
+        mute.setTextSize(14);
+        mute.setOnCheckedChangeListener((v, on) -> { if (stereoReady()) stereo.mute(on); });
+        hu.addView(mute);
+        final TextView volText = label("Volume: slide and let go to send (0 to " + KenwoodLink.VOLUME_CAP + ")", 13, DIM);
+        hu.addView(volText);
+        SeekBar vol = new SeekBar(this);
+        vol.setMax(KenwoodLink.VOLUME_CAP);
+        vol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar b, int p, boolean user) {
+                if (user) volText.setText("Volume: " + p + " (let go to send)");
+            }
+            @Override public void onStartTrackingTouch(SeekBar b) { }
+            @Override public void onStopTrackingTouch(SeekBar b) {
+                if (!stereoReady()) return;
+                stereo.volume(b.getProgress());
+                volText.setText("Volume: " + b.getProgress() + " sent");
+            }
+        });
+        hu.addView(vol);
+        LinearLayout presetRow = row(hu);
+        String[] places = new String[KenwoodLink.PRESETS];
+        for (int i = 0; i < places.length; i++) places[i] = "Preset " + i;
+        final Spinner preset = new Spinner(this);
+        ArrayAdapter<String> presetNames = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, places);
+        presetNames.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        preset.setAdapter(presetNames);
+        presetRow.addView(preset);
+        presetRow.addView(button("Set preset EQ", v -> { if (stereoReady()) stereo.presetEq(preset.getSelectedItemPosition()); }));
 
         LinearLayout dg = card(col, "Diagnostics");
         dg.addView(label("Errors and issues from the sound engine, Calibrate and the stereo link.", 12, DIM));
@@ -378,6 +460,240 @@ public class SoundActivity extends Activity implements ServiceConnection {
                 })
                 .setNeutralButton("Clear", (d, w) -> Diag.LOG.clear())
                 .setNegativeButton("Close", null).show();
+    }
+
+    // ---------------- cabin noise: learned on a drive ----------------
+
+    private String noiseText() {
+        NoiseProfile p = profile;
+        if (learning) return "Learning: " + learnNote + ". Heard so far: " + (p == null ? "nothing yet" : p.summary()) + ".";
+        if (p == null) return "Using the starting model. Learn cabin noise to use this Jeep's own.";
+        if (!p.ready())
+            return "Not enough yet (" + p.summary() + "): it needs stopped and at least one speed. Using the starting model.";
+        return "Using this cabin's measured noise: " + p.summary() + ".";
+    }
+
+    private void askLearn() {
+        new AlertDialog.Builder(this).setTitle("Learn cabin noise")
+                .setMessage("This measures your Jeep's own noise so noise compensation fits it.\n\n"
+                        + "1 Pause the music (it waits while anything is playing).\n"
+                        + "2 Start parked with the engine running.\n"
+                        + "3 Drive as you normally do for a few minutes, through the speeds you usually drive.\n"
+                        + "4 Keep this screen open, then tap Stop learning.\n\n"
+                        + "It needs the dongle linked, for road speed. Another drive adds to it.")
+                .setPositiveButton("Start", (d, w) -> startLearning())
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private void startLearning() {
+        if (mic == null) {
+            Toast.makeText(this, "The microphone is not running, so it cannot listen", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (profile == null) profile = new NoiseProfile();
+        learnNote = "starting";
+        prefs.edit().putBoolean(SoundPrefs.LEARNING, true).apply();     // has the link service read road speed
+        changed();
+        learning = true;
+        learnButton.setText("Stop learning");
+        Diag.info(DiagLog.CAL, "Learning cabin noise started.");
+    }
+
+    private void stopLearning() {
+        learning = false;
+        NoiseProfile p = profile;
+        SharedPreferences.Editor e = prefs.edit().putBoolean(SoundPrefs.LEARNING, false);
+        if (p != null && p.total() > 0) e.putString(SoundPrefs.NOISE_PROFILE, p.toText());
+        e.apply();
+        if (learnButton != null) learnButton.setText("Learn cabin noise");
+        Diag.info(DiagLog.CAL, "Learning cabin noise stopped. Heard: " + (p == null ? "nothing" : p.summary()) + ".");
+        changed();
+    }
+
+    private void askForgetNoise() {
+        if (profile == null && !learning) return;
+        new AlertDialog.Builder(this).setTitle("Forget the learned cabin noise?")
+                .setMessage("Noise compensation goes back to the starting model until it is learned again.")
+                .setPositiveButton("Forget", (d, w) -> {
+                    if (learning) stopLearning();
+                    profile = null;
+                    prefs.edit().remove(SoundPrefs.NOISE_PROFILE).apply();
+                    changed();
+                })
+                .setNegativeButton("Keep", null).show();
+    }
+
+    /** One block of what the mic hears, filed under the road speed. Runs on the mic thread. */
+    private void learn(double[] bands, int count) {
+        NoiseProfile p = profile;
+        LinkService s = service;
+        if (p == null || s == null) return;
+        if (audio != null && audio.isMusicActive()) {
+            learnNote = "waiting, pause the music";
+            return;
+        }
+        Double mph = s.liveSpeed();
+        if (mph == null) {
+            learnNote = "waiting for road speed from the dongle";
+            return;
+        }
+        p.add(mph, bands);
+        learnNote = String.format(Locale.US, "listening at %.0f mph", mph);
+        if (count % 60 == 0) prefs.edit().putString(SoundPrefs.NOISE_PROFILE, p.toText()).apply();   // every 5 s or so
+    }
+
+    // ---------------- box tuning: measured with a sweep ----------------
+
+    private void askBoxTune() {
+        new AlertDialog.Builder(this).setTitle("Measure the box tuning")
+                .setMessage("Plays a 12-second low sweep and finds where the sub's cone goes still: that is the box's "
+                        + "tuning.\n\n"
+                        + "1 Engine off, music paused.\n"
+                        + "2 Volume LOW, about a quarter of normal. This is bass right at the mic.\n"
+                        + "3 Hold the mic a finger-width from the centre of the sub's cone.\n"
+                        + "4 Tap Start and hold still until it finishes.")
+                .setPositiveButton("Start", (d, w) -> startBoxTune())
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private void startBoxTune() {
+        if (mic == null) {
+            boxState.setText("The microphone is not running, so it cannot listen.");
+            return;
+        }
+        if (calibrating || boxTuning) return;
+        if (service != null) service.sound().setBypass(true);     // the port guard and EQ must not shape the sweep
+        changed();
+        boxState.setTextColor(GOOD);
+        boxState.setText("Measuring: about 14 seconds. Hold the mic at the cone...");
+        Diag.info(DiagLog.CAL, "Box-tune sweep started.");
+        boxTuning = true;
+    }
+
+    /** The 20 to 80 Hz sweep out of the tablet, then a little silence. Runs on its own thread. */
+    private void startSweep() {
+        Thread t = new Thread(() -> {
+            AudioTrack track = null;
+            try {
+                int min = AudioTrack.getMinBufferSize(RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT);
+                track = new AudioTrack.Builder()
+                        .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                        .setAudioFormat(new AudioFormat.Builder().setSampleRate(RATE)
+                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                        .setBufferSizeInBytes(Math.max(min, 16384))
+                        .setTransferMode(AudioTrack.MODE_STREAM).build();
+                track.play();
+                short[] buf = new short[2048];
+                long at = 0, end = (long) (RATE * (BoxTune.SWEEP_S + 0.5));
+                while (boxTuning && at < end) {
+                    for (int i = 0; i < buf.length; i += 2) {
+                        short v = (short) (BoxTune.sweepSample(at++, RATE) * 0.5 * 32767);    // half scale
+                        buf[i] = v;
+                        buf[i + 1] = v;
+                    }
+                    track.write(buf, 0, buf.length);
+                }
+            } catch (RuntimeException e) {
+                Diag.error(DiagLog.CAL, "The sweep could not be played: " + e);
+            } finally {
+                if (track != null) {
+                    try { track.stop(); } catch (RuntimeException ignored) { }
+                    track.release();
+                }
+            }
+        }, "sound-sweep");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** The recording is in: find the dip and offer it as the tuning. Runs on the mic thread. */
+    private void finishBoxTune(short[] pcm, int n, int clipped) {
+        if (service != null) service.sound().setBypass(false);
+        final BoxTune.Result r = BoxTune.estimate(BoxTune.response(pcm, n, RATE));
+        final boolean good = clipped <= 3 && r.clear;
+        final String text;
+        if (clipped > 3) text = "The mic overloaded. Turn the volume down and try again.";
+        else if (!r.heard) text = "Could not hear the sweep. Turn the volume up a little and hold the mic right at the cone.";
+        else if (!r.clear) text = String.format(Locale.US, "No clear dip (the deepest was %.0f dB at %.0f Hz). Hold the mic "
+                + "closer to the centre of the cone and try again. A sealed box has no dip.", r.depthDb, r.hz);
+        else text = String.format(Locale.US, "Measured: the box is tuned at %.1f Hz (a %.0f dB dip).", r.hz, r.depthDb);
+        if (good) Diag.info(DiagLog.CAL, text);
+        else Diag.warn(DiagLog.CAL, text);
+        main.post(() -> {
+            boxState.setTextColor(good ? GOOD : WARN);
+            boxState.setText(text);
+            changed();
+            if (good && !isFinishing()) offerTune(Math.round(r.hz * 10) / 10f);
+        });
+    }
+
+    private void offerTune(final float hz) {
+        new AlertDialog.Builder(this).setTitle("Box tuning: " + hz + " Hz")
+                .setMessage(String.format(Locale.US, "Use it? The port guard will then cut below %.0f Hz, where the cone "
+                        + "unloads.", SoundAdapt.subsonicHz(hz)))
+                .setPositiveButton("Use it", (d, w) -> {
+                    prefs.edit().putFloat(SoundPrefs.TUNE, hz).apply();
+                    tuneField.setText(String.valueOf(hz));
+                    changed();
+                })
+                .setNegativeButton("Not now", null).show();
+    }
+
+    // ---------------- the Kenwood link ----------------
+
+    private boolean stereoReady() {
+        if (stereo.connected()) return true;
+        Toast.makeText(this, "Connect to the stereo first", Toast.LENGTH_SHORT).show();
+        return false;
+    }
+
+    /** Connects to the remembered stereo, or asks which paired device it is (always, when choosing again). */
+    private void connectStereo(boolean choose) {
+        BluetoothManager m = getSystemService(BluetoothManager.class);
+        final BluetoothAdapter adapter = m == null ? null : m.getAdapter();
+        if (adapter == null) {
+            Toast.makeText(this, "This tablet has no Bluetooth", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 31
+                && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQ_BT);
+            return;
+        }
+        if (!adapter.isEnabled()) {
+            Toast.makeText(this, "Turn Bluetooth on first", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (stereo.busy()) return;
+        if (choose) stereo.close();
+        else if (stereo.connected()) return;
+        final List<BluetoothDevice> paired = new ArrayList<>(adapter.getBondedDevices());
+        String saved = prefs.getString(SoundPrefs.STEREO_ADDR, null);
+        if (!choose && saved != null) {
+            for (BluetoothDevice d : paired) {
+                if (saved.equals(d.getAddress())) {
+                    stereo.connect(adapter, d, prefs.getString(SoundPrefs.STEREO_NAME, "the stereo"));
+                    return;
+                }
+            }
+        }
+        if (paired.isEmpty()) {
+            Toast.makeText(this, "No paired devices. Pair the stereo in Android's Bluetooth settings first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String[] names = new String[paired.size()];
+        for (int i = 0; i < names.length; i++) names[i] = paired.get(i).getName() + "  " + paired.get(i).getAddress();
+        new AlertDialog.Builder(this).setTitle("Which one is the stereo?")
+                .setItems(names, (d, which) -> {
+                    BluetoothDevice dev = paired.get(which);
+                    String name = String.valueOf(dev.getName());
+                    prefs.edit().putString(SoundPrefs.STEREO_ADDR, dev.getAddress())
+                            .putString(SoundPrefs.STEREO_NAME, name).apply();
+                    stereo.connect(adapter, dev, name);
+                })
+                .setNegativeButton("Cancel", null).show();
     }
 
     // ---------------- mic calibration file ----------------
@@ -491,7 +807,9 @@ public class SoundActivity extends Activity implements ServiceConnection {
         short[] block = new short[BLOCK];
         double[] smooth = null;
         double[] ambient = new double[BLOCK / 2], measure = new double[BLOCK / 2];
-        int ambientBlocks = 0, measureBlocks = 0, clipped = 0;
+        int ambientBlocks = 0, measureBlocks = 0, clipped = 0, learned = 0;
+        short[] sweepHeard = null;                               // the box-tune recording while one runs
+        int sweepLen = 0, sweepClipped = 0;
         long calStart = 0;
         boolean wasCal = false;
         try {
@@ -509,6 +827,24 @@ public class SoundActivity extends Activity implements ServiceConnection {
                     peak = Math.max(peak, Math.abs(s));
                 }
                 peakNow = 10 * Math.log10(Math.max(1e-12, sq / BLOCK / (32768.0 * 32768.0)));
+                if (boxTuning) {
+                    if (sweepHeard == null) {                        // a new run: start the sweep and record it whole
+                        sweepHeard = new short[(int) (RATE * (BoxTune.SWEEP_S + 1.5))];
+                        sweepLen = sweepClipped = 0;
+                        startSweep();
+                    }
+                    int room = Math.min(BLOCK, sweepHeard.length - sweepLen);
+                    System.arraycopy(block, 0, sweepHeard, sweepLen, room);
+                    sweepLen += room;
+                    if (peak > 32000) sweepClipped++;
+                    if (sweepLen >= sweepHeard.length) {
+                        boxTuning = false;
+                        finishBoxTune(sweepHeard, sweepLen, sweepClipped);
+                        sweepHeard = null;
+                    }
+                    continue;
+                }
+                sweepHeard = null;
                 double[] mag = SoundTune.magnitudes(block);
 
                 if (calibrating) {
@@ -540,7 +876,8 @@ public class SoundActivity extends Activity implements ServiceConnection {
                 }
                 wasCal = false;
                 double[] bands = SoundTune.bandLevelsDb(mag, RATE, BLOCK);
-                if (smooth == null) smooth = bands;
+                if (learning) learn(bands, ++learned);
+                if (smooth == null) smooth = bands.clone();
                 else for (int i = 0; i < bands.length; i++) smooth[i] = 0.75 * smooth[i] + 0.25 * bands[i];
                 liveBands = centred(smooth);
             }
@@ -559,7 +896,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
             calState.setText("The microphone is not running, so Calibrate cannot listen.");
             return;
         }
-        if (calibrating) return;
+        if (calibrating || boxTuning) return;
         if (service != null) service.sound().setBypass(true);     // measure the system untouched
         changed();
         calState.setTextColor(GOOD);

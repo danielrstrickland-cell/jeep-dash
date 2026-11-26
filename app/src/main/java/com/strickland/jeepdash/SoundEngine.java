@@ -34,7 +34,7 @@ final class SoundEngine {
     private double sentHeadroom;
     private boolean refused;
     private SoundAdapt.Scene lastScene;
-    private volatile boolean bypass;
+    private volatile boolean bypass, convolving;
     private volatile String state = "off";
     private volatile double[] applied = new double[31];
 
@@ -47,17 +47,25 @@ final class SoundEngine {
     /** Calibrate measures the system untouched, so it switches the DSP out while it listens. */
     void setBypass(boolean on) { bypass = on; }
 
+    /**
+     * The lossless player is applying the room correction itself (as an exact filter), so this effect, which
+     * also sits on the player's output, leaves the correction out and keeps only the adaptive parts.
+     */
+    void setConvolving(boolean on) { convolving = on; }
+
     /** The live values the engine needs polled, added to whatever the dash already reads. */
     static Set<String> withInputs(Set<String> ids, Context c, boolean porsche) {
         if (porsche) return ids;
         SharedPreferences p = SoundPrefs.of(c);
-        if (!p.getBoolean(SoundPrefs.ENABLED, false)) return ids;
+        boolean on = p.getBoolean(SoundPrefs.ENABLED, false);
+        boolean learning = p.getBoolean(SoundPrefs.LEARNING, false);   // "Learn cabin noise" files noise by speed
+        if (!on && !learning) return ids;
         Set<String> out = new LinkedHashSet<>(ids);
-        if (p.getBoolean(SoundPrefs.NOISE, true) || p.getBoolean(SoundPrefs.SCENE_EQ, true)) {
+        if (learning || p.getBoolean(SoundPrefs.NOISE, true) || p.getBoolean(SoundPrefs.SCENE_EQ, true)) {
             out.add("speed");
             out.add("rpm");
         }
-        if (p.getBoolean(SoundPrefs.VOLT, true)) out.add("batt_v");
+        if (on && p.getBoolean(SoundPrefs.VOLT, true)) out.add("batt_v");
         return out;
     }
 
@@ -70,6 +78,7 @@ final class SoundEngine {
     synchronized void tick(Context c, LiveValues v, long now) {
         SharedPreferences p = SoundPrefs.of(c);
         SoundPlan.Settings s = SoundPrefs.settings(p);
+        if (convolving) s.correction = null;
         if (bypass || !s.enabled) {
             release();
             state = bypass ? "measuring" : "off";

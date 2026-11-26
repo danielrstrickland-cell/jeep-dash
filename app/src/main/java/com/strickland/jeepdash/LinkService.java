@@ -333,7 +333,22 @@ public class LinkService extends Service {
     /** A Sound hub setting changed: read what it now needs and re-apply at once. */
     void soundChanged() {
         refreshActive();
+        LosslessPlayer p = player;
+        if (p != null) p.refilter();
         sound.tick(this, values, now());
+    }
+
+    /** Road speed right now in mph, or null without a fresh reading from the dongle. */
+    Double liveSpeed() { return values.get("speed", now()); }
+
+    // ---------------- the lossless player ----------------
+
+    private volatile LosslessPlayer player;
+
+    /** The local lossless player; made the first time it is asked for, and it plays on behind every screen. */
+    synchronized LosslessPlayer player() {
+        if (player == null) player = new LosslessPlayer(this, sound, () -> sound.tick(this, values, now()));
+        return player;
     }
 
     private void followSpeed() {
@@ -669,6 +684,8 @@ public class LinkService extends Service {
 
     @Override
     public void onDestroy() {
+        LosslessPlayer lp = player;
+        if (lp != null) lp.release();
         sound.release();
         if (tablet != null) tablet.stop();
         stopWorker();

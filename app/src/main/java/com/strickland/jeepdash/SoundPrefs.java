@@ -2,6 +2,7 @@ package com.strickland.jeepdash;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import com.strickland.jeepdash.core.NoiseProfile;
 import com.strickland.jeepdash.core.SoundAdapt;
 import com.strickland.jeepdash.core.SoundPlan;
 import com.strickland.jeepdash.core.SoundTune;
@@ -16,7 +17,10 @@ final class SoundPrefs {
             SCENE_EQ = "scene_eq", NOISE = "noise_comp", STRENGTH = "noise_strength", VOLT = "volt_safe",
             PORT = "port_guard", TUNE = "tune_hz", DROP = "bass_drop", AUTO = "auto_mode",
             MEASURED = "measured", VALID_LO = "valid_lo", VALID_HI = "valid_hi",
-            MIC_USB = "mic_usb", MIC_CAL = "mic_cal", PEAK_BEST = "peak_best";
+            MIC_USB = "mic_usb", MIC_CAL = "mic_cal", PEAK_BEST = "peak_best",
+            NOISE_PROFILE = "noise_profile", LEARNING = "noise_learning",
+            STEREO_ADDR = "stereo_addr", STEREO_NAME = "stereo_name",
+            PLAYER_TREE = "player_tree", PLAYER_FILTER = "player_filter";
     /** The settings a scene snapshot carries. */
     private static final String[] SCENE_KEYS = {ENABLED, TARGET, BASS, TREBLE, SCENE_EQ, NOISE, STRENGTH, VOLT, PORT, DROP};
     static final String[] SCENE_NAMES = {"Solo drive", "Full car", "Bass demo"};
@@ -57,6 +61,9 @@ final class SoundPrefs {
         return c;
     }
 
+    /** The cabin's measured noise, or null before any has been learned. */
+    static NoiseProfile noise(SharedPreferences p) { return NoiseProfile.fromText(p.getString(NOISE_PROFILE, null)); }
+
     static SoundPlan.Settings settings(SharedPreferences p) {
         SoundPlan.Settings s = new SoundPlan.Settings();
         s.enabled = p.getBoolean(ENABLED, false);
@@ -68,6 +75,7 @@ final class SoundPrefs {
         s.portGuard = p.getBoolean(PORT, true);
         s.tuneHz = p.getFloat(TUNE, 0);
         s.bassDrop = p.getBoolean(DROP, false);
+        s.noise = noise(p);
         return s;
     }
 
