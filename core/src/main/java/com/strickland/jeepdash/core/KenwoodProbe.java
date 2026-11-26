@@ -1,14 +1,14 @@
 package com.strickland.jeepdash.core;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
 /**
  * The stereo probe: a fixed list of questions put to the KMM-BT728HD so its own replies show how each sound
- * setting is laid out, before this app ever writes one. It sends the session opener and then only read
- * requests — never a setting write — and acknowledges whatever the head unit sends, as the stock app does.
- * Pure: it hands out frames and turns replies into log lines; the screen owns the socket and the timing.
+ * setting is laid out, before this app ever writes one. Only read requests, never a setting write. They go
+ * out through {@link KenwoodLink}, which holds the session; this also turns frames into log lines.
  */
 public final class KenwoodProbe {
 
@@ -19,14 +19,9 @@ public final class KenwoodProbe {
         Step(String label, int category, int cmd) { this.label = label; this.category = category; this.cmd = cmd; }
     }
 
-    static final int CAT_SESSION = 0x3B, OPEN = 1;
-
     private final List<Step> steps = new ArrayList<>();
-    private int next;
-    private int seq;
 
     public KenwoodProbe() {
-        steps.add(new Step("open session", CAT_SESSION, OPEN));
         steps.add(new Step("EQ menu", KenwoodCommands.CAT_SETTING, KenwoodCommands.EQ_MENU));
         steps.add(new Step("read preset EQ", KenwoodCommands.CAT_SETTING, KenwoodCommands.GET_PRESET_EQ));
         steps.add(new Step("read custom EQ", KenwoodCommands.CAT_SETTING, KenwoodCommands.GET_CUSTOM_EQ));
@@ -40,20 +35,8 @@ public final class KenwoodProbe {
         steps.add(new Step("read loudness", KenwoodCommands.CAT_SETTING, KenwoodCommands.GET_LOUDNESS));
     }
 
-    public int stepCount() { return steps.size(); }
-
-    public boolean done() { return next >= steps.size(); }
-
-    /** The step that {@link #nextFrame()} will send, or null when the probe has asked everything. */
-    public Step peek() { return done() ? null : steps.get(next); }
-
-    /** The next question as a frame to write, with its own sequence number; null when done. */
-    public byte[] nextFrame() {
-        if (done()) return null;
-        Step s = steps.get(next++);
-        seq = (seq + 1) & 0x7F;
-        return KenwoodCommands.command(s.category, s.cmd, seq);
-    }
+    /** The questions, in order. The session itself is {@link KenwoodLink}'s business. */
+    public List<Step> steps() { return Collections.unmodifiableList(steps); }
 
     /** The acknowledgement to send back for a received frame, or null if it is itself an ACK or unreadable. */
     public static byte[] ackFor(byte[] frame) {

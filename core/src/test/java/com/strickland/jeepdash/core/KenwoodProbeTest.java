@@ -5,19 +5,13 @@ import java.util.List;
 /** The stereo probe and the stream splitter that feeds it. */
 public class KenwoodProbeTest {
 
-    public static void probeOpensThenOnlyReads() {
-        KenwoodProbe p = new KenwoodProbe();
-        int n = 0;
-        while (!p.done()) {
-            KenwoodProbe.Step s = p.peek();
-            KenwoodFrame.Parsed f = KenwoodFrame.parse(p.nextFrame());
-            T.ok(f != null, "step " + s.label + " builds a valid frame");
-            T.eq(0, f.payload.length, s.label + " carries no payload");
+    public static void probeOnlyAsksAndLeavesTheSessionToTheLink() {
+        List<KenwoodProbe.Step> steps = new KenwoodProbe().steps();
+        T.ok(steps.size() >= 10, "the sound settings are all asked for");
+        for (KenwoodProbe.Step s : steps) {
             T.ok(!KenwoodCommands.unconfirmed(s.category, s.cmd), s.label + " is not a setting write");
-            T.eq(++n, f.cmdId[4] & 0xFF, "sequence counts up");
+            T.ok(s.category != 0x3B && s.category != 0x5B, s.label + " is not session set-up: the link does that");
         }
-        T.eq(p.stepCount(), n, "every step was sent");
-        T.ok(p.nextFrame() == null, "nothing after the last step");
     }
 
     public static void ackOnlyForMessages() {

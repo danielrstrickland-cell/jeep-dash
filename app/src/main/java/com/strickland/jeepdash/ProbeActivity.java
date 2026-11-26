@@ -6,7 +6,6 @@ import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
-import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -24,43 +23,31 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import com.strickland.jeepdash.core.DiagLog;
-import com.strickland.jeepdash.core.KenwoodLink;
 import com.strickland.jeepdash.core.KenwoodProbe;
-import com.strickland.jeepdash.core.KenwoodStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
 
 /**
  * Stereo probe: asks the Kenwood KMM-BT728HD for its current sound settings over the same Bluetooth serial
  * link the KENWOOD Remote app uses, and logs every reply, so the layout of each setting can be worked out
- * before this app ever changes one. Unlike Listen mode it does send: the session opener, read requests and
- * acknowledgements — the list in {@link KenwoodProbe}. It never sends a setting write. One run takes about
- * half a minute; the log is saved and shared the same way as a Listen log.
+ * before this app ever changes one. Unlike Listen mode it does send: the session set-up and acknowledgements
+ * ({@link StereoLink}) and the read requests listed in {@link KenwoodProbe}. It never sends a setting write.
+ * One run takes about half a minute; the log is saved and shared the same way as a Listen log.
  */
 public class ProbeActivity extends Activity {
-    /** The serial service the stock app connects to on the stereo. */
-    private static final UUID OPENLINK = UUID.fromString("16f92dc0-2eeb-11e6-b342-0002a5d5c51b");
     private static final int REQ_PERM = 8;
-    private static final long STEP_MS = 1500, TAIL_MS = 3000;
+    private static final long OPEN_WAIT_MS = 45000, ANSWER_WAIT_MS = 12000, STEP_MS = 700, TAIL_MS = 3000;
 
     private final DiagLog log = new DiagLog(2000);
     private final Handler main = new Handler(Looper.getMainLooper());
     private final long t0 = System.currentTimeMillis();
     private final String startedWhen = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
     private BluetoothAdapter adapter;
-    private volatile BluetoothSocket socket;
-    private volatile OutputStream out;
     private volatile boolean closing, running;
-    private volatile StereoSocket waiter;
-    private volatile boolean dropped;                      // the link in use has ended
-    private volatile KenwoodLink acker = new KenwoodLink();
+    private final StereoLink link = new StereoLink((level, tag, text) -> log.add(now(), level, tag, text));
     private String stereoName = "(none)";
 
     private TextView status, logView;
@@ -193,136 +180,61 @@ public class ProbeActivity extends Activity {
                 .setNegativeButton("Cancel", null).show();
     }
 
-    private void start(BluetoothDevice d) {
+    private void start(final BluetoothDevice d) {
         disconnect();
         closing = false;
         running = true;
         stereoName = String.valueOf(d.getName());
         note("Picked " + stereoName);
         status.setText("Getting ready for " + stereoName + "...");
-        Thread t = new Thread(() -> run(d), "probe");
+        link.connect(adapter, d, stereoName);
+        Thread t = new Thread(this::run, "probe");
         t.setDaemon(true);
         t.start();
     }
 
-    /** Listens for the stereo to call the tablet. Null if cancelled or it cannot listen. */
-    private BluetoothSocket listen(BluetoothDevice d) {
-        show("Waiting for the stereo to call this tablet. " + StereoSocket.HOW);
-        note("Listening on the OpenLink serial service for " + stereoName + ".");
-        StereoSocket w = new StereoSocket();
-        waiter = w;
-        BluetoothSocket s = w.await(adapter, d, this::fail);
-        waiter = null;
-        if (s != null) note("The stereo called in.");
-        return s;
-    }
-
-    /** Takes a connected socket into use and starts reading it. False if it has no streams. */
-    private boolean take(BluetoothSocket s) {
-        socket = s;
-        dropped = false;
-        acker = new KenwoodLink(SoundPrefs.of(this).getInt(SoundPrefs.ACK_STYLE, 0));
+    /** Waits for the session, then asks each question once the one before has been taken. */
+    private void run() {
+        int asked = 0;
         try {
-            out = s.getOutputStream();
-            final InputStream in = s.getInputStream();
-            Thread r = new Thread(() -> readLoop(in), "probe-read");
-            r.setDaemon(true);
-            r.start();
-            return true;
-        } catch (IOException e) {
-            fail("No streams: " + e.getMessage());
-            return false;
-        }
-    }
-
-    private void run(BluetoothDevice d) {
-        show("Calling " + stereoName + "...");
-        BluetoothSocket s = StereoSocket.call(adapter, d, this::fail);     // as the stock app does
-        boolean called = s != null;
-        if (called) note("The stereo took the tablet's call.");
-        else s = listen(d);
-        try {
-            if (s != null && take(s)) Thread.sleep(STEP_MS);               // let the stereo speak first, if it does
-            if (called && dropped && !closing) {
-                note("The stereo hung up at once. Is its REMOTE APP setting on ANDROID with this tablet picked?");
-                out = null;
-                try { s.close(); } catch (IOException ignored) { }
-                s = listen(d);
-                if (s != null && take(s)) Thread.sleep(STEP_MS);
+            long until = System.currentTimeMillis() + OPEN_WAIT_MS;
+            while (!closing && !link.ready() && System.currentTimeMillis() < until) {
+                show(link.state());
+                Thread.sleep(300);
+            }
+            if (closing) return;
+            if (!link.ready()) {
+                fail("No session with the stereo after " + (OPEN_WAIT_MS / 1000) + " seconds. Nothing was asked.");
+                show("No session with the stereo. Tap Save & share to send the log.");
+                return;
+            }
+            show("Session open. Asking...");
+            for (KenwoodProbe.Step step : new KenwoodProbe().steps()) {
+                if (closing || !link.connected()) break;
+                link.ask(step.label, step.category, step.cmd);
+                asked++;
+                long limit = System.currentTimeMillis() + ANSWER_WAIT_MS;
+                while (!closing && link.connected() && !link.idle() && System.currentTimeMillis() < limit) Thread.sleep(100);
+                Thread.sleep(STEP_MS);                       // room for the stereo's reply before the next question
+            }
+            Thread.sleep(TAIL_MS);
+            if (!closing) {
+                note("Probe finished. " + asked + " questions asked.");
+                show("Finished. Tap Save & share.");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-        }
-        if (s == null || out == null || closing) {
+        } finally {
             running = false;
-            if (!closing) show("Could not reach the stereo. Is Bluetooth on?");
-            return;
         }
-        show("Connected. Asking...");
-        KenwoodProbe probe = new KenwoodProbe();
-        try {
-            Thread.sleep(50);
-            while (!closing && !probe.done()) {
-                KenwoodProbe.Step step = probe.peek();
-                byte[] frame = probe.nextFrame();
-                send(frame, "> " + step.label + ": " + KenwoodProbe.describe(frame));
-                Thread.sleep(STEP_MS);
-            }
-            Thread.sleep(TAIL_MS);
-        } catch (InterruptedException ignored) {
-            Thread.currentThread().interrupt();
-        }
-        running = false;
-        if (!closing) {
-            note("Probe finished. " + probe.stepCount() + " questions asked.");
-            show("Finished. Tap Save & share.");
-        }
-    }
-
-    private void send(byte[] frame, String line) {
-        OutputStream o = out;
-        if (o == null) return;
-        try {
-            synchronized (o) {
-                o.write(frame);
-                o.flush();
-            }
-            log.info(now(), DiagLog.CMD, line);
-        } catch (IOException e) {
-            log.error(now(), DiagLog.CMD, "Send failed (" + line + "): " + e.getMessage());
-        }
-    }
-
-    private void readLoop(InputStream in) {
-        KenwoodStream stream = new KenwoodStream();
-        byte[] buf = new byte[1024];
-        try {
-            int n;
-            while (!closing && (n = in.read(buf)) > 0) {
-                for (byte[] frame : stream.feed(buf, n)) {
-                    KenwoodLink.Event e = acker.onFrame(frame);      // tries each way of acknowledging in turn
-                    log.info(now(), DiagLog.CMD, "< " + e.line);
-                    if (e.ack != null) send(e.ack, "> ack");
-                }
-            }
-        } catch (IOException e) {
-            if (!closing) fail("Link closed: " + e.getMessage());
-        }
-        if (stream.strayBytes() > 0) note(stream.strayBytes() + " bytes arrived outside any frame.");
-        dropped = true;
     }
 
     private void show(String s) { main.post(() -> status.setText(s)); }
 
     private void disconnect() {
-        StereoSocket w = waiter;
-        if (w != null) w.cancel();
         closing = true;
         running = false;
-        out = null;
-        BluetoothSocket s = socket;
-        socket = null;
-        try { if (s != null) s.close(); } catch (IOException ignored) { }
+        link.close();
     }
 
     // ---------------- save ----------------

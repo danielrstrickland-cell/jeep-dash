@@ -1,141 +1,176 @@
 package com.strickland.jeepdash.core;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.ArrayDeque;
+import java.util.Arrays;
 
 /**
- * The Sound hub's live conversation with the KMM-BT728HD: it hands out the frames for the commands whose
- * payloads are confirmed (session open, mute, volume, preset EQ), numbers them, matches the stereo's answers
- * to what was asked, and acknowledges whatever the stereo sends on its own. Pure: the app owns the socket.
+ * The live conversation with the KMM-BT728HD, held to what Kenwood's own app (KENWOOD Remote 2.0.5) does on
+ * the wire. Pure: the app owns the socket and the clock, writes what {@link #poll} hands out and passes in
+ * what arrives.
  *
- * A volume command is held to the stereo's own scale, 0 to {@link #VOLUME_MAX} (the owner's figure for the
- * knob). That the command's level is the knob's number is still to be seen on the stereo itself. Source
- * switching is not here: it needs the source list the stereo itself reports, which the probe log will show.
+ * What the stock app does, and so this does:
+ * - A plain message from the stereo is acknowledged with its five id bytes exactly as they came, type ACK and
+ *   one result byte: 0, or 2 when it is the same message as the one before. Replies and notifications are
+ *   not acknowledged.
+ * - When the stereo says hello (category 3B, command 2) the app starts the session: 5B/02 with 00 00 01 01,
+ *   then 3B/01. When the stereo then sends 5B/01, the app asks for its features with 3B/34.
+ * - One message is in the air at a time. Messages are numbered from 0; the number moves on only when the
+ *   stereo acknowledges the message. One not acknowledged within a second is sent again, and after ten such
+ *   seconds the link is given up.
+ *
+ * Commands from the screen (mute, volume, preset EQ, the probe's questions) wait until the session is open.
+ * A volume command is held to the stereo's own scale, 0 to {@link #VOLUME_MAX}.
  */
 public final class KenwoodLink {
     /** The top of the stereo's volume scale: the KMM-BT728HD's knob runs 0 to 35. */
     public static final int VOLUME_MAX = 35;
     /** How many preset places the screen offers; the names come from the probe log. */
     public static final int PRESETS = 10;
+    /** A message not acknowledged in this long is sent again; after this many such waits the link is given up. */
+    public static final int RESEND_MS = 1000, TRIES = 10;
 
-    /** A command to write to the socket, its number and what to call it in the log. */
-    public static final class Sent {
+    static final int CAT_SESSION = 0x3B, CAT_INFO = 0x5B;
+    static final int HELLO = 2, OPEN = 1, INFO = 2, INFO_ANSWER = 1, FEATURES = 0x34;
+    private static final int TAKEN = 0, REPEAT = 2;
+    private static final int PLAIN = KenwoodFrame.CMD, DEBUG = 0x3F;   // the two message types the stock app acknowledges
+
+    /** Something to write to the socket now. */
+    public static final class Out {
         public final byte[] frame;
-        public final int seq;
         public final String label;
-        Sent(byte[] frame, int seq, String label) { this.frame = frame; this.seq = seq; this.label = label; }
+        public final int attempt;        // 1 the first time, 2 for the first repeat...
+        Out(byte[] frame, String label, int attempt) { this.frame = frame; this.label = label; this.attempt = attempt; }
     }
 
     /** What a received frame means. */
     public static final class Event {
         public final String line;        // for the diagnostics log
         public final byte[] ack;         // to write back, or null
-        public final String answered;    // the command this answers, or null
+        public final String answered;    // the message of ours this acknowledges, or null
         public final int result;         // the stereo's result code when answered (0 = accepted)
         Event(String line, byte[] ack, String answered, int result) {
             this.line = line; this.ack = ack; this.answered = answered; this.result = result;
         }
     }
 
-    /**
-     * The ways an acknowledgement can be put together. Which one the stereo wants was not settled by reading
-     * the stock app: on the owner's stereo an acknowledgement that echoed the message's id unchanged was
-     * ignored, and the stereo repeated its opening message once a second, ten times, then hung up. So a
-     * message the stereo repeats is acknowledged a different way each time, and when it moves on to something
-     * new, the way last used is the one it accepts. The app remembers that for next time.
-     */
-    public static final int ACK_STYLES = 5;
-    private static final String[] STYLE = {"addresses swapped, result 0", "addresses swapped, no result",
-            "id as it came, no result", "answered with the same message", "id as it came, result 0"};
-
-    private final Map<Integer, String> pending = new HashMap<>();
-    private int seq;
-    private int style;                 // the acknowledgement style to start a message with
-    private int repeats;               // how many times the stereo has repeated the message in hand
-    private byte[] lastId;             // the id of the stereo's last message
-    private boolean confirmed;
-
-    public KenwoodLink() { this(0); }
-
-    /** Starts from the acknowledgement style that worked last time. */
-    public KenwoodLink(int rememberedStyle) {
-        style = rememberedStyle >= 0 && rememberedStyle < ACK_STYLES ? rememberedStyle : 0;
-    }
-
-    /** The acknowledgement style in use for the stereo's current message. */
-    public synchronized int ackStyle() { return (style + repeats) % ACK_STYLES; }
-
-    /** True once the stereo has moved on from a message, which means it accepted {@link #ackStyle()}. */
-    public synchronized boolean ackStyleConfirmed() { return confirmed; }
-
-    public static String styleName(int style) { return style >= 0 && style < ACK_STYLES ? STYLE[style] : "?"; }
-
-    private static byte[] acknowledge(int style, byte[] id) {
-        byte[] back = {id[1], id[0], id[2], id[3], id[4]};          // from the app to the stereo
-        switch (style) {
-            case 0: return KenwoodFrame.frame(back, KenwoodFrame.ACK, new byte[]{0});
-            case 1: return KenwoodFrame.frame(back, KenwoodFrame.ACK, new byte[0]);
-            case 2: return KenwoodFrame.frame(id, KenwoodFrame.ACK, new byte[0]);
-            case 3: return KenwoodFrame.frame(back, KenwoodFrame.CMD, new byte[0]);
-            default: return KenwoodFrame.frame(id, KenwoodFrame.ACK, new byte[]{0});
+    private static final class Msg {
+        final int category, cmd;
+        final String label;
+        final byte[] payload;
+        Msg(int category, int cmd, String label, byte[] payload) {
+            this.category = category; this.cmd = cmd; this.label = label; this.payload = payload;
         }
     }
 
-    private synchronized Sent send(int category, int cmd, String label, byte... payload) {
-        seq = (seq + 1) & 0x7F;
-        pending.put(seq, label);
-        return new Sent(KenwoodCommands.command(category, cmd, seq, payload), seq, label);
+    private final ArrayDeque<Msg> setUp = new ArrayDeque<>();     // session messages, ahead of everything else
+    private final ArrayDeque<Msg> queue = new ArrayDeque<>();     // commands, once the session is open
+    private Msg flying;                // the message in the air
+    private byte[] flyingFrame;
+    private long sentAt;
+    private int waits;                 // seconds this message has gone unacknowledged
+    private int seq;                   // the number the next new message carries
+    private boolean begun, open, lost;
+    private byte[] lastId;             // the id of the stereo's last plain message
+
+    private void startSession() {
+        begun = true;
+        setUp.add(new Msg(CAT_INFO, INFO, "Session set-up", new byte[]{0, 0, 1, 1}));
+        setUp.add(new Msg(CAT_SESSION, OPEN, "Open session", new byte[0]));
     }
 
-    /** The session opener, sent once after connecting, as the stock app and the probe do. */
-    public Sent open() { return send(KenwoodProbe.CAT_SESSION, KenwoodProbe.OPEN, "Open session"); }
+    /** Starts the session from this side, for a stereo that has said nothing. Does nothing if it is started. */
+    public synchronized void begin() {
+        if (!begun) startSession();
+    }
 
-    public Sent mute(boolean on) {
-        return send(KenwoodCommands.CAT_CONTROL, KenwoodCommands.MUTE, on ? "Mute on" : "Mute off", (byte) (on ? 1 : 0));
+    /** Any command, by its numbers: the probe's questions come this way. */
+    public synchronized void ask(String label, int category, int cmd, byte... payload) {
+        queue.add(new Msg(category, cmd, label, payload));
+    }
+
+    public void mute(boolean on) {
+        ask(on ? "Mute on" : "Mute off", KenwoodCommands.CAT_CONTROL, KenwoodCommands.MUTE, (byte) (on ? 1 : 0));
     }
 
     /** A volume level, held between 0 and the top of the stereo's scale. */
-    public Sent volume(int level) {
+    public void volume(int level) {
         int v = Math.max(0, Math.min(VOLUME_MAX, level));
-        return send(KenwoodCommands.CAT_CONTROL, KenwoodCommands.VOLUME, "Volume " + v, (byte) v);
+        ask("Volume " + v, KenwoodCommands.CAT_CONTROL, KenwoodCommands.VOLUME, (byte) v);
     }
 
     /** One of the stereo's built-in EQ presets, by its place in the stereo's list. */
-    public Sent presetEq(int index) {
+    public void presetEq(int index) {
         int i = Math.max(0, Math.min(PRESETS - 1, index));
-        return send(KenwoodCommands.CAT_SETTING, KenwoodCommands.SET_PRESET_EQ, "Preset EQ " + i, (byte) i);
+        ask("Preset EQ " + i, KenwoodCommands.CAT_SETTING, KenwoodCommands.SET_PRESET_EQ, (byte) i);
     }
 
-    /** True while a command has had no answer yet. */
-    public synchronized boolean waiting(int seq) { return pending.containsKey(seq); }
+    /** True once the stereo has answered the session opener: commands go out from then on. */
+    public synchronized boolean open() { return open; }
 
-    /** Stops waiting for a command's answer; returns its label the first time, null if it was answered. */
-    public synchronized String giveUp(int seq) { return pending.remove(seq); }
+    /** True when the stereo left a message unacknowledged for ten seconds: hang up, as the stock app does. */
+    public synchronized boolean lost() { return lost; }
 
-    /** A frame arrived: log it, acknowledge the stereo's own messages, and match answers to commands. */
+    /** True when nothing is in the air and nothing is waiting to go. */
+    public synchronized boolean idle() { return flying == null && setUp.isEmpty() && queue.isEmpty(); }
+
+    /** What to write now: a new message if none is in the air, the one in the air again if its second is up, or null. */
+    public synchronized Out poll(long nowMs) {
+        if (lost) return null;
+        if (flying != null) {
+            if (nowMs - sentAt < RESEND_MS) return null;
+            if (++waits >= TRIES) {
+                lost = true;
+                return null;
+            }
+            sentAt = nowMs;
+            return new Out(flyingFrame, flying.label, waits + 1);
+        }
+        Msg next = setUp.poll();
+        if (next == null && open) next = queue.poll();
+        if (next == null) return null;
+        flying = next;
+        flyingFrame = KenwoodCommands.command(next.category, next.cmd, seq, next.payload);
+        sentAt = nowMs;
+        waits = 0;
+        return new Out(flyingFrame, next.label, 1);
+    }
+
+    /** A frame arrived: log it, acknowledge the stereo's own messages, and match acknowledgements to ours. */
     public synchronized Event onFrame(byte[] frame) {
         String line = KenwoodProbe.describe(frame) + "  [" + KenwoodProbe.hex(frame) + "]";
         KenwoodFrame.Parsed p = KenwoodFrame.parse(frame);
         if (p == null) return new Event(line, null, null, 0);
-        if (p.ptype != KenwoodFrame.ACK) {
-            if (lastId != null && java.util.Arrays.equals(lastId, p.cmdId)) {
-                if (!confirmed) repeats++;                         // it did not take the last one: try the next way
-            } else {
-                if (lastId != null) {                              // it moved on: the last way worked
-                    style = (style + repeats) % ACK_STYLES;
-                    confirmed = true;
-                }
-                lastId = p.cmdId.clone();
-                repeats = 0;
+        if (p.ptype == KenwoodFrame.ACK) return acknowledged(p, line);
+        if (p.ptype == DEBUG) return new Event(line, KenwoodCommands.ack(p.cmdId, TAKEN), null, 0);
+        if (p.ptype != PLAIN) return new Event(line, null, null, 0);
+        if (lastId != null && Arrays.equals(lastId, p.cmdId))
+            return new Event(line + "  (a repeat)", KenwoodCommands.ack(p.cmdId, REPEAT), null, 0);
+        lastId = p.cmdId.clone();
+        if ((p.cmdId[0] & 0xFF) == KenwoodCommands.MAIN && (p.cmdId[1] & 0xFF) == KenwoodCommands.CORE) {
+            int cat = p.cmdId[2] & 0xFF, cmd = p.cmdId[3] & 0xFF;
+            if (cat == CAT_SESSION && cmd == HELLO) {
+                startSession();
+                line += "  (the stereo's hello: starting the session)";
+            } else if (cat == CAT_INFO && cmd == INFO_ANSWER) {
+                setUp.add(new Msg(CAT_SESSION, FEATURES, "Ask for features", new byte[0]));
             }
-            int use = (style + repeats) % ACK_STYLES;
-            return new Event(line + "  (acknowledged: " + STYLE[use] + ")", acknowledge(use, p.cmdId), null, 0);
         }
-        int a = p.cmdId[0] & 0xFF, b = p.cmdId[1] & 0xFF;          // an answer may carry our id as sent, or turned round
-        boolean ours = (a == KenwoodCommands.CORE && b == KenwoodCommands.MAIN)
-                || (a == KenwoodCommands.MAIN && b == KenwoodCommands.CORE);
-        String label = ours ? pending.remove(p.cmdId[4] & 0xFF) : null;
-        int result = p.payload.length > 0 ? p.payload[0] & 0xFF : 0;
+        return new Event(line, KenwoodCommands.ack(p.cmdId, TAKEN), null, 0);
+    }
+
+    private Event acknowledged(KenwoodFrame.Parsed p, String line) {
+        byte[] id = p.cmdId;
+        boolean mine = flying != null && (id[0] & 0xFF) == KenwoodCommands.CORE && (id[1] & 0xFF) == KenwoodCommands.MAIN
+                && (id[2] & 0xFF) == flying.category && (id[3] & 0xFF) == flying.cmd && (id[4] & 0xFF) == seq;
+        if (!mine) return new Event(line + "  (not for the message in the air)", null, null, 0);
+        int result = p.payload.length > 0 ? p.payload[0] & 0xFF : TAKEN;
+        if (result == REPEAT) result = TAKEN;                     // it had the first copy already
+        String label = flying.label;
+        if (flying.category == CAT_SESSION && flying.cmd == OPEN) open = true;
+        flying = null;
+        flyingFrame = null;
+        seq = (seq + 1) & 0xFF;
+        if (seq == 0xFF) seq = 0;
         return new Event(line, null, label, result);
     }
 }

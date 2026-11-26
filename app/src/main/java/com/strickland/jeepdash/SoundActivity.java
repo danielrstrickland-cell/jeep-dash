@@ -135,7 +135,6 @@ public class SoundActivity extends Activity implements ServiceConnection {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         audio = getSystemService(AudioManager.class);
         SoundProfiles.ensure(prefs);
-        stereo.remember(prefs);
         profile = SoundPrefs.noise(prefs);
         prefs.edit().putBoolean(SoundPrefs.LEARNING, false).apply();    // learning only runs with this screen open
         buildScreen();
