@@ -29,6 +29,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.text.InputType;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -48,6 +49,7 @@ import com.strickland.jeepdash.core.DiagLog;
 import com.strickland.jeepdash.core.KenwoodLink;
 import com.strickland.jeepdash.core.NoiseProfile;
 import com.strickland.jeepdash.core.SoundAdapt;
+import com.strickland.jeepdash.core.SoundHelp;
 import com.strickland.jeepdash.core.SoundPlan;
 import com.strickland.jeepdash.core.SoundTune;
 import java.io.ByteArrayOutputStream;
@@ -195,7 +197,8 @@ public class SoundActivity extends Activity implements ServiceConnection {
         return t;
     }
 
-    private LinearLayout card(LinearLayout parent, String title) {
+    /** A card with its title and, beside it, the information button for that card's help topic. */
+    private LinearLayout card(LinearLayout parent, String title, String topic) {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable bg = new GradientDrawable();
@@ -208,11 +211,13 @@ public class SoundActivity extends Activity implements ServiceConnection {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = (int) (12 * density);
         parent.addView(c, lp);
-        if (title != null) {
-            TextView t = label(title, 15, INK);
-            t.setTypeface(Typeface.DEFAULT_BOLD);
-            c.addView(t);
-        }
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView t = label(title, 15, INK);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        head.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        head.addView(HelpButton.make(this, topic), new LinearLayout.LayoutParams(HelpButton.size(this), HelpButton.size(this)));
+        c.addView(head);
         return c;
     }
 
@@ -305,14 +310,14 @@ public class SoundActivity extends Activity implements ServiceConnection {
         col.addView(label("Tuned for: Type R components, JL tweeters, Skar EVL-15 ported, PDR-V75 / SR 1Dk", 12, DIM));
         col.addView(label("Signal: tablet DSP  >  head unit  >  amps  >  speakers", 12, DIM));
 
-        LinearLayout dsp = card(col, "Tablet DSP");
+        LinearLayout dsp = card(col, "Tablet DSP", SoundHelp.DSP);
         toggle(dsp, "On (EQ and limiter on everything the tablet plays)", SoundPrefs.ENABLED, false);
         dspState = label("", 12, GOOD);
         dsp.addView(dspState);
         picker(dsp, "Listening to", new String[]{"Music", "Movie or TV show (voices lifted, sound in step with the picture)"},
                 new String[]{"MUSIC", "MOVIE"}, SoundPrefs.MODE, "MUSIC");
 
-        LinearLayout tune = card(col, "EQ and live RTA");
+        LinearLayout tune = card(col, "EQ and live RTA", SoundHelp.RTA);
         tune.addView(label("Bars: what the mic hears.  Yellow: target.  Green: gains applied.", 12, DIM));
         graph = new RtaView(this);
         tune.addView(graph, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (190 * density)));
@@ -321,7 +326,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
         slider(tune, "Custom bass shelf", SoundPrefs.BASS, 0, 12, 7, " dB");
         slider(tune, "Custom treble at 20 kHz", SoundPrefs.TREBLE, -10, 0, -6, " dB");
 
-        LinearLayout cal = card(col, "Calibrate and room correction");
+        LinearLayout cal = card(col, "Calibrate and room correction", SoundHelp.CALIBRATE);
         cal.addView(label("Engine off or idling, windows up, tablet where your head is. Set a normal listening "
                 + "volume. It plays about 10 seconds of noise and stores what the mic hears.", 12, DIM));
         picker(cal, "Microphone", new String[]{"Tablet's built-in mic", "USB measurement mic"},
@@ -338,7 +343,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
                 : "Calibrated. Correction follows the target above.", 12, GOOD);
         cal.addView(calState);
 
-        LinearLayout ad = card(col, "Adaptive engine");
+        LinearLayout ad = card(col, "Adaptive engine", SoundHelp.ADAPTIVE);
         picker(ad, "While driving", new String[]{"Fully automatic", "Automatic, with a note on each change", "Parked only"},
                 new String[]{"AUTO", "AUTO_NOTE", "PARKED_ONLY"}, SoundPrefs.AUTO, "AUTO");
         toggle(ad, "Scene-linked EQ (idle / cruise / highway)", SoundPrefs.SCENE_EQ, true);
@@ -378,7 +383,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
                 + "Type it in, or Measure finds it with a sweep and the mic.", 12, DIM);
         ad.addView(boxState);
 
-        LinearLayout sc = card(col, "Scenes");
+        LinearLayout sc = card(col, "Scenes", SoundHelp.SCENES);
         sc.addView(label("Tap to recall, hold to save the current settings.", 12, DIM));
         LinearLayout scRow = row(sc);
         for (int i = 0; i < SoundPrefs.SCENE_NAMES.length; i++) {
@@ -402,11 +407,11 @@ public class SoundActivity extends Activity implements ServiceConnection {
         loud = label("", 12, DIM);
         sc.addView(loud);
 
-        LinearLayout lp = card(col, "Lossless player");
+        LinearLayout lp = card(col, "Lossless player", SoundHelp.PLAYER);
         lp.addView(label("Plays your own files (the USB stick) with the room correction applied as an exact filter.", 12, DIM));
         lp.addView(button("Open player", v -> startActivity(new Intent(this, PlayerActivity.class))));
 
-        LinearLayout hu = card(col, "Head unit");
+        LinearLayout hu = card(col, "Head unit", SoundHelp.HEAD_UNIT);
         hu.addView(label("Kenwood link: mute, volume and preset EQ. Not tried on the stereo yet, so every command and "
                 + "answer goes in the diagnostics log. The first time, send a low volume and check the stereo shows the same "
                 + "number. Source, custom EQ, filters, sub level and fader wait on the probe log.", 12, DIM));
@@ -448,7 +453,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
         presetRow.addView(preset);
         presetRow.addView(button("Set preset EQ", v -> { if (stereoReady()) stereo.presetEq(preset.getSelectedItemPosition()); }));
 
-        LinearLayout dg = card(col, "Diagnostics");
+        LinearLayout dg = card(col, "Diagnostics", SoundHelp.DIAGNOSTICS);
         dg.addView(label("Errors and issues from the sound engine, Calibrate and the stereo link.", 12, DIM));
         dg.addView(button("Open log", v -> showLog()));
         setContentView(scroll);

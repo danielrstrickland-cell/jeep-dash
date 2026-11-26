@@ -29,6 +29,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import com.strickland.jeepdash.core.DiagLog;
+import com.strickland.jeepdash.core.SoundHelp;
 import com.strickland.jeepdash.core.SoundTune;
 import java.util.ArrayList;
 import java.util.List;
@@ -189,6 +190,9 @@ public class PlayerActivity extends Activity implements ServiceConnection {
         folder = button("Pick music folder", v -> pickFolder());
         folder.setTextSize(13);
         head.addView(folder);
+        LinearLayout.LayoutParams info = new LinearLayout.LayoutParams(HelpButton.size(this), HelpButton.size(this));
+        info.leftMargin = dp(10);
+        head.addView(HelpButton.make(this, SoundHelp.PLAYER), info);
         col.addView(head);
 
         title = label("Nothing playing", 20, INK);

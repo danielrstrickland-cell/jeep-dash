@@ -33,6 +33,7 @@ import com.strickland.jeepdash.core.DongleSession;
 import com.strickland.jeepdash.core.DriveLogWriter;
 import com.strickland.jeepdash.core.FuelUse;
 import com.strickland.jeepdash.core.Gears;
+import com.strickland.jeepdash.core.KeepAlive;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Motion;
 import com.strickland.jeepdash.core.MisfireCodes;
@@ -177,6 +178,7 @@ public class LinkService extends Service {
     private volatile boolean running;
     private volatile int generation;        // each worker thread has its own; an old one stops when it changes
     private volatile boolean anyBound;
+    private volatile boolean soundOnly;                     // dash closed, dongle let go, alive only for the DSP or the player
     private volatile boolean foreground;
     private volatile DongleSession session;
     private volatile Poller runner;
@@ -706,7 +708,35 @@ public class LinkService extends Service {
         super.onDestroy();
     }
 
+    /** True while the sound side should outlive the dash: the Tablet DSP is switched on, or the player is playing. */
+    private boolean soundWanted() {
+        if (Catalog.porsche()) return false;
+        LosslessPlayer p = player;
+        return SoundPrefs.of(this).getBoolean(SoundPrefs.ENABLED, false) || (p != null && p.playing());
+    }
+
+    /**
+     * The dash is closed and the Jeep is quiet, but the sound is still wanted: let go of the dongle and stay
+     * alive for the DSP, so it carries on over whatever else the tablet plays. Opening the dash starts the
+     * dongle link again; Stop on the notification ends this.
+     */
+    private void keepOnlyTheSound() {
+        if (!running || soundOnly) return;
+        stopWorker();
+        soundOnly = true;
+        setStatus(Status.SEARCHING, "Dash closed. The sound is still on.");
+        postNotification();
+    }
+
+    private void postNotification() {
+        if (!foreground) return;
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm == null) return;
+        try { nm.notify(NOTIFICATION_ID, buildNotification()); } catch (RuntimeException ignored) { }
+    }
+
     private void shutDown() {
+        soundOnly = false;
         stopWorker();
         setStatus(Status.SEARCHING, "Stopped. Open Jeep Dash to reconnect.");
         if (foreground) {
@@ -744,7 +774,7 @@ public class LinkService extends Service {
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
                 .setContentTitle("Jeep Dash")
-                .setContentText(statusLine(status))
+                .setContentText(soundOnly ? "Sound is on. Stop turns it off." : statusLine(status))
                 .setContentIntent(open)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -786,6 +816,10 @@ public class LinkService extends Service {
     // ---------------- the connection loop ----------------
 
     private synchronized void startWorker() {
+        if (soundOnly) {
+            soundOnly = false;
+            postNotification();
+        }
         if (running && worker != null && worker.isAlive()) return;
         running = true;
         final int gen = ++generation;
@@ -1231,7 +1265,11 @@ public class LinkService extends Service {
         }
 
         if (anyBound || dataLately) lastUsefulMs = t;
-        else if (running && t - lastUsefulMs > IDLE_STOP_MS) main.post(this::shutDown);
+        switch (KeepAlive.decide(anyBound || dataLately, t - lastUsefulMs, IDLE_STOP_MS, running, soundOnly, soundWanted())) {
+            case STOP: main.post(this::shutDown); break;
+            case SOUND_ONLY: main.post(this::keepOnlyTheSound); break;
+            default: break;
+        }
     }
 
     /** Ticker thread: feeds the misfire buffer while the link is up; a capture cut short by a lost link is saved as it is. */

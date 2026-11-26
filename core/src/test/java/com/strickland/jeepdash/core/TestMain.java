@@ -28,6 +28,8 @@ public final class TestMain {
             SoundTuneTest.class,
             SoundPlanTest.class,
             DspBandsTest.class,
+            SoundHelpTest.class,
+            KeepAliveTest.class,
             FftTest.class,
             BoxTuneTest.class,
             NoiseProfileTest.class,
