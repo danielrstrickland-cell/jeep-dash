@@ -57,6 +57,11 @@
             android:exported="false"
             android:label="Listen mode"
             android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".ProbeActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:exported="false"
+            android:label="Stereo probe" />
         <service
             android:name=".LinkService"
             android:exported="false"

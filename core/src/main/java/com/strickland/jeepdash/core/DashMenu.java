@@ -20,7 +20,7 @@ public final class DashMenu {
             MUSIC_BUTTON = "music_button", VOLUME = "volume", VISUALIZER = "visualizer",
             FUEL = "fuel",
             CODES = "codes", LOGS = "logs", NORMAL = "normal", SCAN = "scan",
-            AUTO_START = "auto_start", UPDATE = "update", LISTEN = "listen", TUNE_LOG = "tune_log",
+            AUTO_START = "auto_start", UPDATE = "update", LISTEN = "listen", PROBE = "probe", TUNE_LOG = "tune_log",
             TRUCK = "truck", ADD_TRUCK = "add_truck", QUALITY = "quality", EFFECTS = "effects", CALM = "calm",
             HEAT = "heat", CRASH = "crash";
 
@@ -116,6 +116,7 @@ public final class DashMenu {
                     : "Scan all values: " + s.scanProgress));
         diag.add(new Entry(LOGS, "Drive logs"));
         diag.add(new Entry(LISTEN, "Listen mode (Kenwood stereo Bluetooth)"));
+        diag.add(new Entry(PROBE, "Stereo probe (read Kenwood sound settings)"));
         add(out, "Diagnostics", diag);
 
         List<Entry> app = new ArrayList<>();

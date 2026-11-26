@@ -1071,6 +1071,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case DashMenu.NORMAL: NormalDialog.show(this, gaugeUnits(), this::refreshNotice); break;
             case DashMenu.SCAN: if (service != null) ScanDialog.show(this, service); break;
             case DashMenu.LISTEN: startActivity(new Intent(this, ListenActivity.class)); break;
+            case DashMenu.PROBE: startActivity(new Intent(this, ProbeActivity.class)); break;
             case DashMenu.TUNE_LOG:
                 if (LinkService.tunePaused()) showMessage("Tune log", LinkService.PAUSED_DETAIL);
                 else startActivity(new Intent(this, TuneLogActivity.class));
