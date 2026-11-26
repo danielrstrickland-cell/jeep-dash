@@ -32,6 +32,7 @@ public final class TestMain {
             KeepAliveTest.class,
             SettingsPackTest.class,
             ProfileRouteTest.class,
+            RouteWatchTest.class,
             FftTest.class,
             BoxTuneTest.class,
             NoiseProfileTest.class,

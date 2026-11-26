@@ -34,6 +34,7 @@ import com.strickland.jeepdash.core.DriveLogWriter;
 import com.strickland.jeepdash.core.FuelUse;
 import com.strickland.jeepdash.core.Gears;
 import com.strickland.jeepdash.core.ProfileRoute;
+import com.strickland.jeepdash.core.RouteWatch;
 import com.strickland.jeepdash.core.DiagLog;
 import com.strickland.jeepdash.core.KeepAlive;
 import com.strickland.jeepdash.core.LiveValues;
@@ -723,6 +724,10 @@ public class LinkService extends Service {
     // ---------------- sound profiles follow where the sound goes ----------------
 
     private volatile String soundRoute = "";               // the way out right now: ProfileRoute's speaker, bluetooth or other
+    private final RouteWatch routeWatch = new RouteWatch();
+
+    /** Where the tablet's sound is going out right now: one of {@link ProfileRoute}'s, or "" if not known yet. */
+    String soundRoute() { return soundRoute; }
 
     private final android.media.AudioDeviceCallback routeWatcher = new android.media.AudioDeviceCallback() {
         @Override public void onAudioDevicesAdded(android.media.AudioDeviceInfo[] added) { readSoundRoute(); }
@@ -748,12 +753,14 @@ public class LinkService extends Service {
     /**
      * Ticker thread: when the way out has changed since it was last acted on (tablet speakers to the
      * stereo's Bluetooth, or back), the profile set for the new one comes on. Only a change does this, so a
-     * profile picked by hand stays until then; and never in the middle of a measurement.
+     * profile picked by hand stays until then. The new way out has to hold steady first (Bluetooth blips),
+     * and nothing switches under the open Sound hub or in the middle of a measurement: it waits for those.
      */
     private void followSoundRoute() {
-        final String route = soundRoute;
+        final String route = routeWatch.settled(soundRoute, now());
         final SharedPreferences p = SoundPrefs.of(this);
-        if (route.isEmpty() || route.equals(p.getString(SoundPrefs.LAST_ROUTE, ""))) return;
+        if (route == null || route.equals(p.getString(SoundPrefs.LAST_ROUTE, ""))) return;
+        if (SoundActivity.showing) return;
         if (p.getBoolean(SoundPrefs.LEARNING, false) || "measuring".equals(sound.state())) return;
         main.post(() -> {
             if (route.equals(p.getString(SoundPrefs.LAST_ROUTE, ""))) return;

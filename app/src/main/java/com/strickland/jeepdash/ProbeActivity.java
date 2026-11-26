@@ -57,6 +57,7 @@ public class ProbeActivity extends Activity {
     private volatile BluetoothSocket socket;
     private volatile OutputStream out;
     private volatile boolean closing, running;
+    private volatile StereoSocket waiter;
     private String stereoName = "(none)";
 
     private TextView status, logView;
@@ -138,8 +139,9 @@ public class ProbeActivity extends Activity {
         title.setText("Stereo probe: Kenwood sound settings (read only)");
         col.addView(title);
         TextView how = text(12, Color.LTGRAY);
-        how.setText("1 Close the KENWOOD Remote app.  2 Stereo on, engine can be off.  3 Pick the stereo and wait "
-                + "about 30 seconds.  4 Save & share the log.");
+        how.setText("1 Force-stop the KENWOOD Remote app.  2 Stereo on; tap Pick stereo & run.  3 On the stereo: "
+                + "FUNCTION, REMOTE APP, SELECT, ANDROID: YES, then ANDROID LIST: this tablet.  4 When the stereo has "
+                + "called in, wait about 30 seconds, then Save & share the log.");
         col.addView(how);
 
         LinearLayout top = new LinearLayout(this);
@@ -194,30 +196,22 @@ public class ProbeActivity extends Activity {
         running = true;
         stereoName = String.valueOf(d.getName());
         note("Picked " + stereoName);
-        status.setText("Connecting to " + stereoName + "...");
+        status.setText("Getting ready for " + stereoName + "...");
         Thread t = new Thread(() -> run(d), "probe");
         t.setDaemon(true);
         t.start();
     }
 
     private void run(BluetoothDevice d) {
-        BluetoothSocket s = null;
-        for (int attempt = 0; attempt < 2 && s == null && !closing; attempt++) {
-            BluetoothSocket cand = null;
-            try {
-                cand = attempt == 0 ? d.createRfcommSocketToServiceRecord(OPENLINK)
-                        : d.createInsecureRfcommSocketToServiceRecord(OPENLINK);
-                try { adapter.cancelDiscovery(); } catch (RuntimeException ignored) { }   // needs the scan permission; not vital
-                cand.connect();
-                s = cand;
-            } catch (IOException | RuntimeException e) {
-                fail("Connect " + (attempt == 0 ? "secure" : "insecure") + " failed: " + e.getMessage());
-                try { if (cand != null) cand.close(); } catch (IOException ignored) { }
-            }
-        }
+        show("Waiting for the stereo to call this tablet. " + StereoSocket.HOW);
+        note("Listening on the OpenLink serial service for " + stereoName + ".");
+        StereoSocket w = new StereoSocket();
+        waiter = w;
+        BluetoothSocket s = w.await(adapter, d, this::fail);
+        waiter = null;
         if (s == null) {
             running = false;
-            show("Could not connect. Is the KENWOOD Remote app closed and the stereo on?");
+            if (!closing) show("Could not listen for the stereo. Is Bluetooth on?");
             return;
         }
         socket = s;
@@ -233,7 +227,7 @@ public class ProbeActivity extends Activity {
             show("Connected but could not open the link.");
             return;
         }
-        note("Connected on the OpenLink serial service.");
+        note("The stereo called in on the OpenLink serial service.");
         show("Connected. Asking...");
         KenwoodProbe probe = new KenwoodProbe();
         try {
@@ -290,6 +284,8 @@ public class ProbeActivity extends Activity {
     private void show(String s) { main.post(() -> status.setText(s)); }
 
     private void disconnect() {
+        StereoSocket w = waiter;
+        if (w != null) w.cancel();
         closing = true;
         running = false;
         out = null;

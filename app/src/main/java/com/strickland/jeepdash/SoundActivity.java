@@ -90,6 +90,9 @@ public class SoundActivity extends Activity implements ServiceConnection {
     private volatile boolean calibrating, noiseOn, learning, boxTuning;
     private volatile String learnNote = "";
     private String shownProfile = "";                  // the sound profile this screen was built for
+    /** True while this screen is in front: the link service does not swap sound profiles under it. */
+    static volatile boolean showing;
+    private volatile int learnKept, learnMusic, learnNoSpeed;      // why learning did or did not hear anything
     private volatile NoiseProfile profile;             // the cabin noise learned so far, or null
     private final StereoLink stereo = new StereoLink();
     private AudioManager audio;
@@ -140,6 +143,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
     @Override
     protected void onStart() {
         super.onStart();
+        showing = true;
         bound = bindService(new Intent(this, LinkService.class), this, Context.BIND_AUTO_CREATE);
         main.post(refresh);
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startMic();
@@ -148,6 +152,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
 
     @Override
     protected void onStop() {
+        showing = false;
         main.removeCallbacks(refresh);
         if (learning) stopLearning();
         mic = null;
@@ -343,7 +348,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
         picker(cal, "Microphone", new String[]{"Tablet's built-in mic", "USB measurement mic"},
                 new String[]{"builtin", "usb"}, SoundPrefs.MIC_USB, "builtin");
         LinearLayout calRow = row(cal);
-        calRow.addView(button("Calibrate", v -> startCalibrate()));
+        calRow.addView(button("Calibrate", v -> askCalibrate()));
         calRow.addView(button("Load mic cal file", v -> pickCalFile()));
         calRow.addView(button("Clear", v -> {
             prefs.edit().remove(SoundPrefs.MEASURED).apply();
@@ -424,9 +429,10 @@ public class SoundActivity extends Activity implements ServiceConnection {
         lp.addView(button("Open player", v -> startActivity(new Intent(this, PlayerActivity.class))));
 
         LinearLayout hu = card(col, "Head unit", SoundHelp.HEAD_UNIT);
-        hu.addView(label("Kenwood link: mute, volume and preset EQ. Not tried on the stereo yet, so every command and "
-                + "answer goes in the diagnostics log. The first time, send a low volume and check the stereo shows the same "
-                + "number. Source, custom EQ, filters, sub level and fader wait on the probe log.", 12, DIM));
+        hu.addView(label("Kenwood link: mute, volume and preset EQ. Connect makes the tablet wait for the stereo to call "
+                + "in, as the stereo's own app does: force-stop the KENWOOD Remote app first, then set the stereo's "
+                + "REMOTE APP to this tablet. Not proven on the stereo yet, so every command and answer goes in the "
+                + "diagnostics log. Source, custom EQ, filters, sub level and fader wait on the probe log.", 12, DIM));
         LinearLayout huRow = row(hu);
         huRow.addView(button("Connect", v -> connectStereo(false)));
         huRow.addView(button("Disconnect", v -> stereo.close()));
@@ -606,6 +612,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
             return;
         }
         if (profile == null) profile = new NoiseProfile();
+        learnKept = learnMusic = learnNoSpeed = 0;
         learnNote = "starting";
         prefs.edit().putBoolean(SoundPrefs.LEARNING, true).apply();     // has the link service read road speed
         changed();
@@ -621,7 +628,9 @@ public class SoundActivity extends Activity implements ServiceConnection {
         if (p != null && p.total() > 0) e.putString(SoundPrefs.NOISE_PROFILE, p.toText());
         e.apply();
         if (learnButton != null) learnButton.setText("Learn cabin noise");
-        Diag.info(DiagLog.CAL, "Learning cabin noise stopped. Heard: " + (p == null ? "nothing" : p.summary()) + ".");
+        Diag.info(DiagLog.CAL, "Learning cabin noise stopped. Heard: " + (p == null ? "nothing" : p.summary())
+                + ". Moments kept " + learnKept + ", skipped " + learnMusic + " for music playing and " + learnNoSpeed
+                + " for no road speed from the dongle.");
         changed();
     }
 
@@ -645,13 +654,16 @@ public class SoundActivity extends Activity implements ServiceConnection {
         if (p == null || s == null) return;
         if (audio != null && audio.isMusicActive()) {
             learnNote = "waiting, pause the music";
+            learnMusic++;
             return;
         }
         Double mph = s.liveSpeed();
         if (mph == null) {
             learnNote = "waiting for road speed from the dongle";
+            learnNoSpeed++;
             return;
         }
+        learnKept++;
         p.add(mph, bands);
         learnNote = String.format(Locale.US, "listening at %.0f mph", mph);
         if (count % 60 == 0) prefs.edit().putString(SoundPrefs.NOISE_PROFILE, p.toText()).apply();   // every 5 s or so
@@ -1006,6 +1018,27 @@ public class SoundActivity extends Activity implements ServiceConnection {
         }
     }
 
+    private static String routeWords(String route) {
+        return ProfileRoute.BLUETOOTH.equals(route) ? "Bluetooth (the stereo)"
+                : ProfileRoute.SPEAKER.equals(route) ? "the tablet's own speakers" : "something else";
+    }
+
+    /** Calibrate measures into the profile showing: check first that the sound is going where that profile expects. */
+    private void askCalibrate() {
+        String id = SoundProfiles.active(prefs), want = SoundProfiles.route(prefs, id);
+        String now = service == null ? "" : service.soundRoute();
+        if (want.isEmpty() || now.isEmpty() || want.equals(now)) {
+            startCalibrate();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Measure into " + SoundProfiles.name(prefs, id) + "?")
+                .setMessage("This profile is for " + routeWords(want) + ", but right now the tablet's sound is going out by "
+                        + routeWords(now) + ". Calibrate would measure the wrong speakers and replace this profile's "
+                        + "measurement.")
+                .setPositiveButton("Calibrate anyway", (d, w) -> startCalibrate())
+                .setNegativeButton("Cancel", null).show();
+    }
+
     private void startCalibrate() {
         if (mic == null) {
             calState.setText("The microphone is not running, so Calibrate cannot listen.");
@@ -1100,8 +1133,8 @@ public class SoundActivity extends Activity implements ServiceConnection {
         prefs.edit().putString(SoundPrefs.MEASURED, SoundPlan.toText(measured))
                 .putInt(SoundPrefs.VALID_LO, lo).putInt(SoundPrefs.VALID_HI, hi).apply();
         int reach = SoundTune.reach(measured, SoundPrefs.targetBands(prefs))[0];
-        final String done = String.format(Locale.US, "Calibrated with the %s (noise %.0f dB above the cabin). Correcting %d Hz to %s.",
-                trusted ? "measurement mic" : usb ? "USB mic, no cal file loaded" : "built-in mic",
+        final String done = String.format(Locale.US, "Calibrated %s with the %s (noise %.0f dB above the cabin). Correcting %d Hz to %s.",
+                SoundProfiles.name(prefs, SoundProfiles.active(prefs)), trusted ? "measurement mic" : usb ? "USB mic, no cal file loaded" : "built-in mic",
                 over, (int) Math.round(c[lo]), String.format(Locale.US, "%.0f kHz", c[hi] / 1000))
                 + (c[reach] > 150 ? String.format(Locale.US, " These speakers start at about %d Hz, so nothing is boosted "
                 + "below that.", (int) Math.round(c[reach])) : "");

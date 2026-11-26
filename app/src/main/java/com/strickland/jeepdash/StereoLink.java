@@ -18,12 +18,11 @@ import java.util.concurrent.Executors;
 
 /**
  * The Sound hub's live link to the Kenwood KMM-BT728HD, on the same Bluetooth serial service the stereo
- * probe uses. It opens the session, sends the commands {@link KenwoodLink} hands out (mute, volume,
+ * probe uses. It waits for the stereo to call in ({@link StereoSocket}), opens the session, sends the commands {@link KenwoodLink} hands out (mute, volume,
  * preset EQ), acknowledges whatever the stereo says, and puts every frame either way in the diagnostics log.
  * Open only while the Sound hub is showing. The caller holds the Bluetooth permission.
  */
 final class StereoLink {
-    private static final UUID OPENLINK = UUID.fromString("16f92dc0-2eeb-11e6-b342-0002a5d5c51b");
     private static final long ANSWER_MS = 2500;
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -36,6 +35,7 @@ final class StereoLink {
     private volatile BluetoothSocket socket;
     private volatile OutputStream out;
     private volatile boolean closing, connecting;
+    private volatile StereoSocket waiter;          // while waiting for the stereo to call
     private volatile int run;                      // each connect is its own run; an older one stands down
     private volatile String state = "Not connected.", last = "";
 
@@ -51,7 +51,7 @@ final class StereoLink {
         closing = false;
         connecting = true;
         last = "";
-        state = "Connecting to " + name + "...";
+        state = "Waiting for " + name + " to call this tablet. " + StereoSocket.HOW;
         link = new KenwoodLink();
         final int mine = ++run;
         Thread t = new Thread(() -> run(adapter, device, name, mine), "stereo-link");
@@ -62,20 +62,10 @@ final class StereoLink {
     private boolean over(int mine) { return closing || run != mine; }
 
     private void run(BluetoothAdapter adapter, BluetoothDevice device, String name, int mine) {
-        BluetoothSocket s = null;
-        for (int attempt = 0; attempt < 2 && s == null && !over(mine); attempt++) {
-            BluetoothSocket cand = null;
-            try {
-                cand = attempt == 0 ? device.createRfcommSocketToServiceRecord(OPENLINK)
-                        : device.createInsecureRfcommSocketToServiceRecord(OPENLINK);
-                try { adapter.cancelDiscovery(); } catch (RuntimeException ignored) { }   // needs the scan permission; not vital
-                cand.connect();
-                s = cand;
-            } catch (IOException | RuntimeException e) {
-                Diag.warn(DiagLog.BT, "Stereo connect " + (attempt == 0 ? "secure" : "insecure") + " failed: " + e.getMessage());
-                try { if (cand != null) cand.close(); } catch (IOException ignored) { }
-            }
-        }
+        StereoSocket w = new StereoSocket();
+        waiter = w;
+        BluetoothSocket s = w.await(adapter, device, text -> Diag.warn(DiagLog.BT, text));
+        waiter = null;
         InputStream in = null;
         OutputStream o = null;
         if (s != null && !over(mine)) {
@@ -90,15 +80,18 @@ final class StereoLink {
             try { if (s != null) s.close(); } catch (IOException ignored) { }
             if (run != mine) return;                 // a newer connect owns the state now
             connecting = false;
-            if (!closing) state = "Could not connect. Is the KENWOOD Remote app closed and the stereo on?";
+            if (!closing) state = "Could not listen for the stereo. Is Bluetooth on?";
             return;
         }
         socket = s;
         out = o;
         connecting = false;
         state = "Connected to " + name + ".";
-        Diag.info(DiagLog.BT, "Stereo link up: " + name);
-        send(link.open());
+        Diag.info(DiagLog.BT, "Stereo link up: " + name + " called in.");
+        // let the stereo speak first if it means to, then open the session as the stock app does
+        main.postDelayed(() -> io.execute(() -> {
+            if (!over(mine) && connected()) send(link.open());
+        }), 600);
         readLoop(in, mine);
     }
 
@@ -129,7 +122,7 @@ final class StereoLink {
             Diag.warn(DiagLog.BT, stream.strayBytes() + " bytes from the stereo arrived outside any frame.");
         if (over(mine)) return;                      // closed on purpose: close() already tidied up
         drop();
-        state = "The stereo link dropped.";
+        state = "The stereo hung up. Tap Connect to wait for it again.";
     }
 
     private boolean write(byte[] frame) {
@@ -182,6 +175,8 @@ final class StereoLink {
     void close() {
         closing = true;
         connecting = false;
+        StereoSocket w = waiter;
+        if (w != null) w.cancel();
         drop();
         state = "Not connected.";
         last = "";
