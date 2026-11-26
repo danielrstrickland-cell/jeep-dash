@@ -46,6 +46,46 @@ public class SoundPlanTest {
         T.near(0, SoundPlan.gains(s, l).bandDb[band(100)], 1e-9, "parked-only mode leaves it alone while moving");
     }
 
+    private static NoiseProfile learned(double riseDb) {
+        NoiseProfile p = new NoiseProfile();
+        double[] quiet = new double[31], loud = new double[31];
+        java.util.Arrays.fill(quiet, -60);
+        java.util.Arrays.fill(loud, -60 + riseDb);
+        for (int i = 0; i < NoiseProfile.MIN_SAMPLES; i++) { p.add(0, quiet); p.add(45, loud); }
+        return p;
+    }
+
+    public static void learnedCabinNoiseReplacesTheStartingModel() {
+        SoundPlan.Settings s = new SoundPlan.Settings();
+        s.noiseStrength = 1;
+        s.noise = learned(4);
+        SoundPlan.Live l = new SoundPlan.Live();
+        l.mph = 45;
+        SoundPlan.Gains g = SoundPlan.gains(s, l);
+        T.near(2, g.bandDb[band(100)], 1e-6, "4 dB of measured noise earns 2 dB");
+        T.near(2, g.bandDb[band(8000)], 1e-6, "in the treble too, where the starting model gives almost nothing");
+        l.mayAdjust = false;
+        T.near(0, SoundPlan.gains(s, l).bandDb[band(100)], 1e-9, "parked-only mode still leaves it alone while moving");
+    }
+
+    public static void anUnfinishedProfileLeavesTheStartingModelInCharge() {
+        SoundPlan.Settings s = new SoundPlan.Settings();
+        s.noiseStrength = 1;
+        s.noise = new NoiseProfile();
+        SoundPlan.Live l = new SoundPlan.Live();
+        l.mph = 80;
+        T.near(6, SoundPlan.gains(s, l).bandDb[band(100)], 1e-9, "the model's full bass boost at 80 mph");
+    }
+
+    public static void aRevvedEngineStillCountsWithALearnedProfile() {
+        SoundPlan.Settings s = new SoundPlan.Settings();
+        s.noiseStrength = 1;
+        s.noise = learned(4);
+        SoundPlan.Live l = new SoundPlan.Live();
+        l.rpm = 4000;
+        T.near(3, SoundPlan.gains(s, l).bandDb[band(100)], 1e-9, "stopped and revving: the engine's share");
+    }
+
     public static void protectionAppliesEvenWhenHandsOff() {
         SoundPlan.Settings s = new SoundPlan.Settings();
         s.tuneHz = 34;

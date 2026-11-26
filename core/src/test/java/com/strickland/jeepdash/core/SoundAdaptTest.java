@@ -40,6 +40,13 @@ public class SoundAdaptTest {
         T.ok(SoundAdapt.noiseBoostDb(100, 0, 4000, 1) > 0, "a revved engine counts when stopped");
     }
 
+    public static void engineNoiseOnItsOwn() {
+        T.near(3, SoundAdapt.engineBoostDb(100, 4000, 1), 1e-9, "a fully revved engine is worth half the road's most");
+        T.near(0, SoundAdapt.engineBoostDb(100, 1200, 1), 1e-9, "nothing at a normal idle");
+        T.near(SoundAdapt.engineBoostDb(100, 4000, 1), SoundAdapt.noiseBoostDb(100, 0, 4000, 1), 1e-9,
+                "stopped, the whole noise boost is the engine's");
+    }
+
     public static void subTrimFollowsVoltage() {
         T.near(0, SoundAdapt.subTrimDb(14.1), 1e-9, "healthy rail, nothing off");
         T.near(0, SoundAdapt.subTrimDb(0), 1e-9, "unknown voltage, nothing off");

@@ -5,8 +5,7 @@ package com.strickland.jeepdash.core;
  * values the dash already reads (speed, rpm, battery volts), giving decibel offsets for the tuner to apply.
  *
  * The noise figures here are a starting model — road noise rising with speed, engine noise with rpm, both
- * heaviest in the bass — and are meant to be replaced by the cabin's own measured noise once Calibrate has
- * recorded it. Nothing here touches the stereo or the audio; it only answers "how many dB, at this pitch".
+ * heaviest in the bass — used until the cabin's own noise has been measured into a {@link NoiseProfile}. Nothing here touches the stereo or the audio; it only answers "how many dB, at this pitch".
  */
 public final class SoundAdapt {
 
@@ -61,14 +60,25 @@ public final class SoundAdapt {
         return 1 - 0.85 * t;
     }
 
+    /** How loud the engine alone is taken to be, 0..0.5: nothing under 1500 rpm, its most by 4000. */
+    private static double engineLevel(double rpm) { return 0.5 * clamp((rpm - 1500) / 2500.0, 0, 1); }
+
+    /**
+     * The engine's own share of noise compensation, in dB at a pitch: what a revved engine earns with the
+     * Jeep standing still. Kept apart so it still applies once road noise comes from a measured
+     * {@link NoiseProfile}, which is learned at ordinary driving revs.
+     */
+    public static double engineBoostDb(double hz, double rpm, double strength) {
+        return clamp(clamp(strength, 0, 1) * MAX_BOOST_DB * maskWeight(hz) * engineLevel(rpm), 0, MAX_BOOST_DB);
+    }
+
     /**
      * Noise compensation: the boost in dB at a pitch for this speed and rpm. Strength is the owner's slider,
      * 0..1. Nothing under 20 mph and 1500 rpm; full road effect by 80 mph; never more than 6 dB.
      */
     public static double noiseBoostDb(double hz, double mph, double rpm, double strength) {
         double road = clamp((mph - 20) / 60.0, 0, 1);
-        double engine = 0.5 * clamp((rpm - 1500) / 2500.0, 0, 1);
-        double level = Math.max(road, engine);
+        double level = Math.max(road, engineLevel(rpm));
         return clamp(clamp(strength, 0, 1) * MAX_BOOST_DB * maskWeight(hz) * level, 0, MAX_BOOST_DB);
     }
 

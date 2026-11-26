@@ -15,6 +15,7 @@ public final class SoundPlan {
         public boolean sceneEq = true, noiseComp = true, voltSafeSub = true, portGuard = true, bassDrop;
         public double noiseStrength = 0.6;      // 0..1
         public double tuneHz;                   // the ported box's tuning; 0 = not known
+        public NoiseProfile noise;              // the cabin's measured noise; null or not ready = starting model
     }
 
     /** What the Jeep is doing right now; zeros when the dongle is not linked. */
@@ -45,15 +46,17 @@ public final class SoundPlan {
         double[] out = new double[c.length];
         if (!s.enabled) return new Gains(out, 0);
         double top = 0;
+        boolean compensate = s.noiseComp && l.mayAdjust;
+        double[] learned = compensate && s.noise != null && s.noise.ready()
+                ? s.noise.boostBands(l.mph, s.noiseStrength) : null;
         for (int i = 0; i < c.length; i++) {
             double hz = c[i], g = 0;
             if (s.correction != null && i < s.correction.length) g += s.correction[i];
             if (s.bassDrop) g += bassDropDb(hz);
             if (s.portGuard) g += Math.max(MIN_DB, SoundAdapt.portGuardDb(hz, s.tuneHz));   // protection: always on
-            if (l.mayAdjust) {
-                if (s.sceneEq) g += SoundAdapt.sceneOffsetDb(l.scene, hz);
-                if (s.noiseComp) g += SoundAdapt.noiseBoostDb(hz, l.mph, l.rpm, s.noiseStrength);
-            }
+            if (l.mayAdjust && s.sceneEq) g += SoundAdapt.sceneOffsetDb(l.scene, hz);
+            if (learned != null) g += Math.max(learned[i], SoundAdapt.engineBoostDb(hz, l.rpm, s.noiseStrength));
+            else if (compensate) g += SoundAdapt.noiseBoostDb(hz, l.mph, l.rpm, s.noiseStrength);
             if (s.voltSafeSub && hz <= SUB_TOP_HZ) g += SoundAdapt.subTrimDb(l.volts);     // protection: always on
             out[i] = SoundAdapt.clamp(g, MIN_DB, MAX_DB);
             top = Math.max(top, out[i]);
