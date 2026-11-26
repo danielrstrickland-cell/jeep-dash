@@ -28,10 +28,8 @@ public class KenwoodFrameTest {
         byte[] cmd = {0x10, 0x20, 0x30, 0x40, 0x50};
         byte[] payload = {0x01, 0x7E, 0x33, 0x7C};     // payload containing bytes that must be stuffed
         byte[] wire = KenwoodFrame.frame(cmd, KenwoodFrame.CMD, payload);
-        T.eq(0x7E, wire[2] & 0xFF, "starts with the 0x7E flag after the length");
+        T.eq(0x7E, wire[0] & 0xFF, "starts with the 0x7E flag");
         T.eq(0x7C, wire[wire.length - 1] & 0xFF, "ends with 0x7C");
-        int bodyLen = ((wire[0] & 0xFF) << 8) | (wire[1] & 0xFF);
-        T.eq(wire.length - 2, bodyLen, "length field counts the body");
 
         KenwoodFrame.Parsed p = KenwoodFrame.parse(wire);
         T.ok(p != null, "a well-formed frame parses");
@@ -42,9 +40,9 @@ public class KenwoodFrameTest {
 
     public static void parseRejectsCorruptedFrame() {
         byte[] wire = KenwoodFrame.frame(new byte[]{1, 2, 3, 4, 5}, KenwoodFrame.CMD, new byte[]{9, 9, 9});
-        wire[5] ^= 0x7F;                                // flip a payload bit, CRC should fail
+        wire[13] ^= 0x01;                               // flip a payload bit, CRC should fail
         T.ok(KenwoodFrame.parse(wire) == null, "bad CRC is rejected");
-        T.ok(KenwoodFrame.parse(new byte[]{0, 2, 0x7E}) == null, "too short is rejected");
+        T.ok(KenwoodFrame.parse(new byte[]{0x7E, 0x7C}) == null, "too short is rejected");
     }
 
     public static void emptyPayloadFrames() {

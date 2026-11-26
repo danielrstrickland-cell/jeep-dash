@@ -9,9 +9,11 @@ import java.io.ByteArrayOutputStream;
  * tested; the service layer owns the RFCOMM socket and hands whole frames to and from here.
  *
  * A message is: {@code 0x0B 0x01  cmdId[5]  ptype 0x01  lenHi lenLo  payload[len]  crcHi crcLo}, with a
- * CRC-16/ARC (poly 0xA001, init 0) over everything up to but not including the CRC. The message is then
- * byte-stuffed — 0x7E, 0x7C and 0x7D become 0x7D followed by the byte XOR 0x20 — and wrapped as
- * {@code lenHi lenLo  0x7E  stuffed…  0x7C}, where the length counts the 0x7E, the stuffed body and the 0x7C.
+ * CRC-16/ARC (poly 0xA001, init 0) over everything up to but not including the CRC. The five id bytes are
+ * {@code 0xA4 (OpenLink core)  addr  category  command  sequence}; an ACK echoes the five it answers. The
+ * message is then byte-stuffed — 0x7E, 0x7C and 0x7D become 0x7D followed by the byte XOR 0x20 — and sent
+ * as {@code 0x7E  stuffed…  0x7C}. (The stock app keeps a two-byte length in front of that in its own buffer,
+ * but never writes it to the socket.)
  */
 public final class KenwoodFrame {
     public static final int CMD = 0, ACK = 1;      // ptype: a command to the head unit, or an acknowledgement
@@ -56,12 +58,9 @@ public final class KenwoodFrame {
         msg[plen + 12] = (byte) (crc & 0xFF);
 
         byte[] stuffed = stuff(msg);
-        int bodyLen = stuffed.length + 2;              // 0x7E + stuffed + 0x7C
-        byte[] out = new byte[bodyLen + 2];
-        out[0] = (byte) ((bodyLen >> 8) & 0xFF);
-        out[1] = (byte) (bodyLen & 0xFF);
-        out[2] = (byte) FLAG;
-        System.arraycopy(stuffed, 0, out, 3, stuffed.length);
+        byte[] out = new byte[stuffed.length + 2];     // 0x7E + stuffed + 0x7C
+        out[0] = (byte) FLAG;
+        System.arraycopy(stuffed, 0, out, 1, stuffed.length);
         out[out.length - 1] = (byte) END;
         return out;
     }
@@ -78,11 +77,9 @@ public final class KenwoodFrame {
 
     /** Unwraps and verifies a whole frame, or returns null if it is malformed or the CRC does not match. */
     public static Parsed parse(byte[] in) {
-        if (in == null || in.length < 5 || (in[2] & 0xFF) != FLAG || (in[in.length - 1] & 0xFF) != END)
+        if (in == null || in.length < 3 || (in[0] & 0xFF) != FLAG || (in[in.length - 1] & 0xFF) != END)
             return null;
-        int bodyLen = ((in[0] & 0xFF) << 8) | (in[1] & 0xFF);
-        if (bodyLen != in.length - 2) return null;
-        byte[] msg = unstuff(in, 3, in.length - 1);    // between the 0x7E and the 0x7C
+        byte[] msg = unstuff(in, 1, in.length - 1);    // between the 0x7E and the 0x7C
         if (msg == null || msg.length < 13) return null;
         int plen = ((msg[9] & 0xFF) << 8) | (msg[10] & 0xFF);
         if (msg.length != plen + 13) return null;

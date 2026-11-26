@@ -21,6 +21,7 @@ public final class TestMain {
             CrashReportTest.class,
             DiagLogTest.class,
             KenwoodFrameTest.class,
+            KenwoodCommandsTest.class,
             TombstoneTest.class,
             SpectrumTest.class,
             VizTuneTest.class,
