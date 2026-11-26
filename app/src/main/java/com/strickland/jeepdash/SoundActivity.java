@@ -48,6 +48,7 @@ import com.strickland.jeepdash.core.BoxTune;
 import com.strickland.jeepdash.core.DiagLog;
 import com.strickland.jeepdash.core.KenwoodLink;
 import com.strickland.jeepdash.core.NoiseProfile;
+import com.strickland.jeepdash.core.ProfileRoute;
 import com.strickland.jeepdash.core.SoundAdapt;
 import com.strickland.jeepdash.core.SoundHelp;
 import com.strickland.jeepdash.core.SoundPlan;
@@ -62,6 +63,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Random;
+import java.util.function.Consumer;
 
 /**
  * The Sound hub: one clean screen for everything about how the system sounds. It switches the tablet DSP
@@ -87,6 +89,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
     private volatile Thread mic;
     private volatile boolean calibrating, noiseOn, learning, boxTuning;
     private volatile String learnNote = "";
+    private String shownProfile = "";                  // the sound profile this screen was built for
     private volatile NoiseProfile profile;             // the cabin noise learned so far, or null
     private final StereoLink stereo = new StereoLink();
     private AudioManager audio;
@@ -101,6 +104,10 @@ public class SoundActivity extends Activity implements ServiceConnection {
 
     private final Runnable refresh = new Runnable() {
         @Override public void run() {
+            if (!SoundProfiles.active(prefs).equals(shownProfile)) {     // it switched by itself: show the new one
+                profile = SoundPrefs.noise(prefs);
+                buildScreen();
+            }
             SoundEngine e = service == null ? null : service.sound();
             graph.set(liveBands, SoundPrefs.targetBands(prefs), e == null ? null : e.applied());
             dspState.setText("Tablet DSP: " + (e == null ? "starting" : e.state()));
@@ -124,6 +131,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
         density = getResources().getDisplayMetrics().density;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         audio = getSystemService(AudioManager.class);
+        SoundProfiles.ensure(prefs);
         profile = SoundPrefs.noise(prefs);
         prefs.edit().putBoolean(SoundPrefs.LEARNING, false).apply();    // learning only runs with this screen open
         buildScreen();
@@ -310,12 +318,15 @@ public class SoundActivity extends Activity implements ServiceConnection {
         col.addView(label("Tuned for: Type R components, JL tweeters, Skar EVL-15 ported, PDR-V75 / SR 1Dk", 12, DIM));
         col.addView(label("Signal: tablet DSP  >  head unit  >  amps  >  speakers", 12, DIM));
 
+        profileCard(col);
+
         LinearLayout dsp = card(col, "Tablet DSP", SoundHelp.DSP);
         toggle(dsp, "On (EQ and limiter on everything the tablet plays)", SoundPrefs.ENABLED, false);
         dspState = label("", 12, GOOD);
         dsp.addView(dspState);
         picker(dsp, "Listening to", new String[]{"Music", "Movie or TV show (voices lifted, sound in step with the picture)"},
                 new String[]{"MUSIC", "MOVIE"}, SoundPrefs.MODE, "MUSIC");
+        toggle(dsp, "Even out loud and quiet (Movie or TV only)", SoundPrefs.LEVEL, false);
 
         LinearLayout tune = card(col, "EQ and live RTA", SoundHelp.RTA);
         tune.addView(label("Bars: what the mic hears.  Yellow: target.  Green: gains applied.", 12, DIM));
@@ -342,6 +353,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
         calState = label(prefs.getString(SoundPrefs.MEASURED, null) == null ? "Not calibrated yet."
                 : "Calibrated. Correction follows the target above.", 12, GOOD);
         cal.addView(calState);
+        slider(cal, "Correction strength", SoundPrefs.CORR, 0, 100, 100, " %");
 
         LinearLayout ad = card(col, "Adaptive engine", SoundHelp.ADAPTIVE);
         picker(ad, "While driving", new String[]{"Fully automatic", "Automatic, with a note on each change", "Parked only"},
@@ -471,6 +483,98 @@ public class SoundActivity extends Activity implements ServiceConnection {
                 })
                 .setNeutralButton("Clear", (d, w) -> Diag.LOG.clear())
                 .setNegativeButton("Close", null).show();
+    }
+
+    // ---------------- sound profiles ----------------
+
+    private void switchProfile(String id) {
+        if (calibrating || boxTuning) {
+            Toast.makeText(this, "Wait for the measurement to finish", Toast.LENGTH_SHORT).show();
+            buildScreen();
+            return;
+        }
+        if (learning) stopLearning();
+        SoundProfiles.switchTo(prefs, id);
+        profile = SoundPrefs.noise(prefs);
+        Diag.info(DiagLog.DSP, "Sound profile: " + SoundProfiles.name(prefs, SoundProfiles.active(prefs)) + ".");
+        buildScreen();
+        changed();
+    }
+
+    private void askProfileName(String title, String now, final Consumer<String> then) {
+        final EditText name = new EditText(this);
+        name.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        name.setHint("Jeep, Room, Headphones...");
+        name.setText(now);
+        new AlertDialog.Builder(this).setTitle(title).setView(name)
+                .setPositiveButton("OK", (d, w) -> {
+                    String text = name.getText().toString().trim();
+                    if (text.isEmpty()) Toast.makeText(this, "It needs a name", Toast.LENGTH_SHORT).show();
+                    else then.accept(text);
+                })
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private void askDeleteProfile(final String id) {
+        if (SoundProfiles.ids(prefs).size() < 2) {
+            Toast.makeText(this, "This is the only profile, so it stays", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Delete " + SoundProfiles.name(prefs, id) + "?")
+                .setMessage("Its Calibrate measurement and settings go with it.")
+                .setPositiveButton("Delete", (d, w) -> {
+                    if (calibrating || boxTuning) return;
+                    if (learning) stopLearning();
+                    SoundProfiles.delete(prefs, id);
+                    profile = SoundPrefs.noise(prefs);
+                    buildScreen();
+                    changed();
+                })
+                .setNegativeButton("Keep", null).show();
+    }
+
+    private Spinner chooser(String[] shown, int selected, final Consumer<Integer> picked) {
+        Spinner sp = new Spinner(this);
+        ArrayAdapter<String> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, shown);
+        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        sp.setAdapter(a);
+        sp.setSelection(Math.max(0, selected));
+        sp.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) { picked.accept(pos); }
+            @Override public void onNothingSelected(AdapterView<?> p) { }
+        });
+        return sp;
+    }
+
+    /** The profile card: which place this is, making and removing profiles, and when this one comes on by itself. */
+    private void profileCard(LinearLayout col) {
+        LinearLayout pf = card(col, "Sound profile", SoundHelp.PROFILES);
+        pf.addView(label("One for each place you listen. Each keeps its own Calibrate measurement, target and adaptive "
+                + "settings, and saves as you go.", 12, DIM));
+        final List<String> ids = SoundProfiles.ids(prefs);
+        final String active = SoundProfiles.active(prefs);
+        shownProfile = active;
+        String[] names = new String[ids.size()];
+        for (int i = 0; i < names.length; i++) names[i] = SoundProfiles.name(prefs, ids.get(i));
+        pf.addView(chooser(names, ids.indexOf(active), pos -> {
+            if (!ids.get(pos).equals(SoundProfiles.active(prefs))) switchProfile(ids.get(pos));
+        }));
+        LinearLayout pfRow = row(pf);
+        pfRow.addView(button("New", v -> askProfileName("New sound profile", "",
+                name -> switchProfile(SoundProfiles.create(prefs, name)))));
+        pfRow.addView(button("Rename", v -> askProfileName("Rename this profile", SoundProfiles.name(prefs, active), name -> {
+            SoundProfiles.rename(prefs, active, name);
+            buildScreen();
+        })));
+        pfRow.addView(button("Delete", v -> askDeleteProfile(active)));
+        pf.addView(label("Come on by itself", 13, DIM));
+        final String[] routes = {ProfileRoute.NONE, ProfileRoute.SPEAKER, ProfileRoute.BLUETOOTH};
+        int at = 0;
+        for (int i = 0; i < routes.length; i++) if (routes[i].equals(SoundProfiles.route(prefs, active))) at = i;
+        pf.addView(chooser(new String[]{"Never (pick it by hand)", "When the tablet plays through its own speakers",
+                "When the tablet plays through Bluetooth (the stereo)"}, at, pos -> {
+            if (!routes[pos].equals(SoundProfiles.route(prefs, active))) SoundProfiles.setRoute(prefs, active, routes[pos]);
+        }));
     }
 
     // ---------------- cabin noise: learned on a drive ----------------
@@ -998,7 +1102,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
         int reach = SoundTune.reach(measured, SoundPrefs.targetBands(prefs))[0];
         final String done = String.format(Locale.US, "Calibrated with the %s (noise %.0f dB above the cabin). Correcting %d Hz to %s.",
                 trusted ? "measurement mic" : usb ? "USB mic, no cal file loaded" : "built-in mic",
-                over, (int) Math.round(c[lo]), hiHz >= 16000 ? "16 kHz" : "12.5 kHz")
+                over, (int) Math.round(c[lo]), String.format(Locale.US, "%.0f kHz", c[hi] / 1000))
                 + (c[reach] > 150 ? String.format(Locale.US, " These speakers start at about %d Hz, so nothing is boosted "
                 + "below that.", (int) Math.round(c[reach])) : "");
         Diag.info(DiagLog.CAL, done);

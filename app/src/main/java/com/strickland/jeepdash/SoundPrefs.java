@@ -19,6 +19,7 @@ final class SoundPrefs {
             MEASURED = "measured", VALID_LO = "valid_lo", VALID_HI = "valid_hi",
             MIC_USB = "mic_usb", MIC_CAL = "mic_cal", PEAK_BEST = "peak_best",
             NOISE_PROFILE = "noise_profile", LEARNING = "noise_learning", MODE = "listen_mode",
+            CORR = "correction_strength", LEVEL = "movie_level", LAST_ROUTE = "profile_last_route",
             STEREO_ADDR = "stereo_addr", STEREO_NAME = "stereo_name",
             PLAYER_TREE = "player_tree", PLAYER_FILTER = "player_filter";
     /** The settings a scene snapshot carries. */
@@ -58,7 +59,7 @@ final class SoundPrefs {
         double[] c = SoundTune.correction(measured, targetBands(p), MAX_BOOST, MAX_CUT);
         int lo = p.getInt(VALID_LO, 0), hi = p.getInt(VALID_HI, c.length - 1);
         for (int i = 0; i < c.length; i++) if (i < lo || i > hi) c[i] = 0;
-        return c;
+        return SoundTune.scaled(c, p.getInt(CORR, 100) / 100.0);
     }
 
     /** The cabin's measured noise, or null before any has been learned. */
@@ -77,6 +78,7 @@ final class SoundPrefs {
         s.bassDrop = p.getBoolean(DROP, false);
         s.noise = noise(p);
         s.movie = "MOVIE".equals(p.getString(MODE, "MUSIC"));
+        s.level = p.getBoolean(LEVEL, false);
         return s;
     }
 

@@ -33,6 +33,8 @@ import com.strickland.jeepdash.core.DongleSession;
 import com.strickland.jeepdash.core.DriveLogWriter;
 import com.strickland.jeepdash.core.FuelUse;
 import com.strickland.jeepdash.core.Gears;
+import com.strickland.jeepdash.core.ProfileRoute;
+import com.strickland.jeepdash.core.DiagLog;
 import com.strickland.jeepdash.core.KeepAlive;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.Motion;
@@ -650,6 +652,12 @@ public class LinkService extends Service {
         gears.restore(savedGearing);                // what earlier drives taught it about this car
         speedCorrection = SpeedCorrection.clamp(dash.getFloat(correctionKey(), 0));
         values.setScale("speed", SpeedCorrection.factor(speedCorrection));
+        try {
+            android.media.AudioManager am = getSystemService(android.media.AudioManager.class);
+            if (am != null) am.registerAudioDeviceCallback(routeWatcher, main);   // also reports what is there now
+        } catch (RuntimeException e) {
+            note("cannot watch where the sound goes: " + e);
+        }
         ticker = Executors.newSingleThreadScheduledExecutor();
         ticker.scheduleWithFixedDelay(this::safeTick, 100, 100, TimeUnit.MILLISECONDS);
     }
@@ -686,6 +694,10 @@ public class LinkService extends Service {
 
     @Override
     public void onDestroy() {
+        try {
+            android.media.AudioManager am = getSystemService(android.media.AudioManager.class);
+            if (am != null) am.unregisterAudioDeviceCallback(routeWatcher);
+        } catch (RuntimeException ignored) { }
         LosslessPlayer lp = player;
         if (lp != null) lp.release();
         sound.release();
@@ -706,6 +718,51 @@ public class LinkService extends Service {
             ticker.shutdown();
         }
         super.onDestroy();
+    }
+
+    // ---------------- sound profiles follow where the sound goes ----------------
+
+    private volatile String soundRoute = "";               // the way out right now: ProfileRoute's speaker, bluetooth or other
+
+    private final android.media.AudioDeviceCallback routeWatcher = new android.media.AudioDeviceCallback() {
+        @Override public void onAudioDevicesAdded(android.media.AudioDeviceInfo[] added) { readSoundRoute(); }
+        @Override public void onAudioDevicesRemoved(android.media.AudioDeviceInfo[] removed) { readSoundRoute(); }
+    };
+
+    private void readSoundRoute() {
+        android.media.AudioManager am = getSystemService(android.media.AudioManager.class);
+        if (am == null) return;
+        String route = ProfileRoute.SPEAKER;
+        for (android.media.AudioDeviceInfo d : am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)) {
+            int t = d.getType();
+            if (t == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) {
+                route = ProfileRoute.BLUETOOTH;
+                break;
+            }
+            if (t == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES || t == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET
+                    || t == android.media.AudioDeviceInfo.TYPE_USB_HEADSET) route = ProfileRoute.OTHER;
+        }
+        soundRoute = route;
+    }
+
+    /**
+     * Ticker thread: when the way out has changed since it was last acted on (tablet speakers to the
+     * stereo's Bluetooth, or back), the profile set for the new one comes on. Only a change does this, so a
+     * profile picked by hand stays until then; and never in the middle of a measurement.
+     */
+    private void followSoundRoute() {
+        final String route = soundRoute;
+        final SharedPreferences p = SoundPrefs.of(this);
+        if (route.isEmpty() || route.equals(p.getString(SoundPrefs.LAST_ROUTE, ""))) return;
+        if (p.getBoolean(SoundPrefs.LEARNING, false) || "measuring".equals(sound.state())) return;
+        main.post(() -> {
+            if (route.equals(p.getString(SoundPrefs.LAST_ROUTE, ""))) return;
+            p.edit().putString(SoundPrefs.LAST_ROUTE, route).apply();
+            if (!SoundProfiles.followRoute(p, route)) return;
+            Diag.info(DiagLog.DSP, "Sound profile switched to " + SoundProfiles.name(p, SoundProfiles.active(p))
+                    + ": the sound now goes out by " + route + ".");
+            soundChanged();
+        });
     }
 
     /** True while the sound side should outlive the dash: the Tablet DSP is switched on, or the player is playing. */
@@ -1232,7 +1289,10 @@ public class LinkService extends Service {
         workOutTiming();
         sampleMisfire();
         if (++tickCount % 5 == 0) followSpeed();
-        if (tickCount % 5 == 0 && !Catalog.porsche()) sound.tick(this, values, now());
+        if (tickCount % 5 == 0 && !Catalog.porsche()) {
+            followSoundRoute();
+            sound.tick(this, values, now());
+        }
         if (tickCount % 10 != 0) return;
 
         // once a second

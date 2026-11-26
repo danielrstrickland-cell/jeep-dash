@@ -94,6 +94,16 @@ public class SoundTuneTest {
         T.ok(c[26] < -3, "the Harman target still eases the top down: " + c[26]);
     }
 
+    public static void correctionStrengthScalesTheWholeCorrection() {
+        double[] c = {6, -12, 0, 3};
+        double[] half = SoundTune.scaled(c, 0.5);
+        T.near(3, half[0], 1e-9, "half the boost");
+        T.near(-6, half[1], 1e-9, "half the cut");
+        T.near(0, SoundTune.scaled(c, 0)[1], 1e-9, "none at 0");
+        T.near(-12, SoundTune.scaled(c, 4)[1], 1e-9, "never more than the full correction");
+        T.ok(SoundTune.scaled(null, 0.5) == null, "no correction stays no correction");
+    }
+
     public static void aFullRangeSystemWithHeavyBassIsStillLevelledOnItsMids() {
         double[] target = SoundTune.targetBands(SoundTune.Target.FLAT);
         double[] m = new double[31];

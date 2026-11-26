@@ -30,6 +30,8 @@ public final class TestMain {
             DspBandsTest.class,
             SoundHelpTest.class,
             KeepAliveTest.class,
+            SettingsPackTest.class,
+            ProfileRouteTest.class,
             FftTest.class,
             BoxTuneTest.class,
             NoiseProfileTest.class,

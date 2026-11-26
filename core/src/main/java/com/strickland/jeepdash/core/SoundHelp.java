@@ -6,14 +6,15 @@ package com.strickland.jeepdash.core;
  * be, so the words cannot drift from what the app does.
  */
 public final class SoundHelp {
-    public static final String DSP = "dsp", RTA = "rta", CALIBRATE = "calibrate", ADAPTIVE = "adaptive",
+    public static final String PROFILES = "profiles", DSP = "dsp", RTA = "rta", CALIBRATE = "calibrate", ADAPTIVE = "adaptive",
             SCENES = "scenes", PLAYER = "player", HEAD_UNIT = "head_unit", DIAGNOSTICS = "diagnostics";
-    public static final String[] TOPICS = {DSP, RTA, CALIBRATE, ADAPTIVE, SCENES, PLAYER, HEAD_UNIT, DIAGNOSTICS};
+    public static final String[] TOPICS = {PROFILES, DSP, RTA, CALIBRATE, ADAPTIVE, SCENES, PLAYER, HEAD_UNIT, DIAGNOSTICS};
 
     private SoundHelp() { }
 
     public static String title(String topic) {
         switch (topic) {
+            case PROFILES: return "Sound profile";
             case DSP: return "Tablet DSP";
             case RTA: return "EQ and live RTA";
             case CALIBRATE: return "Calibrate and room correction";
@@ -29,6 +30,25 @@ public final class SoundHelp {
     public static String text(String topic) {
         int boost = (int) SoundAdapt.MAX_BOOST_DB;
         switch (topic) {
+            case PROFILES: return "WHAT IT IS\n"
+                    + "A profile is one place you listen: the Jeep, a room with the tablet's own speakers, a pair "
+                    + "of headphones. Pick one from the list and the whole screen becomes that place's settings.\n\n"
+                    + "WHAT A PROFILE KEEPS\n"
+                    + "Its own Calibrate measurement, target curve and custom sliders, correction strength, the "
+                    + "adaptive switches and noise strength, the While driving choice, Bass drop, the box tuning and "
+                    + "the learned cabin noise.\n\n"
+                    + "SAVING\n"
+                    + "There is no save button. Whatever you change is kept in the profile you are on, and it is "
+                    + "there when you come back to it. New makes a fresh profile with no measurement: run Calibrate "
+                    + "in that place. Rename and Delete act on the profile you are on.\n\n"
+                    + "SWITCHING BY ITSELF\n"
+                    + "A profile can be set to come on when the tablet plays through its own speakers, or through "
+                    + "Bluetooth. Then connecting to the stereo brings the Jeep profile up and disconnecting brings "
+                    + "the room one back, with no need to open this screen. Any Bluetooth speaker or headphones "
+                    + "count as Bluetooth, so pick by hand for those.\n\n"
+                    + "THE SAME IN EVERY PROFILE\n"
+                    + "The Tablet DSP switch, Music or Movie mode, the microphone choice and its calibration file, "
+                    + "the three scenes and the stereo link.";
             case DSP: return "WHAT IT DOES\n"
                     + "An equaliser on everything the tablet plays (Spotify, YouTube, the lossless player) before the "
                     + "sound goes to the stereo or the tablet's own speakers. Everything else on this screen works "
@@ -49,7 +69,10 @@ public final class SoundHelp {
                     + "which music does not mind but video shows as lips slightly out of step.\n\n"
                     + "Movie or TV show: lifts voices by " + (int) SoundAdapt.VOICE_DB + " dB around 2.5 kHz so speech "
                     + "is easier to follow, and works in short blocks so the sound is only about 20 ms behind the "
-                    + "picture. Bass adjustment is coarser in this mode.";
+                    + "picture. Bass adjustment is coarser in this mode.\n\n"
+                    + "Even out loud and quiet (Movie or TV only): turns loud moments down and brings everything up "
+                    + "by " + (int) SoundAdapt.LEVEL_MAKEUP_DB + " dB, so speech is easier to hear without the "
+                    + "explosions being too loud. It is a compressor: leave it off for music.";
             case RTA: return "WHAT IT SHOWS\n"
                     + "Blue bars: what the microphone hears right now, in 31 bands, lined up on its own mid-range "
                     + "level.\n"
@@ -72,20 +95,22 @@ public final class SoundHelp {
                     + "the mic hears in 31 bands. It works out which bands the speakers actually play, sets the level "
                     + "from the mids inside that range, and then boosts by at most 6 dB and cuts by at most 12 dB a "
                     + "band. Nothing is boosted where the speakers do not play.\n\n"
+                    + "Correction strength sets how much of that correction is used: 100 % is all of it, 50 % half, "
+                    + "0 % none. Turn it down if the corrected sound is too different from what you like.\n\n"
                     + "HOW TO USE IT\n"
                     + "Engine off or idling, windows up, tablet where your head is, a normal listening volume. If it "
                     + "says too quiet or overloaded, change the volume and run it again.\n\n"
                     + "MICROPHONE\n"
-                    + "Built-in mic: trusted from 50 Hz to 12.5 kHz, so only that range is corrected.\n"
+                    + "Built-in mic: trusted from 50 Hz to 10 kHz, so only that range is corrected.\n"
                     + "USB measurement mic: with its calibration file loaded (Load mic cal file, the text file that "
                     + "came with the mic), 25 Hz to 16 kHz.\n\n"
                     + "GOOD TO KNOW\n"
-                    + "There is one stored measurement. A new Calibrate replaces it, and scenes do not keep it, so "
-                    + "measure in the place you listen. Clear removes it.";
+                    + "Each sound profile has its own measurement. A new Calibrate replaces the one in the profile "
+                    + "you are on, so check the profile at the top before you measure. Clear removes it.";
             case ADAPTIVE: return "WHAT IT DOES\n"
                     + "Changes the sound by itself as the Jeep's state changes, using road speed, rpm and battery "
-                    + "voltage from the dongle. Without the dongle linked it sees 0 mph and treats the Jeep as "
-                    + "standing still.\n\n"
+                    + "voltage from the dongle. Without a speed reading from the dongle, scene EQ and noise "
+                    + "compensation rest.\n\n"
                     + "WHILE DRIVING\n"
                     + "Fully automatic: adjusts silently.\n"
                     + "Automatic, with a note: shows a short message when the scene changes.\n"
@@ -120,8 +145,8 @@ public final class SoundHelp {
                     + "DSP on or off, Music or Movie mode, the target curve and custom sliders, the adaptive switches "
                     + "and noise strength, and Bass drop.\n\n"
                     + "WHAT IT DOES NOT KEEP\n"
-                    + "The Calibrate measurement, the box tuning, the learned cabin noise and the While driving "
-                    + "choice. Those are the same in every scene.\n\n"
+                    + "The Calibrate measurement, correction strength, the box tuning, the learned cabin noise and "
+                    + "the While driving choice. Those belong to the sound profile.\n\n"
                     + "BASS DROP\n"
                     + "A show-off lift: 6 dB more under 80 Hz, fading out by 160 Hz.\n\n"
                     + "LOUD-O-METER\n"

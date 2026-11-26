@@ -119,5 +119,19 @@ public final class SoundAdapt {
         return VOICE_DB * Math.exp(-octaves * octaves / (2 * VOICE_OCTAVES * VOICE_OCTAVES));
     }
 
+    /**
+     * Movie and TV levelling ("night mode"): above the threshold, loud sound is squeezed by the ratio, and
+     * everything then gets the make-up gain, so speech comes up and explosions come down. Levels are the
+     * averaged level of a moment of sound, in dB below full scale, as Android's effect measures it.
+     */
+    public static final float LEVEL_THRESHOLD_DB = -30, LEVEL_RATIO = 2.5f, LEVEL_MAKEUP_DB = 4,
+            LEVEL_ATTACK_MS = 10, LEVEL_RELEASE_MS = 600;
+
+    /** Where a level ends up with levelling on. */
+    public static double levelledDb(double inDb) {
+        double over = Math.max(0, inDb - LEVEL_THRESHOLD_DB);
+        return inDb - over * (1 - 1.0 / LEVEL_RATIO) + LEVEL_MAKEUP_DB;
+    }
+
     static double clamp(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
 }

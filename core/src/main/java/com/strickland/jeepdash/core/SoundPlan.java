@@ -16,6 +16,7 @@ public final class SoundPlan {
         public double noiseStrength = 0.6;      // 0..1
         public double tuneHz;                   // the ported box's tuning; 0 = not known
         public boolean movie;                   // a movie or a show is on: lift voices
+        public boolean level;                   // and, in that mode, even out loud and quiet (the audio code's job)
         public NoiseProfile noise;              // the cabin's measured noise; null or not ready = starting model
     }
 

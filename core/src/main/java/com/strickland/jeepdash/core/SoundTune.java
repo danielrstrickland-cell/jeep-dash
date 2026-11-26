@@ -165,6 +165,15 @@ public final class SoundTune {
         return out;
     }
 
+    /** A correction at a strength of 0 to 1: the owner's "how much of it" slider. Null stays null. */
+    public static double[] scaled(double[] correctionDb, double strength) {
+        if (correctionDb == null) return null;
+        double k = SoundAdapt.clamp(strength, 0, 1);
+        double[] out = new double[correctionDb.length];
+        for (int i = 0; i < out.length; i++) out[i] = correctionDb[i] * k;
+        return out;
+    }
+
     /** A band curve read at any pitch: straight lines between band centres on a log-pitch scale, flat past the ends. */
     public static double at(double[] bandDb, double hz) {
         double[] c = bandCentres();

@@ -36,7 +36,7 @@ final class SoundEngine {
     private double sentHeadroom;
     private double rate = 48000;                          // the output mix's sample rate, read when the effect opens
     private float frameMs = DspBands.FRAME_MS;            // the block length the open effect was asked for
-    private boolean refused;
+    private boolean refused, levelling;
     private SoundAdapt.Scene lastScene;
     private volatile boolean bypass, convolving;
     private volatile String state = "off";
@@ -89,10 +89,12 @@ final class SoundEngine {
             return;
         }
         SoundPlan.Live l = new SoundPlan.Live();
-        l.mph = value(v, "speed", now);
+        Double speed = v == null ? null : v.get("speed", now);
+        l.mph = speed == null ? 0 : speed;
         l.rpm = value(v, "rpm", now);
         l.volts = value(v, "batt_v", now);
-        l.scene = adapt.scene(l.mph);
+        // no speed reading (the dongle is not linked): no scene of its own, so no idle cut in a room
+        l.scene = speed == null ? SoundAdapt.Scene.CRUISE : adapt.scene(l.mph);
         SoundAdapt.AutoMode mode = SoundPrefs.autoMode(p);
         l.mayAdjust = mode.mayAdjust(l.mph);
         if (lastScene != null && l.scene != lastScene && mode.showsNote() && s.sceneEq) {
@@ -101,7 +103,7 @@ final class SoundEngine {
             main.post(() -> Toast.makeText(app, text, Toast.LENGTH_SHORT).show());
         }
         lastScene = l.scene;
-        apply(SoundPlan.gains(s, l), c, DspBands.frameMs(s.movie));
+        apply(SoundPlan.gains(s, l), c, DspBands.frameMs(s.movie), s.movie && s.level);
     }
 
     /** The sample rate the tablet mixes its output at; 48 kHz if it will not say. */
@@ -116,7 +118,14 @@ final class SoundEngine {
         }
     }
 
-    private void apply(SoundPlan.Gains g, Context c, float wantedFrameMs) {
+    /** The safety limiter for music, or the movie leveller (loud turned down, everything brought up). */
+    private static DynamicsProcessing.Limiter limiter(boolean level) {
+        return level ? new DynamicsProcessing.Limiter(true, true, 0, SoundAdapt.LEVEL_ATTACK_MS, SoundAdapt.LEVEL_RELEASE_MS,
+                        SoundAdapt.LEVEL_RATIO, SoundAdapt.LEVEL_THRESHOLD_DB, SoundAdapt.LEVEL_MAKEUP_DB)
+                : new DynamicsProcessing.Limiter(true, true, 0, 1f, 60f, 10f, -1f, 0f);
+    }
+
+    private void apply(SoundPlan.Gains g, Context c, float wantedFrameMs, boolean level) {
         if (Build.VERSION.SDK_INT < 28) {
             if (!refused) Diag.error(DiagLog.DSP, "Tablet DSP needs Android 9 or newer.");
             refused = true;
@@ -128,6 +137,11 @@ final class SoundEngine {
             if (dp != null && frameMs != wantedFrameMs) release();   // music and movie modes use different blocks
             if (dp == null) open(g.bandDb.length, outputRate(c), wantedFrameMs);
             boolean fresh = sent == null;
+            if (level != levelling) {
+                dp.setLimiterAllChannelsTo(limiter(level));
+                levelling = level;
+                Diag.info(DiagLog.DSP, level ? "Movie levelling on." : "Movie levelling off.");
+            }
             for (int i = 0; i < g.bandDb.length; i++) {
                 if (sent != null && Math.abs(sent[i] - g.bandDb[i]) < STEP_DB) continue;
                 dp.setPreEqBandAllChannelsTo(i,
@@ -167,7 +181,8 @@ final class SoundEngine {
         }
         dp.setPreEqAllChannelsTo(eq);
         // a safety limiter just under full scale, in case a boost still overshoots the headroom
-        dp.setLimiterAllChannelsTo(new DynamicsProcessing.Limiter(true, true, 0, 1f, 60f, 10f, -1f, 0f));
+        dp.setLimiterAllChannelsTo(limiter(false));
+        levelling = false;
         dp.setEnabled(true);
         sent = null;
         sentHeadroom = 0;

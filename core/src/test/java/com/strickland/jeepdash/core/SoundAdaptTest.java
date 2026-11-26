@@ -47,6 +47,14 @@ public class SoundAdaptTest {
         T.ok(SoundAdapt.voiceLiftDb(100) < 0.05 && SoundAdapt.voiceLiftDb(16000) < 0.2, "none in the bass or the very top");
     }
 
+    public static void levellingBringsSpeechUpAndEffectsDown() {
+        double speech = SoundAdapt.levelledDb(-40), bang = SoundAdapt.levelledDb(-12);
+        T.near(-36, speech, 1e-9, "quiet speech comes up by the make-up gain");
+        T.near(-18.8, bang, 1e-9, "a loud effect comes down");
+        T.ok(bang - speech < 18, "so the gap between them shrinks from 28 dB to about 17");
+        T.ok(SoundAdapt.levelledDb(-5) <= -5, "and nothing loud is made louder");
+    }
+
     public static void engineNoiseOnItsOwn() {
         T.near(3, SoundAdapt.engineBoostDb(100, 4000, 1), 1e-9, "a fully revved engine is worth half the road's most");
         T.near(0, SoundAdapt.engineBoostDb(100, 1200, 1), 1e-9, "nothing at a normal idle");

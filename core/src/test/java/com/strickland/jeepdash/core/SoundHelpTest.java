@@ -4,7 +4,7 @@ package com.strickland.jeepdash.core;
 public class SoundHelpTest {
 
     public static void everyCardHasItsOwnExplanation() {
-        T.eq(8, SoundHelp.TOPICS.length, "one per card");
+        T.eq(9, SoundHelp.TOPICS.length, "one per card");
         java.util.Set<String> seen = new java.util.HashSet<>();
         for (String topic : SoundHelp.TOPICS) {
             T.ok(!SoundHelp.title(topic).isEmpty(), topic + " has a title");
@@ -22,5 +22,6 @@ public class SoundHelpTest {
                 "the most noise compensation adds");
         T.ok(SoundHelp.text(SoundHelp.DSP).contains((int) SoundAdapt.VOICE_DB + " dB"), "the voice lift");
         T.ok(SoundHelp.text(SoundHelp.DSP).contains("Stop"), "how to switch the background sound off");
+        T.ok(SoundHelp.text(SoundHelp.PROFILES).contains("Calibrate"), "a profile keeps its own Calibrate");
     }
 }
