@@ -449,7 +449,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
     }
 
     private void showLog() {
-        final String text = Diag.LOG.export(0, new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date())
+        final String text = Diag.LOG.export(DashApp.build(this), new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date())
                 + " now, times in ms since boot", DiagLog.INFO, null, 100000);
         new AlertDialog.Builder(this).setTitle("Diagnostics")
                 .setMessage(Diag.LOG.size() == 0 ? "Nothing logged." : text)
@@ -988,6 +988,9 @@ public class SoundActivity extends Activity implements ServiceConnection {
                 trusted ? "measurement mic" : usb ? "USB mic, no cal file loaded" : "built-in mic",
                 over, (int) Math.round(c[lo]), hiHz >= 16000 ? "16 kHz" : "12.5 kHz");
         Diag.info(DiagLog.CAL, done);
+        Diag.info(DiagLog.CAL, "Measured (dB, 20 Hz to 20 kHz): " + SoundPlan.toText(measured));
+        double[] fix = SoundPrefs.correction(prefs);
+        if (fix != null) Diag.info(DiagLog.CAL, "Correction toward the target: " + SoundPlan.toText(fix));
         main.post(() -> {
             calState.setTextColor(GOOD);
             calState.setText(done);

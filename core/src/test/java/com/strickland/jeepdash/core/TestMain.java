@@ -27,6 +27,7 @@ public final class TestMain {
             SoundAdaptTest.class,
             SoundTuneTest.class,
             SoundPlanTest.class,
+            DspBandsTest.class,
             FftTest.class,
             BoxTuneTest.class,
             NoiseProfileTest.class,

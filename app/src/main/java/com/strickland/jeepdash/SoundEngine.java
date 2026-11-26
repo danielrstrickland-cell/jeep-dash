@@ -2,12 +2,14 @@ package com.strickland.jeepdash;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.media.AudioManager;
 import android.media.audiofx.DynamicsProcessing;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.widget.Toast;
 import com.strickland.jeepdash.core.DiagLog;
+import com.strickland.jeepdash.core.DspBands;
 import com.strickland.jeepdash.core.LiveValues;
 import com.strickland.jeepdash.core.SoundAdapt;
 import com.strickland.jeepdash.core.SoundPlan;
@@ -32,6 +34,7 @@ final class SoundEngine {
     private DynamicsProcessing dp;
     private double[] sent;
     private double sentHeadroom;
+    private double rate = 48000;                          // the output mix's sample rate, read when the effect opens
     private boolean refused;
     private SoundAdapt.Scene lastScene;
     private volatile boolean bypass, convolving;
@@ -97,10 +100,22 @@ final class SoundEngine {
             main.post(() -> Toast.makeText(app, text, Toast.LENGTH_SHORT).show());
         }
         lastScene = l.scene;
-        apply(SoundPlan.gains(s, l));
+        apply(SoundPlan.gains(s, l), c);
     }
 
-    private void apply(SoundPlan.Gains g) {
+    /** The sample rate the tablet mixes its output at; 48 kHz if it will not say. */
+    private static double outputRate(Context c) {
+        try {
+            AudioManager am = c.getSystemService(AudioManager.class);
+            String r = am == null ? null : am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
+            double v = r == null ? 0 : Double.parseDouble(r);
+            return v >= 8000 ? v : 48000;
+        } catch (RuntimeException e) {
+            return 48000;
+        }
+    }
+
+    private void apply(SoundPlan.Gains g, Context c) {
         if (Build.VERSION.SDK_INT < 28) {
             if (!refused) Diag.error(DiagLog.DSP, "Tablet DSP needs Android 9 or newer.");
             refused = true;
@@ -109,10 +124,12 @@ final class SoundEngine {
         }
         if (refused) return;
         try {
-            if (dp == null) open(g.bandDb.length);
+            if (dp == null) open(g.bandDb.length, outputRate(c));
+            boolean fresh = sent == null;
             for (int i = 0; i < g.bandDb.length; i++) {
                 if (sent != null && Math.abs(sent[i] - g.bandDb[i]) < STEP_DB) continue;
-                dp.setPreEqBandAllChannelsTo(i, new DynamicsProcessing.EqBand(true, edge(i), (float) g.bandDb[i]));
+                dp.setPreEqBandAllChannelsTo(i,
+                        new DynamicsProcessing.EqBand(true, DspBands.cutoff(i, rate), (float) g.bandDb[i]));
                 if (sent == null) sent = new double[g.bandDb.length];
                 sent[i] = g.bandDb[i];
             }
@@ -122,6 +139,8 @@ final class SoundEngine {
             }
             applied = g.bandDb.clone();
             state = "on";
+            if (fresh) Diag.info(DiagLog.DSP, "Gains now (dB, 20 Hz to 20 kHz): " + SoundPlan.toText(g.bandDb)
+                    + "; whole signal " + Math.round(g.headroomDb * 10) / 10.0 + " dB.");
         } catch (RuntimeException e) {
             Diag.error(DiagLog.DSP, "Tablet DSP refused by this tablet: " + e);
             refused = true;
@@ -130,19 +149,17 @@ final class SoundEngine {
         }
     }
 
-    /** The top edge of band i, which is how DynamicsProcessing names a band. */
-    private static float edge(int i) {
-        return (float) (SoundTune.bandCentres()[i] * Math.pow(2, 1 / 6.0));
-    }
-
-    private void open(int bands) {
+    private void open(int bands, double outputRate) {
+        rate = outputRate;
+        // a long block: at the effect's own 10 ms it cannot tell the bass bands apart (see DspBands)
         DynamicsProcessing.Config cfg = new DynamicsProcessing.Config.Builder(
                 DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION, 2,
-                true, bands, false, 0, false, 0, true).build();
+                true, bands, false, 0, false, 0, true)
+                .setPreferredFrameDuration(DspBands.FRAME_MS).build();
         dp = new DynamicsProcessing(0, 0, cfg);               // session 0: everything the tablet plays
         DynamicsProcessing.Eq eq = new DynamicsProcessing.Eq(true, true, bands);
         for (int i = 0; i < bands; i++) {
-            eq.getBand(i).setCutoffFrequency(edge(i));
+            eq.getBand(i).setCutoffFrequency(DspBands.cutoff(i, rate));
             eq.getBand(i).setGain(0);
         }
         dp.setPreEqAllChannelsTo(eq);
@@ -151,7 +168,8 @@ final class SoundEngine {
         dp.setEnabled(true);
         sent = null;
         sentHeadroom = 0;
-        Diag.info(DiagLog.DSP, "Tablet DSP opened: " + bands + " bands on the output mix.");
+        Diag.info(DiagLog.DSP, "Tablet DSP opened: " + bands + " bands on the output mix, "
+                + DspBands.blockFor(rate, DspBands.FRAME_MS) + "-sample blocks at " + Math.round(rate) + " Hz.");
     }
 
     /** Lets the tablet's sound go back to untouched. */
