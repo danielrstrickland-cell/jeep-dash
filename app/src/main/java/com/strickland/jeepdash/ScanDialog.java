@@ -42,9 +42,9 @@ final class ScanDialog {
         new AlertDialog.Builder(activity)
                 .setTitle("Scan all values")
                 .setMessage("Run this with the engine idling warm, in Park.\n\nThe dash asks the engine computer for each "
-                        + "of the 240 values in its live-data table, one at a time, three times over (about three "
+                        + "of the 239 values in its live-data table (01 to ef), one at a time, three times over (about three "
                         + "minutes). It sends only the same read it uses for the gauges and changes nothing. The gauges "
-                        + "are blank while it runs. The result is saved as a CSV in Downloads/JeepDash to share.")
+                        + "are blank while it runs. A value that does not answer gets the line set up again and one more try. The result is saved as a CSV in Downloads/JeepDash to share.")
                 .setPositiveButton("Start", (d, w) -> {
                     if (service.startScan()) progress();
                 })
