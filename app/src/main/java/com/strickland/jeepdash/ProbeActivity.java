@@ -58,6 +58,7 @@ public class ProbeActivity extends Activity {
     private volatile OutputStream out;
     private volatile boolean closing, running;
     private volatile StereoSocket waiter;
+    private volatile boolean dropped;                      // the link in use has ended
     private String stereoName = "(none)";
 
     private TextView status, logView;
@@ -139,9 +140,9 @@ public class ProbeActivity extends Activity {
         title.setText("Stereo probe: Kenwood sound settings (read only)");
         col.addView(title);
         TextView how = text(12, Color.LTGRAY);
-        how.setText("1 Force-stop the KENWOOD Remote app.  2 Stereo on; tap Pick stereo & run.  3 On the stereo: "
-                + "FUNCTION, REMOTE APP, SELECT, ANDROID: YES, then ANDROID LIST: this tablet.  4 When the stereo has "
-                + "called in, wait about 30 seconds, then Save & share the log.");
+        how.setText("1 Force-stop the KENWOOD Remote app.  2 On the stereo: FUNCTION, REMOTE APP, SELECT, ANDROID: YES, "
+                + "then ANDROID LIST: this tablet.  3 Tap Pick stereo & run and wait about 30 seconds.  4 Save & share "
+                + "the log, whatever it shows.");
         col.addView(how);
 
         LinearLayout top = new LinearLayout(this);
@@ -202,36 +203,62 @@ public class ProbeActivity extends Activity {
         t.start();
     }
 
-    private void run(BluetoothDevice d) {
+    /** Listens for the stereo to call the tablet. Null if cancelled or it cannot listen. */
+    private BluetoothSocket listen(BluetoothDevice d) {
         show("Waiting for the stereo to call this tablet. " + StereoSocket.HOW);
         note("Listening on the OpenLink serial service for " + stereoName + ".");
         StereoSocket w = new StereoSocket();
         waiter = w;
         BluetoothSocket s = w.await(adapter, d, this::fail);
         waiter = null;
-        if (s == null) {
-            running = false;
-            if (!closing) show("Could not listen for the stereo. Is Bluetooth on?");
-            return;
-        }
+        if (s != null) note("The stereo called in.");
+        return s;
+    }
+
+    /** Takes a connected socket into use and starts reading it. False if it has no streams. */
+    private boolean take(BluetoothSocket s) {
         socket = s;
+        dropped = false;
         try {
             out = s.getOutputStream();
             final InputStream in = s.getInputStream();
             Thread r = new Thread(() -> readLoop(in), "probe-read");
             r.setDaemon(true);
             r.start();
+            return true;
         } catch (IOException e) {
             fail("No streams: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private void run(BluetoothDevice d) {
+        show("Calling " + stereoName + "...");
+        BluetoothSocket s = StereoSocket.call(adapter, d, this::fail);     // as the stock app does
+        boolean called = s != null;
+        if (called) note("The stereo took the tablet's call.");
+        else s = listen(d);
+        try {
+            if (s != null && take(s)) Thread.sleep(STEP_MS);               // let the stereo speak first, if it does
+            if (called && dropped && !closing) {
+                note("The stereo hung up at once. Is its REMOTE APP setting on ANDROID with this tablet picked?");
+                out = null;
+                try { s.close(); } catch (IOException ignored) { }
+                s = listen(d);
+                if (s != null && take(s)) Thread.sleep(STEP_MS);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (s == null || out == null || closing) {
             running = false;
-            show("Connected but could not open the link.");
+            if (!closing) show("Could not reach the stereo. Is Bluetooth on?");
             return;
         }
-        note("The stereo called in on the OpenLink serial service.");
         show("Connected. Asking...");
         KenwoodProbe probe = new KenwoodProbe();
         try {
-            Thread.sleep(STEP_MS);                                   // let the stereo speak first, if it does
+            Thread.sleep(50);
             while (!closing && !probe.done()) {
                 KenwoodProbe.Step step = probe.peek();
                 byte[] frame = probe.nextFrame();
@@ -279,6 +306,7 @@ public class ProbeActivity extends Activity {
             if (!closing) fail("Link closed: " + e.getMessage());
         }
         if (stream.strayBytes() > 0) note(stream.strayBytes() + " bytes arrived outside any frame.");
+        dropped = true;
     }
 
     private void show(String s) { main.post(() -> status.setText(s)); }

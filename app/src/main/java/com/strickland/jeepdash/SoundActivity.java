@@ -429,10 +429,11 @@ public class SoundActivity extends Activity implements ServiceConnection {
         lp.addView(button("Open player", v -> startActivity(new Intent(this, PlayerActivity.class))));
 
         LinearLayout hu = card(col, "Head unit", SoundHelp.HEAD_UNIT);
-        hu.addView(label("Kenwood link: mute, volume and preset EQ. Connect makes the tablet wait for the stereo to call "
-                + "in, as the stereo's own app does: force-stop the KENWOOD Remote app first, then set the stereo's "
-                + "REMOTE APP to this tablet. Not proven on the stereo yet, so every command and answer goes in the "
-                + "diagnostics log. Source, custom EQ, filters, sub level and fader wait on the probe log.", 12, DIM));
+        hu.addView(label("Kenwood link: mute, volume and preset EQ. Force-stop the KENWOOD Remote app and set the "
+                + "stereo's REMOTE APP to ANDROID with this tablet picked, then Connect: it calls the stereo and, if the "
+                + "stereo will not talk, waits for the stereo to call. Not proven on the stereo yet, so every command and "
+                + "answer goes in the diagnostics log. Source, custom EQ, filters, sub level and fader wait on the probe "
+                + "log.", 12, DIM));
         LinearLayout huRow = row(hu);
         huRow.addView(button("Connect", v -> connectStereo(false)));
         huRow.addView(button("Disconnect", v -> stereo.close()));

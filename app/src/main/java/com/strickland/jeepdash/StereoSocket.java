@@ -8,23 +8,42 @@ import java.io.IOException;
 import java.util.UUID;
 
 /**
- * Gets the serial link to the Kenwood the way the stock KENWOOD Remote app does: the tablet listens on the
- * OpenLink service and the stereo calls in. Calling out to the stereo instead is accepted and hung up on
- * within milliseconds (seen on the owner's KMM-BT728HD, build 84), and Kenwood's own instructions are to
- * start the app first and then connect from the receiver.
+ * Gets the serial link to the Kenwood, either way round. The stock KENWOOD Remote app calls the stereo's
+ * OpenLink service, so {@link #call} does that first. On the owner's KMM-BT728HD that call was taken and
+ * hung up on within milliseconds while the stereo's REMOTE APP setting was not on Android, so the link also
+ * knows how to wait for the stereo to call the tablet ({@link #await}), which is what Kenwood's own
+ * instructions describe (start the app, then connect from the receiver).
  *
- * The stereo calls when its REMOTE APP setting is on ANDROID with this tablet picked, at the moment
- * Bluetooth connects or that setting is made. The stock app must not be running: it listens on the same
- * service. The caller holds the Bluetooth permission.
+ * Either way the stereo's REMOTE APP setting has to be on ANDROID with this tablet picked, and the stock app
+ * must not be running: the stereo keeps one such link. The caller holds the Bluetooth permission.
  */
 final class StereoSocket {
     static final UUID OPENLINK = UUID.fromString("16f92dc0-2eeb-11e6-b342-0002a5d5c51b");
 
     /** What to do on the stereo so it calls, in the stereo's own menu words. */
     static final String HOW = "On the stereo: press the volume knob for FUNCTION, then REMOTE APP, SELECT, ANDROID, YES, "
-            + "and pick this tablet in ANDROID LIST. Force-stop the KENWOOD Remote app on the tablet first.";
+            + "and pick this tablet in ANDROID LIST. Force-stop the KENWOOD Remote app on the tablet first. If nothing "
+            + "happens, switch the stereo off and on so it reconnects.";
 
     interface Log { void line(String text); }
+
+    /** Calls the stereo's OpenLink service: secured first, then unsecured. Null if neither connects. */
+    static BluetoothSocket call(BluetoothAdapter adapter, BluetoothDevice device, Log log) {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            BluetoothSocket cand = null;
+            try {
+                cand = attempt == 0 ? device.createRfcommSocketToServiceRecord(OPENLINK)
+                        : device.createInsecureRfcommSocketToServiceRecord(OPENLINK);
+                try { adapter.cancelDiscovery(); } catch (RuntimeException ignored) { }   // needs the scan permission; not vital
+                cand.connect();
+                return cand;
+            } catch (IOException | RuntimeException e) {
+                log.line("Calling the stereo (" + (attempt == 0 ? "secured" : "unsecured") + ") failed: " + e.getMessage());
+                try { if (cand != null) cand.close(); } catch (IOException ignored) { }
+            }
+        }
+        return null;
+    }
 
     private volatile BluetoothServerSocket server;
     private volatile boolean cancelled;
