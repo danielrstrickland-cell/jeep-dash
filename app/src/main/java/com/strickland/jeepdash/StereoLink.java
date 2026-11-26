@@ -18,7 +18,7 @@ import java.util.concurrent.Executors;
 
 /**
  * The Sound hub's live link to the Kenwood KMM-BT728HD, on the same Bluetooth serial service the stereo
- * probe uses. It opens the session, sends the commands {@link KenwoodLink} hands out (mute, capped volume,
+ * probe uses. It opens the session, sends the commands {@link KenwoodLink} hands out (mute, volume,
  * preset EQ), acknowledges whatever the stereo says, and puts every frame either way in the diagnostics log.
  * Open only while the Sound hub is showing. The caller holds the Bluetooth permission.
  */
@@ -167,7 +167,7 @@ final class StereoLink {
 
     void mute(final boolean on) { io.execute(() -> send(link.mute(on))); }
 
-    /** Held to {@link KenwoodLink#VOLUME_CAP} whatever is asked. */
+    /** Held to the stereo's scale, 0 to {@link KenwoodLink#VOLUME_MAX}. */
     void volume(final int level) { io.execute(() -> send(link.volume(level))); }
 
     void presetEq(final int index) { io.execute(() -> send(link.presetEq(index))); }

@@ -19,13 +19,13 @@ public class KenwoodLinkTest {
         T.eq(130 & 0x7F, last, "wraps at 0x7F like the probe");
     }
 
-    public static void volumeIsHeldUnderTheCap() {
+    public static void volumeStaysOnTheStereosOwnScale() {
         KenwoodLink k = new KenwoodLink();
-        T.eq(new byte[]{9}, KenwoodFrame.parse(k.volume(9).frame).payload, "a level under the cap goes as asked");
-        T.eq(new byte[]{(byte) KenwoodLink.VOLUME_CAP}, KenwoodFrame.parse(k.volume(35).frame).payload,
-                "a level over the cap is sent as the cap");
+        T.eq(35, KenwoodLink.VOLUME_MAX, "the KMM-BT728HD's knob runs 0 to 35");
+        T.eq(new byte[]{9}, KenwoodFrame.parse(k.volume(9).frame).payload, "a level on the scale goes as asked");
+        T.eq(new byte[]{35}, KenwoodFrame.parse(k.volume(35).frame).payload, "the top of the scale can be sent");
+        T.eq(new byte[]{35}, KenwoodFrame.parse(k.volume(60).frame).payload, "past the top is sent as the top");
         T.eq(new byte[]{0}, KenwoodFrame.parse(k.volume(-4).frame).payload, "never below zero");
-        T.ok(KenwoodLink.VOLUME_CAP <= 15, "the cap stays low until the stereo's own scale is known");
     }
 
     public static void presetAndMuteAreTheConfirmedCommands() {

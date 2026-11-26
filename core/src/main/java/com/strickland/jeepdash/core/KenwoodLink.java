@@ -8,13 +8,13 @@ import java.util.Map;
  * payloads are confirmed (session open, mute, volume, preset EQ), numbers them, matches the stereo's answers
  * to what was asked, and acknowledges whatever the stereo sends on its own. Pure: the app owns the socket.
  *
- * Until a probe log has shown the stereo's own volume scale, a volume command is held to {@link #VOLUME_CAP}
- * however high it is asked for, so an untested command cannot turn the system up loud. Source switching is
- * not here: it needs the source list the stereo itself reports, which the probe log will show.
+ * A volume command is held to the stereo's own scale, 0 to {@link #VOLUME_MAX} (the owner's figure for the
+ * knob). That the command's level is the knob's number is still to be seen on the stereo itself. Source
+ * switching is not here: it needs the source list the stereo itself reports, which the probe log will show.
  */
 public final class KenwoodLink {
-    /** The highest level a volume command may carry until the stereo's scale is confirmed. */
-    public static final int VOLUME_CAP = 15;
+    /** The top of the stereo's volume scale: the KMM-BT728HD's knob runs 0 to 35. */
+    public static final int VOLUME_MAX = 35;
     /** How many preset places the screen offers; the names come from the probe log. */
     public static final int PRESETS = 10;
 
@@ -53,9 +53,9 @@ public final class KenwoodLink {
         return send(KenwoodCommands.CAT_CONTROL, KenwoodCommands.MUTE, on ? "Mute on" : "Mute off", (byte) (on ? 1 : 0));
     }
 
-    /** A volume level, held between 0 and the cap. */
+    /** A volume level, held between 0 and the top of the stereo's scale. */
     public Sent volume(int level) {
-        int v = Math.max(0, Math.min(VOLUME_CAP, level));
+        int v = Math.max(0, Math.min(VOLUME_MAX, level));
         return send(KenwoodCommands.CAT_CONTROL, KenwoodCommands.VOLUME, "Volume " + v, (byte) v);
     }
 

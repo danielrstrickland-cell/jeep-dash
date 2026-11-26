@@ -66,7 +66,7 @@ import java.util.Random;
  * ({@link SoundEngine}) on and off, shows what the mic hears against the target, runs Calibrate (pink noise
  * out, mic in, correction stored), and holds the adaptive settings, the scenes and the diagnostics log. It
  * also learns the cabin's own noise for noise compensation, measures the sub box's tuning with a sweep, and
- * holds the Kenwood link (mute, capped volume, preset EQ).
+ * holds the Kenwood link (mute, volume, preset EQ).
  *
  * The DSP itself lives in the link service, so it carries on when this screen is closed; this screen only
  * changes saved settings and asks the engine to re-apply. The mic is open only while the screen is showing.
@@ -402,8 +402,8 @@ public class SoundActivity extends Activity implements ServiceConnection {
 
         LinearLayout hu = card(col, "Head unit");
         hu.addView(label("Kenwood link: mute, volume and preset EQ. Not tried on the stereo yet, so every command and "
-                + "answer goes in the diagnostics log. Volume is held to " + KenwoodLink.VOLUME_CAP + " until the probe "
-                + "log shows the stereo's own scale. Source, custom EQ, filters, sub level and fader wait on that log.", 12, DIM));
+                + "answer goes in the diagnostics log. The first time, send a low volume and check the stereo shows the same "
+                + "number. Source, custom EQ, filters, sub level and fader wait on the probe log.", 12, DIM));
         LinearLayout huRow = row(hu);
         huRow.addView(button("Connect", v -> connectStereo(false)));
         huRow.addView(button("Disconnect", v -> stereo.close()));
@@ -416,10 +416,10 @@ public class SoundActivity extends Activity implements ServiceConnection {
         mute.setTextSize(14);
         mute.setOnCheckedChangeListener((v, on) -> { if (stereoReady()) stereo.mute(on); });
         hu.addView(mute);
-        final TextView volText = label("Volume: slide and let go to send (0 to " + KenwoodLink.VOLUME_CAP + ")", 13, DIM);
+        final TextView volText = label("Volume: slide and let go to send (0 to " + KenwoodLink.VOLUME_MAX + ")", 13, DIM);
         hu.addView(volText);
         SeekBar vol = new SeekBar(this);
-        vol.setMax(KenwoodLink.VOLUME_CAP);
+        vol.setMax(KenwoodLink.VOLUME_MAX);
         vol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar b, int p, boolean user) {
                 if (user) volText.setText("Volume: " + p + " (let go to send)");
