@@ -3,6 +3,7 @@ package com.strickland.jeepdash;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -25,7 +26,7 @@ import java.util.concurrent.Executors;
  * while the Sound hub is showing. The caller holds the Bluetooth permission.
  */
 final class StereoLink {
-    private static final long ANSWER_MS = 2500, OPEN_AFTER_MS = 600, QUICK_HANGUP_MS = 5000;
+    private static final long ANSWER_MS = 2500, QUIET_MS = 1500, QUICK_HANGUP_MS = 5000;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
@@ -40,6 +41,11 @@ final class StereoLink {
     private volatile StereoSocket waiter;          // while waiting for the stereo to call
     private volatile int run;                      // each connect is its own run; an older one stands down
     private volatile String state = "Not connected.", last = "";
+    private volatile SharedPreferences prefs;      // where the acknowledgement style the stereo accepts is kept
+    private volatile long heardAt;                 // when the stereo last sent anything on this link
+
+    /** Gives the link somewhere to remember what it learns about the stereo between connections. */
+    void remember(SharedPreferences p) { prefs = p; }
 
     /** One line for the screen: the link's state and the last command's fate. */
     String state() { return last.isEmpty() ? state : state + "  " + last; }
@@ -121,18 +127,30 @@ final class StereoLink {
             closeQuietly(s);
             return false;
         }
-        link = new KenwoodLink();
+        SharedPreferences p = prefs;
+        link = new KenwoodLink(p == null ? 0 : p.getInt(SoundPrefs.ACK_STYLE, 0));
+        heardAt = SystemClock.elapsedRealtime();
         socket = s;
         out = o;
         connecting = false;
         last = "";
         state = "Connected to " + name + ".";
         Diag.info(DiagLog.BT, "Stereo link up (" + how + "): " + name);
-        // let the stereo speak first if it means to, then open the session as the stock app does
+        // The stereo speaks first (a hello it repeats every second until it is acknowledged the way it wants).
+        // Open the session, as the stock app does, only once it has gone quiet: that is, once it is satisfied.
         final BluetoothSocket mineNow = s;
-        main.postDelayed(() -> io.execute(() -> {
-            if (!over(mine) && socket == mineNow) send(link.open());
-        }), OPEN_AFTER_MS);
+        main.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (over(mine) || socket != mineNow) return;
+                if (SystemClock.elapsedRealtime() - heardAt < QUIET_MS) {
+                    main.postDelayed(this, 300);
+                    return;
+                }
+                io.execute(() -> {
+                    if (!over(mine) && socket == mineNow) send(link.open());
+                });
+            }
+        }, QUIET_MS);
         boolean heard = readLoop(in, mine);
         if (!over(mine)) drop();
         return heard;
@@ -147,10 +165,17 @@ final class StereoLink {
             int n;
             while (!over(mine) && (n = in.read(buf)) > 0) {
                 heard = true;
+                heardAt = SystemClock.elapsedRealtime();
                 for (byte[] frame : stream.feed(buf, n)) {
                     KenwoodLink.Event e = k.onFrame(frame);
                     Diag.info(DiagLog.CMD, "< " + e.line);
                     if (e.ack != null) write(e.ack);
+                    SharedPreferences p = prefs;
+                    if (k.ackStyleConfirmed() && p != null && p.getInt(SoundPrefs.ACK_STYLE, -1) != k.ackStyle()) {
+                        p.edit().putInt(SoundPrefs.ACK_STYLE, k.ackStyle()).apply();
+                        Diag.info(DiagLog.BT, "The stereo accepts acknowledgements this way: "
+                                + KenwoodLink.styleName(k.ackStyle()) + ". Remembered.");
+                    }
                     if (e.answered == null) continue;
                     if (e.result == 0) {
                         last = e.answered + ": accepted.";

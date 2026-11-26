@@ -24,6 +24,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import com.strickland.jeepdash.core.DiagLog;
+import com.strickland.jeepdash.core.KenwoodLink;
 import com.strickland.jeepdash.core.KenwoodProbe;
 import com.strickland.jeepdash.core.KenwoodStream;
 import java.io.IOException;
@@ -59,6 +60,7 @@ public class ProbeActivity extends Activity {
     private volatile boolean closing, running;
     private volatile StereoSocket waiter;
     private volatile boolean dropped;                      // the link in use has ended
+    private volatile KenwoodLink acker = new KenwoodLink();
     private String stereoName = "(none)";
 
     private TextView status, logView;
@@ -219,6 +221,7 @@ public class ProbeActivity extends Activity {
     private boolean take(BluetoothSocket s) {
         socket = s;
         dropped = false;
+        acker = new KenwoodLink(SoundPrefs.of(this).getInt(SoundPrefs.ACK_STYLE, 0));
         try {
             out = s.getOutputStream();
             final InputStream in = s.getInputStream();
@@ -297,9 +300,9 @@ public class ProbeActivity extends Activity {
             int n;
             while (!closing && (n = in.read(buf)) > 0) {
                 for (byte[] frame : stream.feed(buf, n)) {
-                    log.info(now(), DiagLog.CMD, "< " + KenwoodProbe.describe(frame));
-                    byte[] ack = KenwoodProbe.ackFor(frame);
-                    if (ack != null) send(ack, "> ack");
+                    KenwoodLink.Event e = acker.onFrame(frame);      // tries each way of acknowledging in turn
+                    log.info(now(), DiagLog.CMD, "< " + e.line);
+                    if (e.ack != null) send(e.ack, "> ack");
                 }
             }
         } catch (IOException e) {

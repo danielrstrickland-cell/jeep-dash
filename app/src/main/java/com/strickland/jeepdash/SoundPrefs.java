@@ -19,7 +19,7 @@ final class SoundPrefs {
             MEASURED = "measured", VALID_LO = "valid_lo", VALID_HI = "valid_hi",
             MIC_USB = "mic_usb", MIC_CAL = "mic_cal", PEAK_BEST = "peak_best",
             NOISE_PROFILE = "noise_profile", LEARNING = "noise_learning", MODE = "listen_mode",
-            CORR = "correction_strength", LEVEL = "movie_level", LAST_ROUTE = "profile_last_route",
+            CORR = "correction_strength", ACK_STYLE = "kenwood_ack_style", LEVEL = "movie_level", LAST_ROUTE = "profile_last_route",
             STEREO_ADDR = "stereo_addr", STEREO_NAME = "stereo_name",
             PLAYER_TREE = "player_tree", PLAYER_FILTER = "player_filter";
     /** The settings a scene snapshot carries. */

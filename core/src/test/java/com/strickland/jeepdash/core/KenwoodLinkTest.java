@@ -50,6 +50,14 @@ public class KenwoodLinkTest {
         T.ok(!k.waiting(mute.seq), "no longer waiting");
     }
 
+    public static void anAnswerAddressedBackToTheAppIsMatchedToo() {
+        KenwoodLink k = new KenwoodLink();
+        KenwoodLink.Sent mute = k.mute(true);
+        byte[] back = {0x50, (byte) 0xA4, 0x11, 3, (byte) mute.seq};          // from the stereo to the app
+        KenwoodLink.Event e = k.onFrame(KenwoodFrame.frame(back, KenwoodFrame.ACK, new byte[]{0}));
+        T.eq("Mute on", e.answered, "an answer with the addresses turned round is still the answer");
+    }
+
     public static void aRefusalCarriesItsCode() {
         KenwoodLink k = new KenwoodLink();
         KenwoodFrame.Parsed sent = KenwoodFrame.parse(k.presetEq(2).frame);
@@ -58,15 +66,62 @@ public class KenwoodLinkTest {
         T.eq(5, e.result, "the refusal code");
     }
 
-    public static void whatTheStereoSaysIsAcknowledged() {
+    /** The message the owner's KMM-BT728HD opens with, once a second, until it is happy or gives up after ten. */
+    private static byte[] hello() {
+        return KenwoodFrame.frame(new byte[]{0x50, (byte) 0xA4, 0x3B, 2, 0}, KenwoodFrame.CMD, new byte[0]);
+    }
+
+    public static void theFirstAcknowledgementIsAddressedBackToTheStereo() {
         KenwoodLink k = new KenwoodLink();
-        byte[] id = {0x50, (byte) 0xA4, 0x11, 2, 9};
-        KenwoodLink.Event e = k.onFrame(KenwoodFrame.frame(id, KenwoodFrame.CMD, new byte[]{12}));
+        KenwoodLink.Event e = k.onFrame(hello());
         T.ok(e.answered == null, "not an answer to anything");
         KenwoodFrame.Parsed ack = KenwoodFrame.parse(e.ack);
-        T.eq(KenwoodFrame.ACK, ack.ptype, "acknowledged, as the stock app does");
-        T.eq(id, ack.cmdId, "with its own id");
-        T.ok(e.line.contains("0C"), "and logged with its payload");
+        T.eq(KenwoodFrame.ACK, ack.ptype, "an acknowledgement");
+        T.eq(new byte[]{(byte) 0xA4, 0x50, 0x3B, 2, 0}, ack.cmdId, "from the app to the stereo: its two addresses swapped");
+        T.eq(new byte[]{0}, ack.payload, "result 0");
+        T.ok(e.line.contains("7E") && e.line.contains("7C"), "the log line carries the frame's own bytes: " + e.line);
+    }
+
+    public static void aMessageTheStereoRepeatsGetsADifferentAcknowledgementEachTime() {
+        KenwoodLink k = new KenwoodLink();
+        k.onFrame(hello());
+        KenwoodFrame.Parsed second = KenwoodFrame.parse(k.onFrame(hello()).ack);
+        T.eq(new byte[]{(byte) 0xA4, 0x50, 0x3B, 2, 0}, second.cmdId, "second try: still swapped");
+        T.eq(0, second.payload.length, "but with no result byte");
+        KenwoodFrame.Parsed third = KenwoodFrame.parse(k.onFrame(hello()).ack);
+        T.eq(new byte[]{0x50, (byte) 0xA4, 0x3B, 2, 0}, third.cmdId, "third: its id as it came");
+        T.eq(0, third.payload.length, "no result byte");
+        KenwoodFrame.Parsed fourth = KenwoodFrame.parse(k.onFrame(hello()).ack);
+        T.eq(KenwoodFrame.CMD, fourth.ptype, "fourth: answered with the same message, not an acknowledgement");
+        T.eq(new byte[]{(byte) 0xA4, 0x50, 0x3B, 2, 0}, fourth.cmdId, "from the app");
+        KenwoodFrame.Parsed fifth = KenwoodFrame.parse(k.onFrame(hello()).ack);
+        T.eq(new byte[]{0x50, (byte) 0xA4, 0x3B, 2, 0}, fifth.cmdId, "fifth: what builds 84 to 88 sent");
+        T.eq(new byte[]{0}, fifth.payload, "id as it came, result 0");
+        KenwoodFrame.Parsed sixth = KenwoodFrame.parse(k.onFrame(hello()).ack);
+        T.eq(new byte[]{(byte) 0xA4, 0x50, 0x3B, 2, 0}, sixth.cmdId, "then round again from the first: swapped");
+        T.eq(new byte[]{0}, sixth.payload, "with result 0");
+        T.ok(!k.ackStyleConfirmed(), "nothing has been accepted yet");
+    }
+
+    public static void aNewMessageMeansTheLastAcknowledgementWorked() {
+        KenwoodLink k = new KenwoodLink();
+        k.onFrame(hello());
+        k.onFrame(hello());
+        k.onFrame(hello());                                               // style 2 went out last
+        byte[] next = KenwoodFrame.frame(new byte[]{0x50, (byte) 0xA4, 0x11, 2, 1}, KenwoodFrame.CMD, new byte[]{12});
+        KenwoodFrame.Parsed ack = KenwoodFrame.parse(k.onFrame(next).ack);
+        T.ok(k.ackStyleConfirmed(), "the stereo moved on, so it took the last one");
+        T.eq(2, k.ackStyle(), "style 2 is the one");
+        T.eq(new byte[]{0x50, (byte) 0xA4, 0x11, 2, 1}, ack.cmdId, "and the new message is acknowledged the same way");
+        T.eq(0, ack.payload.length, "no result byte");
+        k.onFrame(next);
+        T.eq(2, k.ackStyle(), "once it is known, a repeat does not change it");
+    }
+
+    public static void aRememberedStyleIsTriedFirst() {
+        KenwoodLink k = new KenwoodLink(3);
+        T.eq(KenwoodFrame.CMD, KenwoodFrame.parse(k.onFrame(hello()).ack).ptype, "starts with the style that worked last time");
+        T.eq(0, new KenwoodLink(99).ackStyle(), "a bad remembered value starts from the first");
     }
 
     public static void junkAndStrangersAnswersAreOnlyLogged() {
