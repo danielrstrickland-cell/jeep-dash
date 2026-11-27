@@ -132,13 +132,14 @@ public final class SoundTune {
     }
 
     /**
-     * Where the two kinds of correction meet. Up to FULL_BELOW_HZ a cabin's peaks and dips are real and
+     * Where the two kinds of correction meet. A car cabin's bass behaviour (steady booms and holes) runs to
+     * about 300 Hz (published cabin studies put the change at 300 to 440 Hz). Up to FULL_BELOW_HZ a cabin's peaks and dips are real and
      * steady, and are corrected in full. From BROAD_ABOVE_HZ up, what one mic position hears is mostly
      * reflections that change a few inches away, so only the broad shape is corrected, and by no more than
      * BROAD_LIMIT_DB either way. Between the two the one eases into the other. This is the usual practice
      * of room-correction tools: fix the bass, only tilt the rest.
      */
-    public static final double FULL_BELOW_HZ = 200, BROAD_ABOVE_HZ = 500, BROAD_LIMIT_DB = 3;
+    public static final double FULL_BELOW_HZ = 300, BROAD_ABOVE_HZ = 600, BROAD_LIMIT_DB = 3;
     /** How far up the tablet's own mic can be trusted: its correction is faded out over the octave below this. */
     public static final double BUILT_IN_TOP_HZ = 8000;
     private static final int BROAD_BANDS = 3;                    // an octave each side
@@ -206,6 +207,35 @@ public final class SoundTune {
             double keep = hz >= topHz * 0.99 ? 0 : SoundAdapt.clamp(Math.log(topHz / hz) / Math.log(2), 0, 1);
             out[i] = correctionDb[i] * keep;
         }
+        return out;
+    }
+
+    /**
+     * The bands a correction made worse: after it, the band is further from the target than before by more
+     * than marginDb. Both measurements are lined up on their own mids first, so a change of overall level
+     * does not count.
+     */
+    public static boolean[] worse(double[] beforeDb, double[] afterDb, double[] targetDb, double marginDb) {
+        double[] c = bandCentres();
+        int n = Math.min(c.length, Math.min(beforeDb.length, Math.min(afterDb.length, targetDb.length)));
+        double b = 0, a = 0;
+        int k = 0;
+        for (int i = 0; i < n; i++) if (c[i] >= 300 && c[i] <= 3000) { b += beforeDb[i] - targetDb[i]; a += afterDb[i] - targetDb[i]; k++; }
+        b = k == 0 ? 0 : b / k;
+        a = k == 0 ? 0 : a / k;
+        boolean[] out = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            double was = Math.abs(beforeDb[i] - targetDb[i] - b), now = Math.abs(afterDb[i] - targetDb[i] - a);
+            out[i] = now > was + marginDb;
+        }
+        return out;
+    }
+
+    /** A correction with the given bands left out (set to 0). Null stays null; no mask leaves it whole. */
+    public static double[] without(double[] correctionDb, boolean[] drop) {
+        if (correctionDb == null) return null;
+        double[] out = correctionDb.clone();
+        if (drop != null) for (int i = 0; i < Math.min(out.length, drop.length); i++) if (drop[i]) out[i] = 0;
         return out;
     }
 

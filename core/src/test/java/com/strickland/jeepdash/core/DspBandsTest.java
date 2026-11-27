@@ -57,4 +57,37 @@ public class DspBandsTest {
         everyStepSitsInItsBand(DspBands.FRAME_MS);
         everyStepSitsInItsBand(DspBands.MOVIE_FRAME_MS);
     }
+
+    public static void theFineBandsFollowTheCurveWithoutSteps() {
+        double[] c = SoundTune.bandCentres();
+        double[] f = DspBands.fineCentres();
+        T.eq(DspBands.FINE, f.length, "a band every ninth of an octave");
+        T.near(20, f[0], 1, "from 20 Hz");
+        T.near(20000, f[f.length - 1], 500, "to 20 kHz");
+        double[] curve = new double[31];
+        curve[7] = -9;                                                   // one 9 dB cut at 100 Hz
+        double[] fine = DspBands.fine(curve);
+        T.near(c[7], f[21], 0.01, "every third fine band sits on one of the 31");
+        T.near(-9, fine[21], 1e-9, "the full cut at its own centre");
+        for (int j = 0; j < f.length; j++) {
+            if (j > 0) T.ok(Math.abs(fine[j] - fine[j - 1]) <= 3 + 1e-9, "no step bigger than a third of the band's: " + f[j]);
+        }
+        T.near(0, fine[0], 1e-9, "nothing far away");
+        T.near(c.length, 31, 0, "the 31 bands stay the plan's");
+    }
+
+    public static void theFineCutoffsRiseAndCoverEveryStep() {
+        double rate = 48000;
+        float ms = DspBands.FRAME_MS;
+        float[] cut = new float[DspBands.FINE];
+        for (int j = 0; j < cut.length; j++) {
+            cut[j] = DspBands.fineCutoff(j, rate, ms);
+            if (j > 0) T.ok(cut[j] > cut[j - 1], "rising at " + j);
+        }
+        int block = DspBands.blockFor(rate, ms);
+        int[] of = DspBands.bandOfBin(cut, rate, block);
+        int top = (int) (16000.0 * block / rate);
+        for (int k = 1; k <= top; k++) T.ok(of[k] >= 0, "bin " + k + " has a band");
+        T.near(1000, DspBands.fineCentres()[of[(int) Math.round(1000.0 * block / rate)]], 40, "1 kHz takes the 1 kHz band's gain");
+    }
 }

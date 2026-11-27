@@ -15,7 +15,7 @@ public final class KenwoodCommands {
     public static final int CORE = 0xA4;        // OpenLink core, first id byte of everything this side sends
     public static final int MAIN = 0x50;        // the head unit's main address
     public static final int CAT_CONTROL = 0x11; // source, volume, mute, preset EQ
-    public static final int CAT_SETTING = 0x41; // sound settings
+    public static final int CAT_SETTING = 0x3D; // sound settings: what the stock app's settings screens send (it answers in 5D)
 
     // CAT_CONTROL commands (confirmed)
     public static final int SOURCE = 1, VOLUME = 2, MUTE = 3, PRESET_EQ = 4;
@@ -59,9 +59,9 @@ public final class KenwoodCommands {
         return command(CAT_SETTING, SET_PRESET_EQ, seq, (byte) index);
     }
 
-    /** Asks the head unit for a setting's current value: one of the GET_ commands, no payload. */
+    /** Asks the head unit for a setting's current value: one of the GET_ commands, carrying one 0 as the stock app's do. */
     public static byte[] read(int seq, int getCmd) {
-        return command(CAT_SETTING, getCmd, seq);
+        return command(CAT_SETTING, getCmd, seq, (byte) 0);
     }
 
     /** True for the setting commands whose payload layout is still unconfirmed, so callers gate them. */

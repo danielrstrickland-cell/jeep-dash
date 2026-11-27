@@ -24,6 +24,7 @@ public final class TestMain {
             KenwoodCommandsTest.class,
             KenwoodProbeTest.class,
             KenwoodLinkTest.class,
+            KenwoodSettingsTest.class,
             SoundAdaptTest.class,
             SoundTuneTest.class,
             SoundPlanTest.class,

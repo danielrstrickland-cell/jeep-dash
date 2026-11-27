@@ -6,7 +6,9 @@ import android.bluetooth.BluetoothSocket;
 import android.os.SystemClock;
 import com.strickland.jeepdash.core.DiagLog;
 import com.strickland.jeepdash.core.KenwoodLink;
+import com.strickland.jeepdash.core.KenwoodCommands;
 import com.strickland.jeepdash.core.KenwoodProbe;
+import com.strickland.jeepdash.core.KenwoodSettings;
 import com.strickland.jeepdash.core.KenwoodStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,6 +26,9 @@ final class StereoLink {
     /** Where the link's log lines go: the level is one of {@link DiagLog}'s. */
     interface Sink { void line(int level, String tag, String text); }
 
+    /** Hears every message the stereo sends of its own, by its numbers. Called on the link's reading thread. */
+    interface Listener { void message(int cat, int cmd, byte[] payload); }
+
     private static final long SILENT_MS = 3000, TICK_MS = 50;
 
     private final Sink sink;
@@ -34,6 +39,9 @@ final class StereoLink {
     private volatile StereoSocket sock;            // the connect in hand
     private volatile int run;                      // each connect is its own run; an older one stands down
     private volatile String state = "Not connected.", last = "";
+    private volatile Listener listener;
+    private volatile KenwoodSettings.Backup heard = new KenwoodSettings.Backup();   // settings answers on this link
+    private volatile byte[] status;                // the stereo's last status message (5B/12)
 
     /** Logs to the app's diagnostics log. */
     StereoLink() { this((level, tag, text) -> Diag.LOG.add(Diag.now(), level, tag, text)); }
@@ -57,6 +65,20 @@ final class StereoLink {
     boolean idle() { return link.idle(); }
 
     boolean busy() { return connecting; }
+
+    void listen(Listener l) { listener = l; }
+
+    /** Every settings answer the stereo has given on this link, by command. */
+    KenwoodSettings.Backup heard() { return heard; }
+
+    /** The stereo's last status message: source first, then what it is playing. Null until it sends one. */
+    byte[] status() { byte[] s = status; return s == null ? null : s.clone(); }
+
+    /** Asks the stereo for every sound setting, as the stock app's settings screens do. Answers land in {@link #heard}. */
+    void readAll() {
+        for (KenwoodSettings.Read r : KenwoodSettings.reads())
+            link.ask("Read " + r.label, KenwoodCommands.CAT_SETTING, r.cmd, (byte) 0);
+    }
 
     void connect(final BluetoothAdapter adapter, final BluetoothDevice device, final String name) {
         if (connecting || connected()) return;
@@ -132,6 +154,8 @@ final class StereoLink {
         final KenwoodLink k = new KenwoodLink();
         final AtomicBoolean heard = new AtomicBoolean();
         link = k;
+        this.heard = new KenwoodSettings.Backup();
+        status = null;
         socket = s;
         out = o;
         connecting = false;
@@ -193,6 +217,16 @@ final class StereoLink {
                     info(DiagLog.CMD, "< " + e.line);
                     if (e.ack != null && write(o, e.ack))
                         info(DiagLog.CMD, "> acknowledged  [" + KenwoodProbe.hex(e.ack) + "]");
+                    if (e.cat == KenwoodSettings.REPLY) {
+                        this.heard.add(e.cmd, e.payload);
+                        java.util.List<String> names = KenwoodSettings.options(e.payload);
+                        info(DiagLog.CMD, "  setting " + KenwoodSettings.name(e.cmd)
+                                + (names.isEmpty() ? "" : ": choices " + String.join(", ", names)));
+                    } else if (e.cat == 0x5B && e.cmd == 0x12) {
+                        status = e.payload;
+                    }
+                    Listener l = listener;
+                    if (e.cat >= 0 && l != null) l.message(e.cat, e.cmd, e.payload);
                     if (e.answered == null) continue;
                     if (e.result == 0) {
                         last = e.answered + ": accepted.";
@@ -239,8 +273,8 @@ final class StereoLink {
 
     void att() { link.att(); }
 
-    /** Any read request, by its numbers: the probe's questions come this way. */
-    void ask(String label, int category, int cmd) { link.ask(label, category, cmd); }
+    /** Any message to the stereo, by its numbers: the probe's questions and tries come this way. */
+    void ask(String label, int category, int cmd, byte... payload) { link.ask(label, category, cmd, payload); }
 
     void close() {
         closing = true;

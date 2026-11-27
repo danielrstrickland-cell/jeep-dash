@@ -22,7 +22,8 @@ final class SoundProfiles {
     private static final String[] KEYS = {SoundPrefs.TARGET, SoundPrefs.BASS, SoundPrefs.TREBLE, SoundPrefs.CORR,
             SoundPrefs.SCENE_EQ, SoundPrefs.NOISE, SoundPrefs.STRENGTH, SoundPrefs.VOLT, SoundPrefs.PORT,
             SoundPrefs.TUNE, SoundPrefs.DROP, SoundPrefs.AUTO, SoundPrefs.MEASURED, SoundPrefs.VALID_LO,
-            SoundPrefs.VALID_HI, SoundPrefs.NOISE_PROFILE};
+            SoundPrefs.VALID_HI, SoundPrefs.NOISE_PROFILE, SoundPrefs.CHECK_MASK, SoundPrefs.PREV_MEASURED,
+            SoundPrefs.PREV_LO, SoundPrefs.PREV_HI, SoundPrefs.PREV_MASK};
 
     private SoundProfiles() { }
 

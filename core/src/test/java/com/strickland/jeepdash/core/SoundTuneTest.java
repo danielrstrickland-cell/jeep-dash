@@ -145,7 +145,7 @@ public class SoundTuneTest {
         double[] fix = SoundTune.fadedAbove(SoundTune.correction(JEEP, SoundTune.targetBands(SoundTune.Target.HARMAN), 6, 12),
                 SoundTune.BUILT_IN_TOP_HZ);
         for (int i = 0; i < 31; i++) {
-            if (c[i] >= 500) T.ok(Math.abs(fix[i]) <= 3 + 1e-9, "no more than 3 dB either way at " + Math.round(c[i]) + " Hz: " + fix[i]);
+            if (c[i] >= 600) T.ok(Math.abs(fix[i]) <= 3 + 1e-9, "no more than 3 dB either way at " + Math.round(c[i]) + " Hz: " + fix[i]);
             if (c[i] >= 7900) T.near(0, fix[i], 1e-9, "nothing at all where the tablet's mic cannot be trusted, " + Math.round(c[i]) + " Hz");
         }
         T.ok(fix[10] < -3, "the bass that sits above the target is still brought down: " + fix[10]);
@@ -160,5 +160,30 @@ public class SoundTuneTest {
         T.near(0, f[26], 1e-9, "gone by 8 kHz");
         T.near(0, f[30], 1e-9, "and above");
         T.ok(SoundTune.fadedAbove(null, 8000) == null, "no correction stays no correction");
+    }
+
+    public static void theCabinsBassZoneRunsTo300Hz() {
+        double[] target = SoundTune.targetBands(SoundTune.Target.FLAT);
+        double[] m = new double[31];
+        m[10] = 10; m[11] = 10; m[12] = 10;                             // a 10 dB hump around 250 Hz
+        // the 315 Hz band is in the mids the level is set from, so the reference rises 1 dB: a full cut is 9 dB
+        T.near(-9, SoundTune.correction(m, target, 6, 12)[11], 1e-9, "250 Hz is still the bass zone: cut in full");
+    }
+
+    public static void aBandTheCorrectionMadeWorseIsFound() {
+        double[] target = SoundTune.targetBands(SoundTune.Target.FLAT);
+        double[] before = new double[31], after = new double[31];
+        before[8] = 6;                                                   // 125 Hz was 6 dB hot
+        after[8] = 0.5;                                                  // and is now nearly right
+        before[20] = 1;                                                  // 2 kHz was close
+        after[20] = 5;                                                   // and is now 5 dB out
+        boolean[] worse = SoundTune.worse(before, after, target, 1.5);
+        T.ok(!worse[8], "the band it fixed is kept");
+        T.ok(worse[20], "the band it spoiled is found");
+        T.ok(!worse[25], "an untouched band is left alone");
+        double[] fix = {1, 2, 3};
+        T.ok(java.util.Arrays.equals(new double[]{1, 0, 3}, SoundTune.without(fix, new boolean[]{false, true, false})), "found bands are left out");
+        T.ok(SoundTune.without(null, new boolean[3]) == null, "no correction stays none");
+        T.ok(java.util.Arrays.equals(new double[]{1, 2, 3}, SoundTune.without(fix, null)), "no check, nothing left out");
     }
 }

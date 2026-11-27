@@ -21,7 +21,12 @@ final class SoundPrefs {
             NOISE_PROFILE = "noise_profile", LEARNING = "noise_learning", MODE = "listen_mode",
             CORR = "correction_strength", LEVEL = "movie_level", LAST_ROUTE = "profile_last_route",
             STEREO_ADDR = "stereo_addr", STEREO_NAME = "stereo_name",
-            PLAYER_TREE = "player_tree", PLAYER_FILTER = "player_filter";
+            PLAYER_TREE = "player_tree", PLAYER_FILTER = "player_filter",
+            CHECK_MASK = "check_mask", PREV_MEASURED = "prev_measured", PREV_LO = "prev_valid_lo",
+            PREV_HI = "prev_valid_hi", PREV_MASK = "prev_check_mask", STEREO_BACKUP = "stereo_backup",
+            STEREO_BACKUP_WHEN = "stereo_backup_when";
+    /** The bass-shelf presets on the target: less, normal and more bass (Harman's 7 dB, 3 dB less, 5 dB more). */
+    static final int BASS_LESS = 4, BASS_NORMAL = 7, BASS_MORE = 12;
     /** The settings a scene snapshot carries. */
     private static final String[] SCENE_KEYS = {ENABLED, TARGET, BASS, TREBLE, SCENE_EQ, NOISE, STRENGTH, VOLT, PORT, DROP, MODE};
     static final String[] SCENE_NAMES = {"Solo drive", "Full car", "Bass demo"};
@@ -62,9 +67,25 @@ final class SoundPrefs {
         double[] c = SoundTune.correction(measured, targetBands(p), MAX_BOOST, MAX_CUT);
         int lo = p.getInt(VALID_LO, 0), hi = p.getInt(VALID_HI, c.length - 1);
         for (int i = 0; i < c.length; i++) if (i < lo || i > hi) c[i] = 0;
+        c = SoundTune.without(c, mask(p.getString(CHECK_MASK, null)));      // bands the check found it made worse
         // a mic with no calibration file (the tablet's own) is not believed near the top: ease the correction out there
         if (hi < TRUSTED_TOP_BAND) c = SoundTune.fadedAbove(c, SoundTune.BUILT_IN_TOP_HZ);
         return SoundTune.scaled(c, p.getInt(CORR, 100) / 100.0);
+    }
+
+    /** A check mask as stored: "1" for each band left out, "0" for each kept, comma-separated. Null if none. */
+    static boolean[] mask(String text) {
+        if (text == null || text.isEmpty()) return null;
+        String[] parts = text.split(",");
+        boolean[] m = new boolean[parts.length];
+        for (int i = 0; i < parts.length; i++) m[i] = "1".equals(parts[i].trim());
+        return m;
+    }
+
+    static String maskText(boolean[] m) {
+        StringBuilder s = new StringBuilder();
+        for (int i = 0; i < m.length; i++) s.append(i == 0 ? "" : ",").append(m[i] ? "1" : "0");
+        return s.toString();
     }
 
     /** The cabin's measured noise, or null before any has been learned. */

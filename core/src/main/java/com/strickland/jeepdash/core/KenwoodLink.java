@@ -58,8 +58,12 @@ public final class KenwoodLink {
         public final byte[] ack;         // to write back, or null
         public final String answered;    // the message of ours this acknowledges, or null
         public final int result;         // the stereo's result code when answered (0 = accepted)
-        Event(String line, byte[] ack, String answered, int result) {
+        public final int cat, cmd;       // for a message the stereo sent of its own: its numbers; -1 otherwise
+        public final byte[] payload;     // and what it carried, or null
+        Event(String line, byte[] ack, String answered, int result) { this(line, ack, answered, result, -1, -1, null); }
+        Event(String line, byte[] ack, String answered, int result, int cat, int cmd, byte[] payload) {
             this.line = line; this.ack = ack; this.answered = answered; this.result = result;
+            this.cat = cat; this.cmd = cmd; this.payload = payload;
         }
     }
 
@@ -182,6 +186,7 @@ public final class KenwoodLink {
         if (p.ptype != PLAIN) return new Event(line, null, null, 0);
         if (lastId != null && Arrays.equals(lastId, p.cmdId))
             return new Event(line + "  (a repeat)", KenwoodCommands.ack(p.cmdId, REPEAT), null, 0);
+        int cat0 = p.cmdId[2] & 0xFF, cmd0 = p.cmdId[3] & 0xFF;
         lastId = p.cmdId.clone();
         if ((p.cmdId[0] & 0xFF) == KenwoodCommands.MAIN && (p.cmdId[1] & 0xFF) == KenwoodCommands.CORE) {
             int cat = p.cmdId[2] & 0xFF, cmd = p.cmdId[3] & 0xFF;
@@ -192,7 +197,7 @@ public final class KenwoodLink {
                 line += startUp(cmd, p.payload);
             }
         }
-        return new Event(line, KenwoodCommands.ack(p.cmdId, TAKEN), null, 0);
+        return new Event(line, KenwoodCommands.ack(p.cmdId, TAKEN), null, 0, cat0, cmd0, p.payload.clone());
     }
 
     /** The stereo's start-up answers, each followed by the stock app's next step. Returns a note for the log. */

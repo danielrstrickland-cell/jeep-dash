@@ -23,7 +23,9 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import com.strickland.jeepdash.core.DiagLog;
+import com.strickland.jeepdash.core.KenwoodCommands;
 import com.strickland.jeepdash.core.KenwoodProbe;
+import com.strickland.jeepdash.core.KenwoodSettings;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -126,18 +128,24 @@ public class ProbeActivity extends Activity {
         scroll.addView(col);
 
         TextView title = text(20, Color.WHITE);
-        title.setText("Stereo probe: Kenwood sound settings (read only)");
+        title.setText("Stereo probe: Kenwood sound settings");
         col.addView(title);
         TextView how = text(12, Color.LTGRAY);
         how.setText("1 Force-stop the KENWOOD Remote app.  2 On the stereo: FUNCTION, REMOTE APP, SELECT, ANDROID: YES, "
-                + "then ANDROID LIST: this tablet.  3 Tap Pick stereo & run and wait about 30 seconds.  4 Save & share "
-                + "the log, whatever it shows.");
+                + "then ANDROID LIST: this tablet.  3 Tap Pick stereo & run: it reads every sound setting (reading "
+                + "changes nothing) and keeps them as your backup.  4 Test a write: changes Loudness one step, checks "
+                + "it, and puts it back.  5 Find the volume command: tries each way, you say if the stereo reacted.  "
+                + "6 Save & share the log.");
         col.addView(how);
 
         LinearLayout top = new LinearLayout(this);
         top.addView(button("Pick stereo & run", v -> pickStereo()));
         top.addView(button("Save & share", v -> save()));
         col.addView(top);
+        LinearLayout tests = new LinearLayout(this);
+        tests.addView(button("Test a write", v -> writeTest()));
+        tests.addView(button("Find the volume command", v -> findVolume(0)));
+        col.addView(tests);
 
         status = text(14, Color.rgb(120, 220, 140));
         status.setText("Not connected.");
@@ -193,9 +201,15 @@ public class ProbeActivity extends Activity {
         t.start();
     }
 
-    /** Waits for the session, then asks each question once the one before has been taken. */
+    private boolean waitIdle(long ms) throws InterruptedException {
+        long until = System.currentTimeMillis() + ms;
+        Thread.sleep(300);
+        while (!closing && link.connected() && !link.idle() && System.currentTimeMillis() < until) Thread.sleep(150);
+        return link.idle();
+    }
+
+    /** Waits for the session, then reads every sound setting and keeps the answers as the tune backup. */
     private void run() {
-        int asked = 0;
         try {
             long until = System.currentTimeMillis() + OPEN_WAIT_MS;
             while (!closing && !link.ready() && System.currentTimeMillis() < until) {
@@ -208,25 +222,94 @@ public class ProbeActivity extends Activity {
                 show("No session with the stereo. Tap Save & share to send the log.");
                 return;
             }
-            show("Session open. Asking...");
-            for (KenwoodProbe.Step step : new KenwoodProbe().steps()) {
-                if (closing || !link.connected()) break;
-                link.ask(step.label, step.category, step.cmd);
-                asked++;
-                long limit = System.currentTimeMillis() + ANSWER_WAIT_MS;
-                while (!closing && link.connected() && !link.idle() && System.currentTimeMillis() < limit) Thread.sleep(100);
-                Thread.sleep(STEP_MS);                       // room for the stereo's reply before the next question
-            }
+            show("Session open. Reading every sound setting...");
+            link.readAll();
+            waitIdle(ANSWER_WAIT_MS * KenwoodSettings.reads().size());
             Thread.sleep(TAIL_MS);
-            if (!closing) {
-                note("Probe finished. " + asked + " questions asked.");
-                show("Finished. Tap Save & share.");
-            }
+            if (closing) return;
+            KenwoodSettings.Backup b = link.heard();
+            String when = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(new Date());
+            String text = b.toText(when, stereoName);
+            for (String line : text.split("\n")) note(line);
+            if (b.size() > 0) SoundPrefs.of(this).edit().putString(SoundPrefs.STEREO_BACKUP, text)
+                    .putString(SoundPrefs.STEREO_BACKUP_WHEN, when).apply();
+            note("Read finished: the stereo answered " + b.size() + " of " + KenwoodSettings.reads().size() + " settings.");
+            show(b.size() + " settings read and kept as your backup. Now Test a write, Find the volume command, or Save & share.");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
             running = false;
         }
+    }
+
+    /** Changes Loudness one step, reads it back, and puts it back as it was. */
+    private void writeTest() {
+        if (!link.ready()) {
+            Toast.makeText(this, "Pick the stereo and let it read first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (running) {
+            Toast.makeText(this, "Wait for the probe to finish", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        running = true;
+        final KenwoodSettings.WriteTest w = KenwoodSettings.WriteTest.loudness();
+        link.listen((cat, cmd, p) -> { if (cat == KenwoodSettings.REPLY) w.onReply(cmd, p); });
+        note("Write test: Loudness, one step and back.");
+        show("Testing a write: watch LOUDNESS on the stereo...");
+        Thread t = new Thread(() -> {
+            try {
+                while (!closing && !w.done() && link.connected()) {
+                    KenwoodSettings.Msg m = w.next();
+                    if (m != null) link.ask(m.label, KenwoodCommands.CAT_SETTING, m.cmd, m.payload);
+                    Thread.sleep(500);
+                    w.tick();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                link.listen(null);
+                running = false;
+            }
+            String r = w.done() ? w.result() : "Write test stopped: the link ended.";
+            note("WRITE TEST: " + r);
+            show(r);
+        }, "probe-write");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** The ways of turning the volume tried in turn: a remote key (both code sets), mute, and a direct level. */
+    private static final String[] TRY_LABELS = {"Volume up key, code 8", "Volume up key, code 1",
+            "Volume down key, code 7", "Volume down key, code 2", "ATT key, code 12", "ATT key, code 4",
+            "Mute on (control 03)", "Mute off (control 03)"};
+    private static final int[][] TRIES = {{5, 8}, {5, 1}, {5, 7}, {5, 2}, {5, 12}, {5, 4}, {3, 1}, {3, 0}};
+
+    /** Sends one way of changing the volume, then asks whether the stereo reacted, and goes on to the next. */
+    private void findVolume(final int i) {
+        if (!link.ready()) {
+            Toast.makeText(this, "Pick the stereo and let it read first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (i == 0) note("Volume finder: trying each way, one at a time.");
+        if (i >= TRIES.length) {
+            note("Volume finder done.");
+            show("Volume finder done. Tap Save & share.");
+            return;
+        }
+        byte[] st = link.status();
+        note("TRY " + (i + 1) + ": " + TRY_LABELS[i] + (st == null ? "" : "  (stereo status " + KenwoodProbe.hex(st) + ")"));
+        link.ask(TRY_LABELS[i], KenwoodCommands.CAT_CONTROL, TRIES[i][0], (byte) TRIES[i][1]);
+        show("Sent: " + TRY_LABELS[i]);
+        main.postDelayed(() -> {
+            if (isFinishing()) return;
+            new AlertDialog.Builder(this).setTitle("Try " + (i + 1) + " of " + TRIES.length)
+                    .setMessage("Sent: " + TRY_LABELS[i] + ".\n\nDid the stereo do anything (volume moved, ATT or MUTE showed)?")
+                    .setPositiveButton("Yes", (d, w) -> { note("RESULT " + (i + 1) + ": " + TRY_LABELS[i] + ": the stereo REACTED"); findVolume(i + 1); })
+                    .setNegativeButton("No", (d, w) -> { note("RESULT " + (i + 1) + ": " + TRY_LABELS[i] + ": no reaction"); findVolume(i + 1); })
+                    .setNeutralButton("Stop", (d, w) -> note("Volume finder stopped at try " + (i + 1) + "."))
+                    .setCancelable(false).show();
+        }, 1500);
     }
 
     private void show(String s) { main.post(() -> status.setText(s)); }

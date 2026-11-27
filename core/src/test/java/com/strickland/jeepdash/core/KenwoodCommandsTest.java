@@ -20,7 +20,8 @@ public class KenwoodCommandsTest {
 
     public static void presetEqIsASettingCommand() {
         KenwoodFrame.Parsed p = KenwoodFrame.parse(KenwoodCommands.presetEq(3, 5));
-        T.eq(new byte[]{(byte) 0xA4, 0x50, 0x41, 15, 3}, p.cmdId, "core, main, setting, set preset EQ, seq");
+        T.eq(new byte[]{(byte) 0xA4, 0x50, 0x3D, 15, 3}, p.cmdId,
+                "core, main, setting (3D, as the stock app's settings screens send), set preset EQ, seq");
         T.eq(new byte[]{5}, p.payload, "preset index");
     }
 
@@ -39,9 +40,10 @@ public class KenwoodCommandsTest {
         T.eq(new byte[]{0}, p.payload, "result code");
     }
 
-    public static void readHasNoPayloadAndGateFlagsUnknownSets() {
-        T.eq(0, KenwoodFrame.parse(KenwoodCommands.read(1, KenwoodCommands.GET_CUSTOM_EQ)).payload.length,
-                "a read carries nothing");
+    public static void readCarriesAZeroAndGateFlagsUnknownSets() {
+        KenwoodFrame.Parsed r = KenwoodFrame.parse(KenwoodCommands.read(1, KenwoodCommands.GET_CUSTOM_EQ));
+        T.eq(new byte[]{0}, r.payload, "a read carries one 0, as the stock app's settings screens send it");
+        T.eq(0x3D, r.cmdId[2] & 0xFF, "in the settings category");
         T.ok(KenwoodCommands.unconfirmed(KenwoodCommands.CAT_SETTING, KenwoodCommands.SET_CUSTOM_EQ),
                 "custom EQ write is unconfirmed");
         T.ok(!KenwoodCommands.unconfirmed(KenwoodCommands.CAT_SETTING, KenwoodCommands.SET_PRESET_EQ),

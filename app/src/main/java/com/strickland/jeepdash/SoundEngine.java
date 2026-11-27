@@ -135,19 +135,20 @@ final class SoundEngine {
         if (refused) return;
         try {
             if (dp != null && frameMs != wantedFrameMs) release();   // music and movie modes use different blocks
-            if (dp == null) open(g.bandDb.length, outputRate(c), wantedFrameMs);
+            if (dp == null) open(DspBands.FINE, outputRate(c), wantedFrameMs);
+            double[] fine = DspBands.fine(g.bandDb);            // the 31 gains drawn smooth through the fine bands
             boolean fresh = sent == null;
             if (level != levelling) {
                 dp.setLimiterAllChannelsTo(limiter(level));
                 levelling = level;
                 Diag.info(DiagLog.DSP, level ? "Movie levelling on." : "Movie levelling off.");
             }
-            for (int i = 0; i < g.bandDb.length; i++) {
-                if (sent != null && Math.abs(sent[i] - g.bandDb[i]) < STEP_DB) continue;
+            for (int i = 0; i < fine.length; i++) {
+                if (sent != null && Math.abs(sent[i] - fine[i]) < STEP_DB) continue;
                 dp.setPreEqBandAllChannelsTo(i,
-                        new DynamicsProcessing.EqBand(true, DspBands.cutoff(i, rate, frameMs), (float) g.bandDb[i]));
-                if (sent == null) sent = new double[g.bandDb.length];
-                sent[i] = g.bandDb[i];
+                        new DynamicsProcessing.EqBand(true, DspBands.fineCutoff(i, rate, frameMs), (float) fine[i]));
+                if (sent == null) sent = new double[fine.length];
+                sent[i] = fine[i];
             }
             if (Math.abs(sentHeadroom - g.headroomDb) >= STEP_DB) {
                 dp.setInputGainAllChannelsTo((float) g.headroomDb);
@@ -176,7 +177,7 @@ final class SoundEngine {
         dp = new DynamicsProcessing(0, 0, cfg);               // session 0: everything the tablet plays
         DynamicsProcessing.Eq eq = new DynamicsProcessing.Eq(true, true, bands);
         for (int i = 0; i < bands; i++) {
-            eq.getBand(i).setCutoffFrequency(DspBands.cutoff(i, rate, frameMs));
+            eq.getBand(i).setCutoffFrequency(DspBands.fineCutoff(i, rate, frameMs));
             eq.getBand(i).setGain(0);
         }
         dp.setPreEqAllChannelsTo(eq);

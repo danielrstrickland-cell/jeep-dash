@@ -47,6 +47,7 @@ import android.widget.Toast;
 import com.strickland.jeepdash.core.BoxTune;
 import com.strickland.jeepdash.core.DiagLog;
 import com.strickland.jeepdash.core.KenwoodLink;
+import com.strickland.jeepdash.core.KenwoodSettings;
 import com.strickland.jeepdash.core.NoiseProfile;
 import com.strickland.jeepdash.core.ProfileRoute;
 import com.strickland.jeepdash.core.SoundAdapt;
@@ -77,7 +78,10 @@ import java.util.function.Consumer;
  */
 public class SoundActivity extends Activity implements ServiceConnection {
     private static final int RATE = 48000, BLOCK = 4096, REQ_MIC = 3, REQ_CAL_FILE = 4, REQ_BT = 5;
-    private static final double AMBIENT_S = 1.5, SETTLE_S = 0.8, MEASURE_S = 8;
+    /** Calibrate: quiet, settle, then noise while the tablet is moved slowly round the head (a moving-mic average). */
+    private static final double AMBIENT_S = 1.5, SETTLE_S = 0.8, MEASURE_S = 16;
+    /** The check that follows: the corrected sound measured the same way, and how much worse a band may get. */
+    private static final double CHECK_S = 12, CHECK_MARGIN_DB = 2, CHECK_WAIT_MS = 2500;
     private static final int BG = Color.rgb(12, 16, 24), CARD = Color.rgb(22, 28, 40), LINE = Color.rgb(40, 50, 68),
             INK = Color.rgb(226, 232, 242), DIM = Color.rgb(138, 150, 170), GOOD = Color.rgb(96, 214, 150),
             WARN = Color.rgb(240, 150, 110);
@@ -87,7 +91,8 @@ public class SoundActivity extends Activity implements ServiceConnection {
     private LinkService service;
     private boolean bound;
     private volatile Thread mic;
-    private volatile boolean calibrating, noiseOn, learning, boxTuning;
+    private volatile boolean calibrating, checking, noiseOn, learning, boxTuning;
+    private volatile boolean checkUsb;                 // the check uses the same mic as the Calibrate it checks
     private volatile String learnNote = "";
     private String shownProfile = "";                  // the sound profile this screen was built for
     /** True while this screen is in front: the link service does not swap sound profiles under it. */
@@ -95,6 +100,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
     private volatile int learnKept, learnMusic, learnNoSpeed;      // why learning did or did not hear anything
     private volatile NoiseProfile profile;             // the cabin noise learned so far, or null
     private final StereoLink stereo = new StereoLink();
+    private TextView backupState;
     private AudioManager audio;
     private TextView noiseState, boxState, huState;
     private Button learnButton;
@@ -195,6 +201,14 @@ public class SoundActivity extends Activity implements ServiceConnection {
     public void onServiceDisconnected(ComponentName name) { service = null; }
 
     /** A setting changed: have the engine re-apply now, not at its next tick. */
+    /** One tap for the bass shelf: the target becomes Custom with that shelf, keeping the treble as set. */
+    private void bassPreset(int db) {
+        prefs.edit().putString(SoundPrefs.TARGET, "CUSTOM").putInt(SoundPrefs.BASS, db).apply();
+        Diag.info(DiagLog.DSP, "Target bass shelf set to " + db + " dB.");
+        changed();
+        recreate();                                        // the target picker and the slider show the new values
+    }
+
     private void changed() {
         LinkService s = service;
         if (s != null) s.soundChanged();
@@ -339,19 +353,25 @@ public class SoundActivity extends Activity implements ServiceConnection {
         tune.addView(graph, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (190 * density)));
         picker(tune, "Target curve", new String[]{"Harman", "Flat / reference", "Custom"},
                 new String[]{"HARMAN", "FLAT", "CUSTOM"}, SoundPrefs.TARGET, "HARMAN");
+        LinearLayout bassRow = row(tune);
+        bassRow.addView(button("Less bass", v -> bassPreset(SoundPrefs.BASS_LESS)));
+        bassRow.addView(button("Normal bass", v -> bassPreset(SoundPrefs.BASS_NORMAL)));
+        bassRow.addView(button("More bass", v -> bassPreset(SoundPrefs.BASS_MORE)));
         slider(tune, "Custom bass shelf", SoundPrefs.BASS, 0, 12, 7, " dB");
         slider(tune, "Custom treble at 20 kHz", SoundPrefs.TREBLE, -10, 0, -6, " dB");
 
         LinearLayout cal = card(col, "Calibrate and room correction", SoundHelp.CALIBRATE);
         cal.addView(label("Engine off or idling, windows up, tablet where your head is. Set a normal listening "
-                + "volume. It plays about 10 seconds of noise and stores what the mic hears.", 12, DIM));
+                + "volume. It plays about 16 seconds of noise: move the tablet slowly round your head while it does. "
+                + "Then, with the Tablet DSP on, it checks the result and leaves out anything that came out worse.", 12, DIM));
         picker(cal, "Microphone", new String[]{"Tablet's built-in mic", "USB measurement mic"},
                 new String[]{"builtin", "usb"}, SoundPrefs.MIC_USB, "builtin");
         LinearLayout calRow = row(cal);
         calRow.addView(button("Calibrate", v -> askCalibrate()));
         calRow.addView(button("Load mic cal file", v -> pickCalFile()));
+        calRow.addView(button("Undo", v -> undoCalibrate()));
         calRow.addView(button("Clear", v -> {
-            prefs.edit().remove(SoundPrefs.MEASURED).apply();
+            prefs.edit().remove(SoundPrefs.MEASURED).remove(SoundPrefs.CHECK_MASK).apply();
             calState.setText("Correction cleared.");
             changed();
         }));
@@ -467,6 +487,12 @@ public class SoundActivity extends Activity implements ServiceConnection {
         keyRow.addView(button("Vol -", v -> { if (stereoReady()) stereo.volumeDown(); }));
         keyRow.addView(button("Vol +", v -> { if (stereoReady()) stereo.volumeUp(); }));
         keyRow.addView(button("ATT", v -> { if (stereoReady()) stereo.att(); }));
+        LinearLayout backupRow = row(hu);
+        backupRow.addView(button("Back up my tune", v -> backupTune()));
+        String bw = prefs.getString(SoundPrefs.STEREO_BACKUP_WHEN, null);
+        backupState = label(bw == null ? "No backup of the stereo's tune yet. Reading changes nothing on the stereo."
+                : "Last backup: " + bw + ".", 12, DIM);
+        hu.addView(backupState);
         LinearLayout presetRow = row(hu);
         String[] places = new String[KenwoodLink.PRESETS];
         for (int i = 0; i < places.length; i++) places[i] = "Preset " + i;
@@ -776,6 +802,39 @@ public class SoundActivity extends Activity implements ServiceConnection {
 
     // ---------------- the Kenwood link ----------------
 
+    /**
+     * Reads every sound setting from the stereo (reads only: nothing on the stereo changes) and keeps the
+     * answers as this profile-independent backup, and in the diagnostics log.
+     */
+    private void backupTune() {
+        if (!stereoReady()) return;
+        backupState.setText("Reading every sound setting from the stereo...");
+        Thread t = new Thread(() -> {
+            stereo.readAll();
+            long until = android.os.SystemClock.elapsedRealtime() + 45000;
+            try {
+                Thread.sleep(400);
+                while (!stereo.idle() && stereo.connected() && android.os.SystemClock.elapsedRealtime() < until) Thread.sleep(200);
+                Thread.sleep(1500);                                  // room for the last answers
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            KenwoodSettings.Backup b = stereo.heard();
+            String when = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(new java.util.Date());
+            String text = b.toText(when, prefs.getString(SoundPrefs.STEREO_NAME, "the stereo"));
+            if (b.size() > 0) prefs.edit().putString(SoundPrefs.STEREO_BACKUP, text).putString(SoundPrefs.STEREO_BACKUP_WHEN, when).apply();
+            for (String line : text.split("\n")) Diag.info(DiagLog.CMD, line);
+            final String shown = b.size() == 0
+                    ? "The stereo answered none of the settings questions. Send the diagnostics log."
+                    : "Tune backed up: " + b.size() + " settings, " + when + ". It is in the diagnostics log too.";
+            Diag.info(DiagLog.CMD, shown);
+            main.post(() -> backupState.setText(shown));
+        }, "stereo-backup");
+        t.setDaemon(true);
+        t.start();
+    }
+
     private boolean stereoReady() {
         if (stereo.connected()) return true;
         Toast.makeText(this, "Connect to the stereo first", Toast.LENGTH_SHORT).show();
@@ -980,7 +1039,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
                 sweepHeard = null;
                 double[] mag = SoundTune.magnitudes(block);
 
-                if (calibrating) {
+                if (calibrating || checking) {
                     long now = System.currentTimeMillis();
                     if (!wasCal) {                                   // a new run: start clean
                         wasCal = true;
@@ -990,20 +1049,26 @@ public class SoundActivity extends Activity implements ServiceConnection {
                         ambientBlocks = measureBlocks = clipped = 0;
                     }
                     double t = (now - calStart) / 1000.0;
-                    if (t < AMBIENT_S) {
+                    double quiet = checking ? 0 : AMBIENT_S, length = checking ? CHECK_S : MEASURE_S;
+                    if (t < quiet) {
                         addPower(ambient, mag);
                         ambientBlocks++;
-                    } else if (t < AMBIENT_S + SETTLE_S) {
+                    } else if (t < quiet + SETTLE_S) {
                         if (!noiseOn) startNoise();
-                    } else if (t < AMBIENT_S + SETTLE_S + MEASURE_S) {
+                    } else if (t < quiet + SETTLE_S + length) {
                         addPower(measure, mag);
                         measureBlocks++;
                         if (peak > 32000) clipped++;
                     } else {
                         noiseOn = false;
-                        calibrating = false;
                         wasCal = false;
-                        finishCalibrate(bandsOf(ambient, ambientBlocks), bandsOf(measure, measureBlocks), clipped, usb);
+                        if (checking) {
+                            checking = false;
+                            finishCheck(bandsOf(measure, measureBlocks), clipped);
+                        } else {
+                            calibrating = false;
+                            finishCalibrate(bandsOf(ambient, ambientBlocks), bandsOf(measure, measureBlocks), clipped, usb);
+                        }
                     }
                     continue;
                 }
@@ -1050,11 +1115,12 @@ public class SoundActivity extends Activity implements ServiceConnection {
             calState.setText("The microphone is not running, so Calibrate cannot listen.");
             return;
         }
-        if (calibrating || boxTuning) return;
+        if (calibrating || checking || boxTuning) return;
         if (service != null) service.sound().setBypass(true);     // measure the system untouched
         changed();
         calState.setTextColor(GOOD);
-        calState.setText("Measuring: quiet first, then about 9 seconds of noise...");
+        calState.setText("Measuring: quiet first, then about 16 seconds of noise. While it plays, move the tablet "
+                + "slowly in a small circle around where your head sits, about a foot each way.");
         Diag.info(DiagLog.CAL, "Calibrate started.");
         calibrating = true;
     }
@@ -1136,8 +1202,17 @@ public class SoundActivity extends Activity implements ServiceConnection {
             if (c[i] < loHz) lo = i + 1;
             if (c[i] <= hiHz) hi = i;
         }
-        prefs.edit().putString(SoundPrefs.MEASURED, SoundPlan.toText(measured))
+        SharedPreferences.Editor ed = prefs.edit();
+        String was = prefs.getString(SoundPrefs.MEASURED, null);
+        if (was != null) {                                          // kept for Undo
+            ed.putString(SoundPrefs.PREV_MEASURED, was)
+                    .putInt(SoundPrefs.PREV_LO, prefs.getInt(SoundPrefs.VALID_LO, 0))
+                    .putInt(SoundPrefs.PREV_HI, prefs.getInt(SoundPrefs.VALID_HI, c.length - 1))
+                    .putString(SoundPrefs.PREV_MASK, prefs.getString(SoundPrefs.CHECK_MASK, ""));
+        }
+        ed.putString(SoundPrefs.MEASURED, SoundPlan.toText(measured)).remove(SoundPrefs.CHECK_MASK)
                 .putInt(SoundPrefs.VALID_LO, lo).putInt(SoundPrefs.VALID_HI, hi).apply();
+        checkUsb = usb;
         int reach = SoundTune.reach(measured, SoundPrefs.targetBands(prefs))[0];
         final String done = String.format(Locale.US, "Calibrated %s with the %s (noise %.0f dB above the cabin). Correcting %d Hz to %s.",
                 SoundProfiles.name(prefs, SoundProfiles.active(prefs)), trusted ? "measurement mic" : usb ? "USB mic, no cal file loaded" : "built-in mic",
@@ -1148,10 +1223,73 @@ public class SoundActivity extends Activity implements ServiceConnection {
         Diag.info(DiagLog.CAL, "Measured (dB, 20 Hz to 20 kHz): " + SoundPlan.toText(measured));
         double[] fix = SoundPrefs.correction(prefs);
         if (fix != null) Diag.info(DiagLog.CAL, "Correction toward the target: " + SoundPlan.toText(fix));
+        final boolean check = prefs.getBoolean(SoundPrefs.ENABLED, false);
+        main.post(() -> {
+            calState.setTextColor(GOOD);
+            calState.setText(done + (check ? " Now checking the result: keep moving the tablet the same way..."
+                    : " Turn the Tablet DSP on and Calibrate again to have the result checked."));
+            changed();
+            if (check) main.postDelayed(() -> { if (mic != null && !calibrating) checking = true; }, (long) CHECK_WAIT_MS);
+        });
+    }
+
+    /**
+     * After a Calibrate: the corrected sound, measured the same way. Any band now further from the target than
+     * before (by more than CHECK_MARGIN_DB) is left out of the correction.
+     */
+    private void finishCheck(double[] after, int clipped) {
+        double[] before = SoundPlan.fromText(prefs.getString(SoundPrefs.MEASURED, null));
+        if (before == null || clipped > 3) {
+            String why = before == null ? "there was no measurement to check against" : "the mic overloaded";
+            Diag.warn(DiagLog.CAL, "Check skipped: " + why + ".");
+            main.post(() -> calState.setText("Calibrated. The check was skipped: " + why + "."));
+            return;
+        }
+        String calText = checkUsb ? prefs.getString(SoundPrefs.MIC_CAL, null) : null;
+        if (calText != null) after = SoundTune.applyMicCal(after, SoundTune.parseMicCal(calText));
+        boolean[] worse = SoundTune.worse(before, after, SoundPrefs.targetBands(prefs), CHECK_MARGIN_DB);
+        int lo = prefs.getInt(SoundPrefs.VALID_LO, 0), hi = prefs.getInt(SoundPrefs.VALID_HI, worse.length - 1);
+        double[] c = SoundTune.bandCentres();
+        StringBuilder left = new StringBuilder();
+        int dropped = 0;
+        for (int i = 0; i < worse.length; i++) {
+            if (i < lo || i > hi) worse[i] = false;
+            if (!worse[i]) continue;
+            dropped++;
+            left.append(left.length() == 0 ? "" : ", ").append(c[i] >= 1000
+                    ? String.format(Locale.US, "%.1f kHz", c[i] / 1000) : String.format(Locale.US, "%d Hz", Math.round(c[i])));
+        }
+        prefs.edit().putString(SoundPrefs.CHECK_MASK, SoundPrefs.maskText(worse)).apply();
+        Diag.info(DiagLog.CAL, "Checked (dB, 20 Hz to 20 kHz, corrected): " + SoundPlan.toText(after));
+        final String done = dropped == 0 ? "Checked: the correction made every band closer to the target, or no worse."
+                : "Checked: left out " + dropped + " band" + (dropped == 1 ? "" : "s") + " the correction made worse (" + left + ").";
+        Diag.info(DiagLog.CAL, done);
         main.post(() -> {
             calState.setTextColor(GOOD);
             calState.setText(done);
             changed();
         });
+    }
+
+    /** Puts back the measurement from before the last Calibrate, and keeps the newer one for undoing the undo. */
+    private void undoCalibrate() {
+        String prev = prefs.getString(SoundPrefs.PREV_MEASURED, null);
+        if (prev == null) {
+            calState.setText("Nothing to undo: there is no earlier Calibrate for this profile.");
+            return;
+        }
+        int n = SoundTune.bandCentres().length;
+        String cur = prefs.getString(SoundPrefs.MEASURED, null);
+        SharedPreferences.Editor e = prefs.edit();
+        e.putString(SoundPrefs.MEASURED, prev).putInt(SoundPrefs.VALID_LO, prefs.getInt(SoundPrefs.PREV_LO, 0))
+                .putInt(SoundPrefs.VALID_HI, prefs.getInt(SoundPrefs.PREV_HI, n - 1))
+                .putString(SoundPrefs.CHECK_MASK, prefs.getString(SoundPrefs.PREV_MASK, ""));
+        if (cur != null) e.putString(SoundPrefs.PREV_MEASURED, cur).putInt(SoundPrefs.PREV_LO, prefs.getInt(SoundPrefs.VALID_LO, 0))
+                .putInt(SoundPrefs.PREV_HI, prefs.getInt(SoundPrefs.VALID_HI, n - 1))
+                .putString(SoundPrefs.PREV_MASK, prefs.getString(SoundPrefs.CHECK_MASK, ""));
+        e.apply();
+        Diag.info(DiagLog.CAL, "Undid the last Calibrate: the earlier measurement is back.");
+        calState.setText("The earlier Calibrate is back. Tap Undo again to return to the newer one.");
+        changed();
     }
 }

@@ -57,4 +57,32 @@ public final class DspBands {
         }
         return of;
     }
+
+    /**
+     * How many bands the effect is actually given: one every ninth of an octave, 20 Hz to 20 kHz. The plan's 31
+     * gains are drawn through them as a smooth curve ({@link #fine}), so a change between two of the 31 bands
+     * comes in small steps rather than one hard edge, which in a block-based effect like this one rings.
+     */
+    public static final int FINE = 91;
+
+    /** The fine bands' centres: 1 kHz times 2 to the (j - 51) / 9. */
+    public static double[] fineCentres() {
+        double[] c = new double[FINE];
+        for (int j = 0; j < FINE; j++) c[j] = 1000 * Math.pow(2, (j - 51) / 9.0);
+        return c;
+    }
+
+    /** The plan's 31 band gains, read off at each fine band's centre (straight lines on a log-pitch scale). */
+    public static double[] fine(double[] bandDb) {
+        double[] c = fineCentres();
+        double[] out = new double[FINE];
+        for (int j = 0; j < FINE; j++) out[j] = SoundTune.at(bandDb, c[j]);
+        return out;
+    }
+
+    /** A fine band's cutoff: its top edge less half a step, kept above zero and rising, as {@link #cutoff} does. */
+    public static float fineCutoff(int j, double rate, float frameMs) {
+        double step = rate / blockFor(rate, frameMs);
+        return (float) Math.max(fineCentres()[j] * Math.pow(2, 1 / 18.0) - step / 2, 1 + j * 0.1);
+    }
 }

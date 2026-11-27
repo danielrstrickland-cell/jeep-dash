@@ -293,4 +293,15 @@ public class KenwoodLinkTest {
             k.onFrame(taken(o, 0));
         }
     }
+
+    public static void theStereosOwnMessagesAreHandedOnWithTheirNumbers() {
+        KenwoodLink k = opened();
+        KenwoodLink.Event e = k.onFrame(says(0x5D, 0x4C, 7, 1));
+        T.eq(0x5D, e.cat, "the category it came in");
+        T.eq(0x4C, e.cmd, "the command");
+        T.eq(new byte[]{1}, e.payload, "and what it carried");
+        KenwoodLink.Event ack = k.onFrame(KenwoodFrame.frame(new byte[]{(byte) 0xA4, 0x50, 0x3D, 0x4C, 9}, KenwoodFrame.ACK, new byte[]{0}));
+        T.eq(-1, ack.cat, "an acknowledgement is not one of the stereo's messages");
+        T.ok(ack.payload == null, "and carries nothing on");
+    }
 }

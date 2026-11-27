@@ -10,6 +10,7 @@ public class KenwoodProbeTest {
         T.ok(steps.size() >= 10, "the sound settings are all asked for");
         for (KenwoodProbe.Step s : steps) {
             T.ok(!KenwoodCommands.unconfirmed(s.category, s.cmd), s.label + " is not a setting write");
+            T.ok(!KenwoodSettings.isWrite(s.cmd), s.label + " is none of the stock app's writes");
             T.ok(s.category != 0x3B && s.category != 0x5B, s.label + " is not session set-up: the link does that");
         }
     }

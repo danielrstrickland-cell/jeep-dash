@@ -22,17 +22,8 @@ public final class KenwoodProbe {
     private final List<Step> steps = new ArrayList<>();
 
     public KenwoodProbe() {
-        steps.add(new Step("EQ menu", KenwoodCommands.CAT_SETTING, KenwoodCommands.EQ_MENU));
-        steps.add(new Step("read preset EQ", KenwoodCommands.CAT_SETTING, KenwoodCommands.GET_PRESET_EQ));
-        steps.add(new Step("read custom EQ", KenwoodCommands.CAT_SETTING, KenwoodCommands.GET_CUSTOM_EQ));
-        steps.add(new Step("filter menu", KenwoodCommands.CAT_SETTING, KenwoodCommands.HPF_LPF_MENU));
-        steps.add(new Step("read HPF/LPF", KenwoodCommands.CAT_SETTING, KenwoodCommands.GET_HPF_LPF));
-        steps.add(new Step("fader/balance menu", KenwoodCommands.CAT_SETTING, KenwoodCommands.FAD_BAL_MENU));
-        steps.add(new Step("read fader/balance", KenwoodCommands.CAT_SETTING, KenwoodCommands.GET_FAD_BAL));
-        steps.add(new Step("read sub pre-out", KenwoodCommands.CAT_SETTING, KenwoodCommands.GET_SUB_PREOUT));
-        steps.add(new Step("read sub level", KenwoodCommands.CAT_SETTING, KenwoodCommands.GET_SUB_LEVEL));
-        steps.add(new Step("read bass boost", KenwoodCommands.CAT_SETTING, KenwoodCommands.GET_BASS_BOOST));
-        steps.add(new Step("read loudness", KenwoodCommands.CAT_SETTING, KenwoodCommands.GET_LOUDNESS));
+        for (KenwoodSettings.Read r : KenwoodSettings.reads())
+            steps.add(new Step(r.label, KenwoodCommands.CAT_SETTING, r.cmd));
     }
 
     /** The questions, in order. The session itself is {@link KenwoodLink}'s business. */
