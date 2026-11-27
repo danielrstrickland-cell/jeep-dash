@@ -41,21 +41,6 @@ public final class KenwoodManual {
         return (k == Math.rint(k) ? String.format(Locale.US, "%d", (int) k) : String.valueOf(k)) + " kHz";
     }
 
-    /** True if every byte is a plausible EQ level read as a plain signed number (-9..+9). */
-    static boolean allSigned(byte[] p, int from, int to, int min, int max) {
-        for (int i = from; i < to; i++) if (p[i] < min || p[i] > max) return false;
-        return true;
-    }
-
-    /** True if every byte is a plausible level read as a number with the low end stored as zero (0..max-min). */
-    static boolean allOffset(byte[] p, int from, int to, int min, int max) {
-        for (int i = from; i < to; i++) {
-            int v = p[i] & 0xFF;
-            if (v > max - min) return false;
-        }
-        return true;
-    }
-
     /**
      * A manual-based reading of one setting's answer, or null if nothing in the manual fits. Always worded as
      * "fits", because the command numbers are still being matched to settings.
@@ -71,17 +56,31 @@ public final class KenwoodManual {
             if (v < PRESET_EQ.length) out.add("fits a preset-EQ number (" + PRESET_EQ[v] + ")");
             if (v < Q_FACTORS.length) out.add("fits the Q factor (" + String.format(Locale.US, "%.2f", Q_FACTORS[v]) + ")");
             if (v <= FADER_MAX * 2) out.add("fits fader/balance if centre is " + FADER_MAX);
-        } else if (n >= 13 && n <= 14) {
-            String how = allSigned(p, 0, 13, EQ_MIN, EQ_MAX) ? "as plain -9..+9"
-                    : allOffset(p, 0, 13, EQ_MIN, EQ_MAX) ? "as 0..18 with 9 = flat" : null;
-            if (how != null) {
-                StringBuilder b = new StringBuilder("fits the 13 EQ bands " + how + ": ");
+        } else if (n == 13 || n == 14) {
+            // custom EQ: the stock app writes each level as a code: 0 = 0 dB, 1-9 one way, 19-27 the other
+            // (which way is a cut is not confirmed). A leading extra byte is shown raw.
+            int from = n - 13;
+            boolean fits = true;
+            for (int i = from; i < n; i++) { int c = p[i] & 0xFF; if (c > 9 && (c < 19 || c > 27)) fits = false; }
+            if (fits) {
+                StringBuilder b = new StringBuilder("fits the 13 EQ bands as level codes (0 = flat, 1-9 and 19-27 = 1-9 dB, direction unconfirmed): ");
+                if (from == 1) b.append("lead ").append(p[0] & 0xFF).append("; ");
                 for (int i = 0; i < 13; i++) {
-                    int v = how.startsWith("as plain") ? p[i] : (p[i] & 0xFF) - 9;
-                    b.append(i == 0 ? "" : ", ").append(eqBand(i)).append(' ').append(v > 0 ? "+" : "").append(v);
+                    int c = p[from + i] & 0xFF;
+                    b.append(i == 0 ? "" : ", ").append(eqBand(i)).append(' ')
+                            .append(c == 0 ? "0 dB" : "code " + c + " (" + (c <= 9 ? c : c - 18) + " dB)");
                 }
                 out.add(b.toString());
             }
+        } else if (n == 17) {
+            // time alignment as the stock app writes it: adjust type, listening position, then 5 x (speaker, 2 bytes)
+            StringBuilder b = new StringBuilder("fits time alignment: type " + (p[0] & 0xFF) + (p[0] == 0 ? " (distance)" : p[0] == 1 ? " (gain)" : "")
+                    + ", position " + (p[1] & 0xFF) + ";");
+            for (int i = 0; i < 5; i++) {
+                int sp = p[2 + i * 3] & 0xFF, v = ((p[3 + i * 3] & 0xFF) << 8) | (p[4 + i * 3] & 0xFF);
+                b.append(' ').append(sp < DTA_SPEAKERS.length ? DTA_SPEAKERS[sp] : "speaker " + sp).append(' ').append(v);
+            }
+            out.add(b.toString() + " (value step not yet known; manual range 0-20.01 ft)");
         }
         if (out.isEmpty()) return null;
         return String.join("; ", out) + " (manual)";

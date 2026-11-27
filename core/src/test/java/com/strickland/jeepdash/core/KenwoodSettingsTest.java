@@ -113,9 +113,15 @@ public class KenwoodSettingsTest {
         T.eq("16 kHz", KenwoodManual.eqBand(12), "last EQ band");
         T.eq(13, KenwoodManual.EQ_HZ.length, "13 bands");
         byte[] bands = new byte[13];
-        for (int i = 0; i < 13; i++) bands[i] = 9;                       // 9 = flat when stored as 0..18
+        for (int i = 0; i < 13; i++) bands[i] = (byte) (i == 3 ? 20 : 0);   // 0 = flat, 20 = a code in the 19-27 range
         String h = KenwoodManual.hint(0x40, bands);
         T.ok(h != null && h.contains("62.5 Hz") && h.contains("16 kHz") && h.contains("(manual)"), "bands named: " + h);
+        T.ok(h.contains("250 Hz code 20 (2 dB)") && h.contains("62.5 Hz 0 dB"), "level codes read as the stock app writes them: " + h);
+        T.ok(KenwoodManual.hint(0x40, new byte[]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12}) == null, "code 12 is not an EQ level");
+        byte[] ta = new byte[17];
+        ta[0] = 0; ta[1] = 1; ta[2] = 0; ta[3] = 1; ta[4] = 0x2C;       // type distance, FL = 300
+        String t = KenwoodManual.hint(0x5A, ta);
+        T.ok(t != null && t.contains("distance") && t.contains("FL 300"), "time alignment layout: " + t);
         T.ok(KenwoodManual.hint(0x40, new byte[]{100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100}) == null,
                 "nothing that does not fit the manual");
         KenwoodSettings.Backup b = new KenwoodSettings.Backup();
