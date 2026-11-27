@@ -130,15 +130,17 @@ public final class KenwoodSettings {
                 int v = p[0] & 0xFF;
                 if (v < names.size()) return "set to " + names.get(v);
                 if (cmd == 0x4E) return "level " + subLevel(p[0]);
-                return "value " + v;
+                String h = KenwoodManual.hint(cmd, p);
+                return h != null ? "value " + v + ", " + h : "value " + v;
             }
-            return null;
+            return KenwoodManual.hint(cmd, p);
         }
 
         /** A text file: a header, then one line per setting, "3D/4C = 01  # loudness now: set to LV1". */
         public synchronized String toText(String when, String stereo) {
             StringBuilder s = new StringBuilder("# Kenwood tune backup\n# stereo: ").append(stereo)
                     .append("\n# taken: ").append(when).append("\n# ").append(replies.size()).append(" settings\n");
+            for (String ref : KenwoodManual.reference()) s.append("# manual: ").append(ref).append('\n');
             for (Map.Entry<Integer, byte[]> e : replies.entrySet()) {
                 int cmd = e.getKey();
                 String w = words(cmd, e.getValue());
@@ -262,6 +264,115 @@ public final class KenwoodSettings {
 
         public synchronized boolean done() { return stage >= 6; }
         public synchronized boolean worked() { return worked; }
+        public synchronized String result() { return result; }
+    }
+
+    /**
+     * Puts a saved tune back. Only the one-byte settings whose write is known (loudness, bass boost, subwoofer
+     * on/off, subwoofer level) are restored; each is read first, written only if it differs, then read back.
+     * The first write the stereo does not take stops the run. Everything else in the backup is listed as
+     * not restored, because its layout is not yet verified.
+     */
+    public static final class Restore {
+        public static final int PATIENCE = 12;
+        private static final int[][] PAIRS = {{LOUD_LIST, LOUD_GET, LOUD_SET}, {BASS_LIST, BASS_GET, BASS_SET},
+                {0x42, 0x43, 0x44}, {-1, 0x4E, 0x4F}};
+        private static final String[] NAMES = {"Loudness", "Bass boost", "Subwoofer", "Subwoofer level"};
+
+        private final Backup saved;
+        private final List<Integer> todo = new ArrayList<>();
+        private final List<String> skipped = new ArrayList<>(), changed = new ArrayList<>();
+        private int at = -1, stage;            // stage 0 read now, 1 write sent (read back next), 2 read back, 3 done
+        private boolean handed, failed;
+        private int waited;
+        private String result = "";
+
+        public Restore(Backup saved) {
+            this.saved = saved;
+            for (int i = 0; i < PAIRS.length; i++) {
+                byte[] v = saved.get(PAIRS[i][1]);
+                if (v == null || v.length != 1) { skipped.add(NAMES[i] + " (not in the backup)"); continue; }
+                if (!valid(i, v[0])) { skipped.add(NAMES[i] + " (saved value out of range)"); continue; }
+                todo.add(i);
+            }
+            if (todo.isEmpty()) { stage = 3; result = "Nothing in the backup can be put back yet."; }
+            else at = 0;
+        }
+
+        private boolean valid(int i, byte b) {
+            if (PAIRS[i][0] < 0) {
+                int l = subLevel(b);
+                return l >= KenwoodManual.SUB_LEVEL_MIN && l <= KenwoodManual.SUB_LEVEL_MAX;
+            }
+            byte[] list = saved.get(PAIRS[i][0]);
+            return list == null || (b & 0xFF) < options(list).size();
+        }
+
+        /** Settings the saved backup holds that this restore leaves alone, for the log. */
+        public List<String> notRestored() {
+            List<String> out = new ArrayList<>(skipped);
+            for (Read r : READS) {
+                boolean covered = false;
+                for (int[] pr : PAIRS) if (r.cmd == pr[1] || r.cmd == pr[0]) covered = true;
+                if (!covered && saved.has(r.cmd)) out.add(r.label + " (layout not verified)");
+            }
+            return out;
+        }
+
+        private int get() { return PAIRS[todo.get(at)][1]; }
+        private int set() { return PAIRS[todo.get(at)][2]; }
+        private String name() { return NAMES[todo.get(at)]; }
+
+        /** The next message to send, once; null while waiting or when done. */
+        public synchronized Msg next() {
+            if (stage >= 3 || handed) return null;
+            handed = true;
+            waited = 0;
+            if (stage == 1) {
+                stage = 2;
+                handed = false;
+                return new Msg(name() + " put back", set(), saved.get(get()));
+            }
+            return new Msg(name() + (stage == 0 ? " now" : " check"), get(), new byte[]{0});
+        }
+
+        public synchronized void onReply(int cmd, byte[] p) {
+            if (stage >= 3 || !handed || cmd != get() || p.length != 1) return;
+            byte want = saved.get(get())[0];
+            if (stage == 0) {
+                if (p[0] == want) { nextItem(); return; }
+                stage = 1;
+                handed = false;
+            } else if (stage == 2) {
+                if (p[0] == want) { changed.add(name()); nextItem(); }
+                else fail(name() + " did not take the write: it reads " + hex(p) + ", the backup has " + hex(new byte[]{want}) + ".");
+            }
+        }
+
+        private void nextItem() {
+            if (++at >= todo.size()) {
+                stage = 3;
+                result = changed.isEmpty() ? "Everything already matched the backup. Nothing was written."
+                        : "Put back: " + String.join(", ", changed) + ".";
+                return;
+            }
+            stage = 0;
+            handed = false;
+        }
+
+        private void fail(String text) {
+            stage = 3;
+            failed = true;
+            result = text + (changed.isEmpty() ? "" : " Put back before that: " + String.join(", ", changed) + ".");
+        }
+
+        public synchronized void tick() {
+            if (stage >= 3 || !handed) return;
+            if (++waited >= PATIENCE) fail("The stereo gave no answer for " + name() + ".");
+        }
+
+        public synchronized boolean done() { return stage >= 3; }
+        public synchronized boolean worked() { return stage >= 3 && !failed && !todo.isEmpty(); }
         public synchronized String result() { return result; }
     }
 

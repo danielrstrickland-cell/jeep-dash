@@ -273,6 +273,7 @@ public class ProbeActivity extends Activity {
             }
             String r = w.done() ? w.result() : "Write test stopped: the link ended.";
             note("WRITE TEST: " + r);
+            if (w.done() && w.worked()) SoundPrefs.of(this).edit().putBoolean(SoundPrefs.STEREO_WRITE_OK, true).apply();
             show(r);
         }, "probe-write");
         t.setDaemon(true);

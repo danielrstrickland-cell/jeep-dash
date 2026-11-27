@@ -106,4 +106,72 @@ public class KenwoodSettingsTest {
         T.ok(w.done() && !w.worked(), "gives up without writing anything");
         T.ok(w.result().contains("no answer"), w.result());
     }
+
+    public static void theManualRangesLabelTheBackup() {
+        T.eq("62.5 Hz", KenwoodManual.eqBand(0), "first EQ band");
+        T.eq("1.6 kHz", KenwoodManual.eqBand(7), "a kHz band");
+        T.eq("16 kHz", KenwoodManual.eqBand(12), "last EQ band");
+        T.eq(13, KenwoodManual.EQ_HZ.length, "13 bands");
+        byte[] bands = new byte[13];
+        for (int i = 0; i < 13; i++) bands[i] = 9;                       // 9 = flat when stored as 0..18
+        String h = KenwoodManual.hint(0x40, bands);
+        T.ok(h != null && h.contains("62.5 Hz") && h.contains("16 kHz") && h.contains("(manual)"), "bands named: " + h);
+        T.ok(KenwoodManual.hint(0x40, new byte[]{100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100}) == null,
+                "nothing that does not fit the manual");
+        KenwoodSettings.Backup b = new KenwoodSettings.Backup();
+        b.add(0x40, bands);
+        String text = b.toText("now", "KMM-BT728HD");
+        T.ok(text.contains("# manual: EQ bands"), "the log carries the manual's ranges");
+        T.ok(text.contains("1.6 kHz"), "and each band by name");
+        T.eq(1, KenwoodSettings.Backup.fromText(text).size(), "the manual lines do not confuse reading it back");
+    }
+
+    private static KenwoodSettings.Backup tune(int loud, int sub) {
+        KenwoodSettings.Backup b = new KenwoodSettings.Backup();
+        b.add(0x4B, list("OFF", "LV1", "LV2"));
+        b.add(0x4C, new byte[]{(byte) loud});
+        b.add(0x4E, new byte[]{KenwoodSettings.subLevelByte(sub)});
+        b.add(0x40, new byte[13]);
+        return b;
+    }
+
+    private static void run(KenwoodSettings.Restore r, java.util.Map<Integer, byte[]> stereo) {
+        for (int guard = 0; guard < 200 && !r.done(); guard++) {
+            KenwoodSettings.Msg m = r.next();
+            if (m == null) { r.tick(); continue; }
+            if (m.payload.length == 1 && m.payload[0] == 0 && stereo.containsKey(m.cmd)) r.onReply(m.cmd, stereo.get(m.cmd));
+            else if (stereo.containsKey(m.cmd - 1)) stereo.put(m.cmd - 1, m.payload.clone());       // a write
+        }
+    }
+
+    public static void restoreWritesOnlyWhatDiffersAndChecksIt() {
+        java.util.Map<Integer, byte[]> stereo = new java.util.HashMap<>();
+        stereo.put(0x4C, new byte[]{0});                                  // loudness OFF now, backup has LV1
+        stereo.put(0x4E, new byte[]{KenwoodSettings.subLevelByte(-3)});   // sub level already matches
+        KenwoodSettings.Restore r = new KenwoodSettings.Restore(tune(1, -3));
+        run(r, stereo);
+        T.ok(r.done() && r.worked(), "finished: " + r.result());
+        T.eq(new byte[]{1}, stereo.get(0x4C), "loudness put back to LV1");
+        T.ok(r.result().contains("Loudness") && !r.result().contains("Subwoofer level"), r.result());
+        T.ok(r.notRestored().toString().contains("custom EQ bands"), "the EQ is listed as not restored: " + r.notRestored());
+    }
+
+    public static void restoreStopsAtAWriteTheStereoIgnores() {
+        KenwoodSettings.Restore r = new KenwoodSettings.Restore(tune(2, 0));
+        KenwoodSettings.Msg m = r.next();
+        T.eq(0x4C, m.cmd, "reads loudness first");
+        r.onReply(0x4C, new byte[]{0});
+        T.eq(0x4D, r.next().cmd, "writes the saved value");
+        KenwoodSettings.Msg c;
+        while ((c = r.next()) == null) r.tick();
+        r.onReply(0x4C, new byte[]{0});                                   // still OFF
+        T.ok(r.done() && !r.worked(), "stops");
+        T.ok(r.result().contains("did not take"), r.result());
+    }
+
+    public static void restoreRefusesValuesOutsideTheManual() {
+        KenwoodSettings.Restore r = new KenwoodSettings.Restore(tune(7, 40));   // LV7 and +40 do not exist
+        T.ok(r.done() && !r.worked(), "nothing to put back: " + r.result());
+        T.ok(r.notRestored().toString().contains("out of range"), r.notRestored().toString());
+    }
 }

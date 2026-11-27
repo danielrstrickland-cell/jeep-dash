@@ -489,6 +489,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
         keyRow.addView(button("ATT", v -> { if (stereoReady()) stereo.att(); }));
         LinearLayout backupRow = row(hu);
         backupRow.addView(button("Back up my tune", v -> backupTune()));
+        backupRow.addView(button("Restore my tune", v -> restoreTune()));
         String bw = prefs.getString(SoundPrefs.STEREO_BACKUP_WHEN, null);
         backupState = label(bw == null ? "No backup of the stereo's tune yet. Reading changes nothing on the stereo."
                 : "Last backup: " + bw + ".", 12, DIM);
@@ -831,6 +832,58 @@ public class SoundActivity extends Activity implements ServiceConnection {
             Diag.info(DiagLog.CMD, shown);
             main.post(() -> backupState.setText(shown));
         }, "stereo-backup");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
+     * Puts the saved tune back on the stereo: loudness, bass boost, subwoofer and subwoofer level (the settings
+     * whose writes are known). Locked until the Diagnostics write test has passed on this stereo, and asks first.
+     */
+    private void restoreTune() {
+        if (!prefs.getBoolean(SoundPrefs.STEREO_WRITE_OK, false)) {
+            Toast.makeText(this, "Locked: run Test a write in Diagnostics and let it pass first", Toast.LENGTH_LONG).show();
+            return;
+        }
+        final String saved = prefs.getString(SoundPrefs.STEREO_BACKUP, null);
+        if (saved == null) {
+            Toast.makeText(this, "No backup yet: tap Back up my tune first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!stereoReady()) return;
+        final KenwoodSettings.Restore r = new KenwoodSettings.Restore(KenwoodSettings.Backup.fromText(saved));
+        if (r.done()) {
+            backupState.setText(r.result());
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Restore my tune?")
+                .setMessage("This writes your saved loudness, bass boost, subwoofer and subwoofer level back to the stereo, "
+                        + "only where they differ. EQ, crossovers and time alignment are not restored yet.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Restore", (d, w) -> runRestore(r)).show();
+    }
+
+    private void runRestore(final KenwoodSettings.Restore r) {
+        backupState.setText("Restoring your tune...");
+        stereo.listen((cat, cmd, p) -> { if (cat == KenwoodSettings.REPLY) r.onReply(cmd, p); });
+        Thread t = new Thread(() -> {
+            try {
+                while (!r.done() && stereo.connected()) {
+                    KenwoodSettings.Msg m = r.next();
+                    if (m != null) stereo.ask(m.label, com.strickland.jeepdash.core.KenwoodCommands.CAT_SETTING, m.cmd, m.payload);
+                    Thread.sleep(500);
+                    r.tick();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                stereo.listen(null);
+            }
+            final String shown = r.done() ? r.result() : "Restore stopped: the link ended.";
+            Diag.info(DiagLog.CMD, "RESTORE: " + shown);
+            for (String n : r.notRestored()) Diag.info(DiagLog.CMD, "RESTORE not restored: " + n);
+            main.post(() -> backupState.setText(shown));
+        }, "stereo-restore");
         t.setDaemon(true);
         t.start();
     }

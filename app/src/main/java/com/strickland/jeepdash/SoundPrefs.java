@@ -24,7 +24,7 @@ final class SoundPrefs {
             PLAYER_TREE = "player_tree", PLAYER_FILTER = "player_filter",
             CHECK_MASK = "check_mask", PREV_MEASURED = "prev_measured", PREV_LO = "prev_valid_lo",
             PREV_HI = "prev_valid_hi", PREV_MASK = "prev_check_mask", STEREO_BACKUP = "stereo_backup",
-            STEREO_BACKUP_WHEN = "stereo_backup_when";
+            STEREO_BACKUP_WHEN = "stereo_backup_when", STEREO_WRITE_OK = "stereo_write_ok";
     /** The bass-shelf presets on the target: less, normal and more bass (Harman's 7 dB, 3 dB less, 5 dB more). */
     static final int BASS_LESS = 4, BASS_NORMAL = 7, BASS_MORE = 12;
     /** The settings a scene snapshot carries. */
