@@ -462,6 +462,11 @@ public class SoundActivity extends Activity implements ServiceConnection {
             }
         });
         hu.addView(vol);
+        hu.addView(label("Knob keys: the same as pressing the stereo's own volume and ATT keys.", 12, DIM));
+        LinearLayout keyRow = row(hu);
+        keyRow.addView(button("Vol -", v -> { if (stereoReady()) stereo.volumeDown(); }));
+        keyRow.addView(button("Vol +", v -> { if (stereoReady()) stereo.volumeUp(); }));
+        keyRow.addView(button("ATT", v -> { if (stereoReady()) stereo.att(); }));
         LinearLayout presetRow = row(hu);
         String[] places = new String[KenwoodLink.PRESETS];
         for (int i = 0; i < places.length; i++) places[i] = "Preset " + i;

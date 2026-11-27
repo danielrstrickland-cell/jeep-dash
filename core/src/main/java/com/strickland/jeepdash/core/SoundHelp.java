@@ -185,6 +185,8 @@ public final class SoundHelp {
                     + "Mute: mutes and unmutes the stereo.\n"
                     + "Volume: 0 to " + KenwoodLink.VOLUME_MAX + ", the stereo's own scale. It sends when you let go "
                     + "of the slider. The first time, send a low number and check the stereo shows the same one.\n"
+                    + "Knob keys: Vol -, Vol + and ATT press the stereo's own keys, one step each, the way a "
+                    + "remote would.\n"
                     + "Preset EQ: picks one of the stereo's built-in EQ presets by its place in the stereo's list. "
                     + "The names are not known yet.\n\n"
                     + "HOW IT WORKS\n"

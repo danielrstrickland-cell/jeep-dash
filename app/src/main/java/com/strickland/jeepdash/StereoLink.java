@@ -232,6 +232,13 @@ final class StereoLink {
 
     void presetEq(int index) { link.presetEq(index); }
 
+    /** The stereo's own volume and ATT keys, as a remote would press them. */
+    void volumeUp() { link.volumeUp(); }
+
+    void volumeDown() { link.volumeDown(); }
+
+    void att() { link.att(); }
+
     /** Any read request, by its numbers: the probe's questions come this way. */
     void ask(String label, int category, int cmd) { link.ask(label, category, cmd); }
 

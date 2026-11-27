@@ -202,4 +202,95 @@ public class KenwoodLinkTest {
             k.onFrame(taken(o, 0));
         }
     }
+
+    /** A plain message from the stereo to the app. */
+    static byte[] says(int cat, int cmd, int seq, int... payload) {
+        byte[] b = new byte[payload.length];
+        for (int i = 0; i < b.length; i++) b[i] = (byte) payload[i];
+        return KenwoodFrame.frame(new byte[]{0x50, (byte) 0xA4, (byte) cat, (byte) cmd, (byte) seq}, KenwoodFrame.CMD, b);
+    }
+
+    public static void theStartUpGoesOnAsTheStockAppDoesAfterTheFeatures() {
+        KenwoodLink k = opened();
+        k.onFrame(says(0x5B, 1, 1, 0, 0x10, 0, 0));
+        KenwoodLink.Out features = k.poll(0);
+        k.onFrame(taken(features, 0));
+        k.onFrame(says(0x5B, 0x34, 2, 0xFF, 0x11, 0x24, 0x22, 0, 0, 0, 1));
+        KenwoodLink.Out version = k.poll(0);
+        KenwoodFrame.Parsed v = KenwoodFrame.parse(version.frame);
+        T.eq(new byte[]{(byte) 0xA4, 0x50, 0x3B, 0x36, 3}, v.cmdId, "after the features, 3B/36");
+        T.eq(new byte[]{0}, v.payload, "with a single 0");
+        k.onFrame(taken(version, 0));
+        k.onFrame(says(0x5B, 0x36, 3, 4));
+        T.eq(4, k.remoteVersion(), "the stereo's answer is its remote-key version");
+        KenwoodLink.Out next = k.poll(0);
+        KenwoodFrame.Parsed n = KenwoodFrame.parse(next.frame);
+        T.eq(new byte[]{(byte) 0xA4, 0x50, 0x3B, 0x37, 4}, n.cmdId, "then 3B/37");
+        T.eq(0, n.payload.length, "empty");
+        k.onFrame(taken(next, 0));
+        k.onFrame(says(0x5B, 0x37, 4, 0));
+        KenwoodLink.Out sources = k.poll(0);
+        T.eq(new byte[]{(byte) 0xA4, 0x50, 0x3B, 0x12, 5}, KenwoodFrame.parse(sources.frame).cmdId, "then 3B/12, the last of it");
+        k.onFrame(taken(sources, 0));
+        T.ok(k.idle(), "and the start-up is done");
+    }
+
+    public static void commandsWaitWhileTheStartUpIsUnderWay() {
+        KenwoodLink k = opened();
+        k.onFrame(says(0x5B, 1, 1, 0, 0x10, 0, 0));
+        k.onFrame(taken(k.poll(0), 0));
+        k.mute(true);
+        T.ok(k.poll(100) == null, "held: the stereo's next start-up message is still to come");
+        k.onFrame(says(0x5B, 0x34, 2, 0xFF, 0x11, 0x24, 0x22, 0, 0, 0, 1));
+        k.onFrame(taken(k.poll(200), 0));
+        k.onFrame(says(0x5B, 0x36, 3, 2));
+        k.onFrame(taken(k.poll(300), 0));
+        k.onFrame(says(0x5B, 0x37, 4, 0));
+        KenwoodLink.Out sources = k.poll(400);
+        T.ok(k.poll(450) == null, "still held until the last start-up message is taken");
+        k.onFrame(taken(sources, 0));
+        T.eq(KenwoodCommands.MUTE, KenwoodFrame.parse(k.poll(500).frame).cmdId[3] & 0xFF, "then the command goes");
+    }
+
+    public static void aStalledStartUpDoesNotHoldCommandsForEver() {
+        KenwoodLink k = opened();
+        k.onFrame(says(0x5B, 1, 1, 0, 0x10, 0, 0));
+        k.onFrame(taken(k.poll(0), 0));
+        k.mute(true);
+        T.ok(k.poll(10) == null, "held while the stereo may still answer");      // the link's clock is the poll's
+        T.ok(k.poll(10 + KenwoodLink.SETTLE_MS - 1) == null, "still held just short of the limit");
+        T.ok(k.poll(10 + KenwoodLink.SETTLE_MS) != null, "let go once it has been quiet long enough");
+    }
+
+    public static void theKnobKeysUseTheCodesForTheStereosRemoteVersion() {
+        KenwoodLink k = opened();
+        k.volumeUp();
+        KenwoodLink.Out up = k.poll(0);
+        KenwoodFrame.Parsed p = KenwoodFrame.parse(up.frame);
+        T.eq(new byte[]{(byte) 0xA4, 0x50, 0x11, 5, 2}, p.cmdId, "a remote key is 11/05");
+        T.eq(new byte[]{8}, p.payload, "volume up is key 8 unless the stereo says version 4");
+        k.onFrame(taken(up, 0));
+        k.volumeDown();
+        KenwoodLink.Out down = k.poll(0);
+        T.eq(new byte[]{7}, KenwoodFrame.parse(down.frame).payload, "volume down is key 7");
+        k.onFrame(taken(down, 0));
+        k.att();
+        KenwoodLink.Out att = k.poll(0);
+        T.eq(new byte[]{12}, KenwoodFrame.parse(att.frame).payload, "ATT is key 12");
+        k.onFrame(taken(att, 0));
+
+        k.onFrame(says(0x5B, 0x36, 9, 4));
+        k.onFrame(taken(k.poll(0), 0));                           // the 3B/37 that follows
+        k.onFrame(says(0x5B, 0x37, 10, 0));
+        k.onFrame(taken(k.poll(0), 0));                           // the 3B/12 that ends the start-up
+        k.volumeUp();
+        k.volumeDown();
+        k.att();
+        int[] want = {1, 2, 4};
+        for (int w : want) {
+            KenwoodLink.Out o = k.poll(0);
+            T.eq(new byte[]{(byte) w}, KenwoodFrame.parse(o.frame).payload, "version 4 key " + w);
+            k.onFrame(taken(o, 0));
+        }
+    }
 }
