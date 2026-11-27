@@ -44,6 +44,7 @@ public final class TestMain {
             SubPhysicsTest.class,
             GfxStatsTest.class,
             MilkPlaylistTest.class,
+            DelayEstimatorTest.class,
             MotionTest.class,
             OrbitViewTest.class,
             TrailWorldTest.class,

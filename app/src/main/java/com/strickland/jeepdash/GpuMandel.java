@@ -71,6 +71,6 @@ final class GpuMandel extends GpuLook {
         shader.setFloatUniform("beat", p.beat);
         shader.setFloatUniform("fade", Math.max(0, fade));
         shader.setFloatUniform("shift", shift % 1);
-        shader.setFloatUniform("limit", 48 + depth * 5.5f);                // more steps only as the dive gets deeper
+        shader.setFloatUniform("limit", 40 + depth * 4);                    // more steps only as the dive gets deeper
     }
 }

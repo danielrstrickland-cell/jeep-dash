@@ -223,6 +223,7 @@ public class VisualizerActivity extends Activity
                     long t = System.nanoTime();
                     tapSpectrum.feed(tapSamples, Math.min(0.1f, (t - lastFeed) / 1e9f));
                     view.milkPcm(tapSamples, tapSize);
+                    view.autoDelayTap(tapSamples, tapSize);
                     lastFeed = t;
                     Thread.sleep(20);
                     continue;

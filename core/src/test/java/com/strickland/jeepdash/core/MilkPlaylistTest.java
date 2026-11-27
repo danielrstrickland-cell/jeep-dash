@@ -51,4 +51,16 @@ public final class MilkPlaylistTest {
         T.ok(q.starred("/other/place/c.milk"), "a star survives a re-download to a new folder");
         T.eq("c", MilkPlaylist.name("/other/place/c.milk"), "name without folder or .milk");
     }
+
+    public static void slowPresetsComeUpLess() {
+        MilkPlaylist p = list();
+        p.markSlow("/m/a.milk");
+        int hits = 0;
+        for (int i = 0; i < 1000; i++) if ("/m/a.milk".equals(p.next(MilkPlaylist.ALL))) hits++;
+        T.ok(hits > 10 && hits < 120, "a slow preset still plays, but well under 1 in 5: " + hits);
+        MilkPlaylist q = new MilkPlaylist(3);
+        q.setPresets(java.util.Arrays.asList("/x/a.milk", "/x/b.milk"));
+        q.loadSlow(p.saveSlow());
+        T.ok(q.isSlow("/x/a.milk") && !q.isSlow("/x/b.milk"), "remembered by name");
+    }
 }

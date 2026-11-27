@@ -108,6 +108,11 @@ final class MilkDrop implements TextureView.SurfaceTextureListener {
     volatile boolean active, drop = true, locked;
     volatile float hold = 15, sensitivity = 1, delay = 0.2f;
     volatile int quality = VizTune.BALANCED, mode = MilkPlaylist.FAVOUR, pace = 2;
+    volatile float refresh = 90;
+    // auto detail, per preset: lowered when the preset cannot keep up, raised when it has room, and remembered
+    private static final float START_DETAIL = 0.7f, MIN_DETAIL = 0.35f;
+    private float detail = START_DETAIL, winTime;
+    private int winFrames, goodWins;
     private int vsyncs;
     private String settingsShown = "";
     /** Next (1) or Prev (-1), asked from the side menu. */
@@ -239,8 +244,10 @@ final class MilkDrop implements TextureView.SurfaceTextureListener {
     }
 
     /** The picture is drawn at the Quality setting's share of the screen and stretched to fit. */
+    private float shownDetail() { return Math.min(detail, VizTune.detail(quality)); }
+
     private void fitBufferSize() {
-        float s = VizTune.detail(quality);
+        float s = shownDetail();
         bufW = Math.max(64, Math.round(viewW * s));
         bufH = Math.max(64, Math.round(viewH * s));
         if (texture != null) texture.setDefaultBufferSize(bufW, bufH);
@@ -281,11 +288,42 @@ final class MilkDrop implements TextureView.SurfaceTextureListener {
         int request = render(pm);
         EGL14.eglSwapBuffers(dpy, surf);
         stats.metrics((System.nanoTime() - t0) / 1e6, 0);                // render + swap time, the GPU's share
-        if (lastFrameNs != 0) stats.frame((frameNs - lastFrameNs) / 1e6, VizTune.detail(quality));
+        if (lastFrameNs != 0) {
+            float dt = (frameNs - lastFrameNs) / 1e9f;
+            stats.frame(dt * 1000, shownDetail());
+            autoDetail(dt);
+        }
         lastFrameNs = frameNs;
         String bad = failed(pm);
         if (bad != null) Diag.warn(DiagLog.GFX, "milkdrop preset failed: " + bad);
         if (request != 0 && !locked) show(list.next(mode), request == 2);
+    }
+
+    /** Every 2 seconds: drop the detail if this preset is missing the frame rate, raise it after 6 s of room. */
+    private void autoDetail(float dt) {
+        winTime += dt;
+        winFrames++;
+        if (winTime < 2) return;
+        float fps = winFrames / winTime, target = refresh / Math.max(1, pace), cap = VizTune.detail(quality);
+        winTime = 0;
+        winFrames = 0;
+        if (fps < target * 0.9f && shownDetail() > MIN_DETAIL + 0.01f) {
+            detail = Math.max(MIN_DETAIL, shownDetail() - 0.1f);
+            goodWins = 0;
+            fitBuffer();
+        } else if (fps >= target * 0.97f && detail < cap - 0.01f) {
+            if (++goodWins >= 3) {
+                detail = Math.min(cap, detail + 0.05f);
+                goodWins = 0;
+                fitBuffer();
+            }
+        } else {
+            goodWins = 0;
+        }
+    }
+
+    private android.content.SharedPreferences detailPrefs() {
+        return context.getSharedPreferences("milkdetail", Context.MODE_PRIVATE);
     }
 
     /** Hands projectM every chunk of sound older than the speaker delay. */
@@ -302,6 +340,12 @@ final class MilkDrop implements TextureView.SurfaceTextureListener {
     private void show(String preset, boolean smooth) {
         if (preset == null || pm == 0) return;
         logPreset();
+        if (current != null) detailPrefs().edit().putFloat(MilkPlaylist.name(current), detail).apply();
+        detail = detailPrefs().getFloat(MilkPlaylist.name(preset), START_DETAIL);
+        winTime = 0;
+        winFrames = 0;
+        goodWins = 0;
+        fitBuffer();
         load(pm, preset, smooth);
         current = preset;
         changedMs = System.currentTimeMillis();
@@ -314,8 +358,16 @@ final class MilkDrop implements TextureView.SurfaceTextureListener {
             return;
         }
         String line = "milkdrop " + MilkPlaylist.name(current) + "  " + stats.line();
-        if (stats.fps() < 40) Diag.warn(DiagLog.GFX, line + "  SLOW");
-        else Diag.info(DiagLog.GFX, line);
+        float target = refresh / Math.max(1, pace);
+        if (stats.fps() < target * 0.75f && stats.frames() >= 120) {      // slow even after lowering detail
+            list.markSlow(current);
+            context.getSharedPreferences("viz", Context.MODE_PRIVATE).edit().putString("milkSlow", list.saveSlow()).apply();
+            Diag.warn(DiagLog.GFX, line + "  SLOW (now picked less often)");
+        } else if (stats.fps() < 40) {
+            Diag.warn(DiagLog.GFX, line + "  SLOW");
+        } else {
+            Diag.info(DiagLog.GFX, line);
+        }
         stats.clear();
     }
 
@@ -346,6 +398,7 @@ final class MilkDrop implements TextureView.SurfaceTextureListener {
         collect(pack, found);
         list.setPresets(found);
         list.loadStars(context.getSharedPreferences("viz", Context.MODE_PRIVATE).getString("milkStars", ""));
+        list.loadSlow(context.getSharedPreferences("viz", Context.MODE_PRIVATE).getString("milkSlow", ""));
     }
 
     private static void collect(File dir, List<String> out) {

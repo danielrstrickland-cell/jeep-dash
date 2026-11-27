@@ -19,6 +19,7 @@ public final class MilkPlaylist {
 
     private final List<String> presets = new ArrayList<>();
     private final Set<String> stars = new LinkedHashSet<>();
+    private final Set<String> slow = new LinkedHashSet<>();          // presets that ran slow on this tablet
     private final List<String> history = new ArrayList<>();
     private final Random random;
     private int at = -1;                                         // where in the history the current preset is
@@ -66,12 +67,23 @@ public final class MilkPlaylist {
             else if (mode == FAVOUR && !starred.isEmpty() && random.nextInt(presets.size() + 3 * starred.size()) < 3 * starred.size())
                 p = starred.get(random.nextInt(starred.size()));
             else p = presets.get(random.nextInt(presets.size()));
+            if (slow.contains(p) && random.nextFloat() < 0.7f) continue;   // slow ones come up less often
             if (!p.equals(now) || presets.size() == 1) return p;
         }
         return presets.get(random.nextInt(presets.size()));
     }
 
     public boolean starred(String path) { return path != null && stars.contains(path); }
+
+    /** Notes that a preset ran slow here, so it is picked less often. */
+    public void markSlow(String path) { if (path != null) slow.add(path); }
+
+    public boolean isSlow(String path) { return path != null && slow.contains(path); }
+
+    /** Slow presets as lines of file names, for saving. */
+    public String saveSlow() { return names(slow); }
+
+    public void loadSlow(String saved) { match(saved, slow); }
 
     public void star(String path, boolean on) {
         if (path == null) return;
@@ -80,22 +92,26 @@ public final class MilkPlaylist {
     }
 
     /** Starred presets as one line for saving, by preset file name so they survive a re-download. */
-    public String saveStars() {
+    public String saveStars() { return names(stars); }
+
+    private static String names(Set<String> set) {
         StringBuilder out = new StringBuilder();
-        for (String s : stars) {
+        for (String s : set) {
             if (out.length() > 0) out.append('\n');
             out.append(name(s));
         }
         return out.toString();
     }
 
-    /** Restores stars saved by {@link #saveStars}, matched by file name against the current list. */
-    public void loadStars(String saved) {
-        stars.clear();
+    private void match(String saved, Set<String> into) {
+        into.clear();
         if (saved == null || saved.isEmpty()) return;
         Set<String> names = new LinkedHashSet<>(java.util.Arrays.asList(saved.split("\n")));
-        for (String p : presets) if (names.contains(name(p))) stars.add(p);
+        for (String p : presets) if (names.contains(name(p))) into.add(p);
     }
+
+    /** Restores stars saved by {@link #saveStars}, matched by file name against the current list. */
+    public void loadStars(String saved) { match(saved, stars); }
 
     /** "Dancer - glowsticks 02" from a path, for the name flash and the log. */
     public static String name(String path) {

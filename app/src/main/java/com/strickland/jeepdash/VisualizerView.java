@@ -119,6 +119,13 @@ public class VisualizerView extends View {
     void setSpectrum(Spectrum s) { spectrum = s; }
 
     private MilkDrop milk;
+    // Auto speaker delay: the mic measures the Bluetooth lag now and then; the result moves the slider
+    private final AutoDelay autoDelay = new AutoDelay(getContext(), s -> post(() -> {
+        painter.tune.set(VizTune.GLOBAL, "delay", Math.max(0, Math.min(0.5f, s)));
+        save();
+    }));
+
+    void autoDelayTap(short[] samples, int n) { autoDelay.tap(samples, n); }
 
     /** MilkDrop's view and engine, set by the screen when this tablet can run it. */
     void attachMilk(MilkDrop m) {
@@ -147,11 +154,13 @@ public class VisualizerView extends View {
         m.locked = p.milkLocked;
         m.quality = Math.round(p.tune.get(VizTune.GLOBAL, "quality"));
         m.pace = p.pace;
+        m.refresh = getDisplay() != null ? getDisplay().getRefreshRate() : 60;
         m.mode = Math.round(p.tune.get(look, "play"));
         m.delay = p.tune.get(VizTune.GLOBAL, "delay");
         if (m.active) {
             float hue = p.rpm == null ? 0 : (float) Math.min(1, p.rpm / 4500.0) * 180 * p.tune.get(look, "hue");
-            m.effects(p.tune.get(VizTune.GLOBAL, "bloom"), p.tune.get(VizTune.GLOBAL, "crt"), hue,
+            float bloom = p.tune.on(look, "mglow") ? p.tune.get(VizTune.GLOBAL, "bloom") : 0;   // off unless asked
+            m.effects(bloom, p.tune.get(VizTune.GLOBAL, "crt"), hue,
                     p.sloshX, p.sloshY, p.tune.on(look, "sway"));
         }
         String now = m.current;
@@ -175,6 +184,7 @@ public class VisualizerView extends View {
         } else {
             motion.stop();
             gfx.stop(painter);
+            autoDelay.stop();
         }
     }
 
@@ -270,6 +280,7 @@ public class VisualizerView extends View {
             sound(s, now);
         }
         motion.step(dt, painter.tune.get(VizTune.GLOBAL, "tilt"));
+        autoDelay.setEnabled(running && painter.tune.on(VizTune.GLOBAL, "autodelay"));
         painter.sloshX = motion.sloshX();
         painter.sloshY = motion.sloshY();
         painter.safeTop = safeTop();
@@ -284,7 +295,9 @@ public class VisualizerView extends View {
         painter.drawChrome(canvas, w, h);
         drawMusic(canvas);
         vsyncs = 0;
-        if (running) android.view.Choreographer.getInstance().postFrameCallback(tick);
+        android.view.Choreographer ch = android.view.Choreographer.getInstance();
+        ch.removeFrameCallback(tick);                               // one timer only, however the draw was asked for
+        if (running) ch.postFrameCallback(tick);
     }
 
     /** Stores this moment's sound, then hands the painter the sound from "Speaker delay" ago. */
