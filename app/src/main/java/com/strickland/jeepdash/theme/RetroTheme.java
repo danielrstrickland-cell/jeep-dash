@@ -151,6 +151,7 @@ public final class RetroTheme implements Theme {
     }
 
     private static float redFrom(Param p) {
+        if (p.redLine != null) return Art.frac(p, p.redLine);   // the gauge's own red zone
         if (p.id.equals("rpm")) return Art.frac(p, p.max > 6500 ? 6500 : 5000);
         if (p.id.equals("coolant")) return Art.frac(p, Art.fromBase(p, 230));
         if (p.id.equals("oil_temp")) return Art.frac(p, Art.fromBase(p, 270));

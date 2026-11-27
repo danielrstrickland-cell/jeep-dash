@@ -10,7 +10,8 @@ import java.util.Map;
  * What the dash can show on the 2003 Cayenne Turbo: which group each value comes in and how it is worked
  * out. Groups and slots are from the two captures of the GearWrench app on this car; every value read from
  * the car matched that app's own screen at idle, except the three marked "not on the vendor screen". Peak boost
- * is the boost reading held at its highest; the last ten are worked out by the screen, not read.
+ * is the boost reading held at its highest. Boost and peak boost each come four ways (BOOST_FROM), picked in
+ * the gauge's settings; the last ten are worked out by the screen, not read.
  */
 public final class PorscheCatalog {
     private PorscheCatalog() { }
@@ -21,12 +22,19 @@ public final class PorscheCatalog {
     public static final class Value {
         public final Param param;
         public final int group;
+        /** Other groups the formula leans on (read from their latest answer), and how often to read them. */
+        public final int[] also;
+        public final int alsoWeight;
         final Formula formula;
 
-        Value(Param param, int group, Formula formula) {
+        Value(Param param, int group, Formula formula) { this(param, group, formula, new int[0], 0); }
+
+        Value(Param param, int group, Formula formula, int[] also, int alsoWeight) {
             this.param = param;
             this.group = group;
             this.formula = formula;
+            this.also = also;
+            this.alsoWeight = alsoWeight;
         }
 
         public Double read(KwpBlocks.Block b) {
@@ -39,20 +47,127 @@ public final class PorscheCatalog {
     private static final Map<String, Value> BY_ID = new LinkedHashMap<>();
     /** Worked out by the screen itself (road-speed changes, its GPS and motion sensor); never asked of the car. */
     private static final Map<String, Param> SCREEN = new LinkedHashMap<>();
-    private static volatile double peakBoost;           // highest boost since the key came on, psi
+    /** Highest boost since the key came on, psi, one per way of working it out (see BOOST_FROM). */
+    private static final Map<String, Double> PEAKS = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** The key went off: the next drive's peak starts from zero. */
-    public static void newDrive() { peakBoost = 0; }
+    /**
+     * The latest of the readings the boost choices share across groups: manifold and outside air pressure
+     * (group 16), the boost sensor (3b), engine speed (0a) and intake air (0b). NaN until read.
+     */
+    private static volatile double mapMbar = Double.NaN, baroMbar = Double.NaN, sensorMbar = Double.NaN,
+            rpmNow = Double.NaN, iatC = Double.NaN;
+
+    /** Outside air pressure until the car has given one: standard sea level, mbar. */
+    static final double STANDARD_MBAR = 1013.25;
+    /** The experimental air-flow choice: the 4.5 litre V8, and the share of it taken in each turn (a guess). */
+    static final double LITRES = 4.511, VOLUMETRIC = 0.85;
+
+    /** The key went off: the next drive's peaks start from zero, and nothing carries over. */
+    public static void newDrive() {
+        PEAKS.clear();
+        mapMbar = baroMbar = sensorMbar = rpmNow = iatC = Double.NaN;
+    }
+
+    /** Every group's answer passes through here first, so a boost choice can use another group's latest. */
+    public static void seen(int group, KwpBlocks.Block b) {
+        if (b == null) return;
+        switch (group) {
+            case 0x16: keep(b.v(3, KwpBlocks.MBAR), 0); keep(b.v(4, KwpBlocks.MBAR), 1); break;
+            case 0x3b: keep(b.v(6, KwpBlocks.MBAR), 2); break;
+            case 0x0a: keep(b.v(0, KwpBlocks.RPM), 3); break;
+            case 0x0b: keep(b.v(2, KwpBlocks.TEMP_C), 4); break;
+            default: break;
+        }
+    }
+
+    private static void keep(double v, int which) {
+        if (Double.isNaN(v)) return;
+        switch (which) {
+            case 0: mapMbar = v; break;
+            case 1: baroMbar = v; break;
+            case 2: sensorMbar = v; break;
+            case 3: rpmNow = v; break;
+            default: iatC = v; break;
+        }
+    }
+
+    private static double baro() { return Double.isNaN(baroMbar) ? STANDARD_MBAR : baroMbar; }
 
     /** Manifold pressure minus outside air pressure, psi: below zero is vacuum, above is boost. */
     private static double boost(KwpBlocks.Block b) {
         return (b.v(3, KwpBlocks.MBAR) - b.v(4, KwpBlocks.MBAR)) * PSI_PER_MBAR;
     }
 
+    /** The boost sensor ahead of the throttle minus outside air pressure, psi (group 3b). */
+    private static double sensorBoost(KwpBlocks.Block b) {
+        return (b.v(6, KwpBlocks.MBAR) - baro()) * PSI_PER_MBAR;
+    }
+
+    /** Vacuum from the manifold; once it is in boost, the average of the manifold and the boost sensor (group 16). */
+    static double combined(double manifoldPsi, double sensorPsi) {
+        if (Double.isNaN(manifoldPsi)) return sensorPsi;
+        if (Double.isNaN(sensorPsi) || manifoldPsi < 0) return manifoldPsi;
+        return (manifoldPsi + sensorPsi) / 2;
+    }
+
+    private static double combinedBoost(KwpBlocks.Block b) {
+        double s = Double.isNaN(sensorMbar) ? Double.NaN : (sensorMbar - b.v(4, KwpBlocks.MBAR)) * PSI_PER_MBAR;
+        return combined(boost(b), s);
+    }
+
+    /**
+     * Experimental: the pressure the engine must have in the manifold to take in the measured air flow at this
+     * engine speed and intake air temperature (ideal gas, 4.5 litres, the engine filling 85 % each turn), minus
+     * outside air pressure, psi. NaN below 400 rpm. A third view of boost that uses neither pressure sensor.
+     */
+    static double fromAirFlow(double lbPerHour, double rpm, double intakeC, double outsideMbar) {
+        if (Double.isNaN(lbPerHour) || Double.isNaN(rpm) || rpm < 400 || Double.isNaN(outsideMbar)) return Double.NaN;
+        double kgPerS = lbPerHour * 0.45359237 / 3600, kelvin = (Double.isNaN(intakeC) ? 30 : intakeC) + 273.15;
+        double m3PerS = VOLUMETRIC * LITRES / 1000 * rpm / 120;
+        double pascal = kgPerS * 287.05 * kelvin / m3PerS;
+        return (pascal / 100 - outsideMbar) * PSI_PER_MBAR;
+    }
+
+    private static double airFlowBoost(KwpBlocks.Block b) {
+        return fromAirFlow(b.v(1, KwpBlocks.AIR_LB_H), rpmNow, iatC, b.v(4, KwpBlocks.MBAR));
+    }
+
+    /** The highest of a boost choice since the key came on; vacuum does not count, so it starts at zero. */
+    private static Formula peak(String id, Formula boost) {
+        return b -> {
+            double now = boost.apply(b);
+            if (Double.isNaN(now)) return now;
+            double held = PEAKS.merge(id, Math.max(0, now), Math::max);
+            return held;
+        };
+    }
+
+    /**
+     * The ways a boost gauge can work its reading out, picked in the gauge's settings: a gauge's value is
+     * one of these ids. Boost and Peak boost each come four ways; the order is the drop-down's.
+     */
+    public static final String[] BOOST_FROM = {"Manifold", "Boost sensor", "Combined", "Experimental: from air flow"};
+    private static final String[][] BOOST_FAMILIES = {
+            {"boost", "boost_s", "boost_c", "boost_x"},
+            {"boost_peak", "boost_peak_s", "boost_peak_c", "boost_peak_x"},
+    };
+
+    /** The ids a gauge showing id can switch between (in BOOST_FROM order), or null when it has no such choice. */
+    public static String[] boostFamily(String id) {
+        for (String[] f : BOOST_FAMILIES) for (String x : f) if (x.equals(id)) return f.clone();
+        return null;
+    }
+
     private static double f(double c) { return c * 9 / 5 + 32; }
 
     private static void add(String id, String name, String unit, double min, double max, int weight, int group, Formula formula) {
-        BY_ID.put(id, new Value(new Param(id, name, unit, null, null, null, null, min, max, weight), group, formula));
+        add(id, name, unit, min, max, weight, group, formula, new int[0], 0);
+    }
+
+    private static void add(String id, String name, String unit, double min, double max, int weight, int group,
+                            Formula formula, int[] also, int alsoWeight) {
+        BY_ID.put(id, new Value(new Param(id, name, unit, null, null, null, null, min, max, weight), group, formula,
+                also, alsoWeight));
     }
 
     static {
@@ -60,13 +175,19 @@ public final class PorscheCatalog {
         add("speed", "Speed", "mph", 0, 180, 2, 0x0a, b -> b.v(2, KwpBlocks.KMH) * MPH_PER_KMH);
         // not on the vendor screen
         add("boost", "Boost", "psi", -15, 20, 4, 0x16, PorscheCatalog::boost);
-        // the highest boost since the key came on; vacuum does not count, so it starts at zero
-        add("boost_peak", "Peak boost", "psi", 0, 20, 4, 0x16, b -> {
-            double now = boost(b);
-            if (Double.isNaN(now)) return now;
-            if (now > peakBoost) peakBoost = now;
-            return peakBoost;
-        });
+        // the same gauge worked out three more ways, picked in its settings; outside air pressure comes from group 16
+        add("boost_s", "Boost (sensor)", "psi", -15, 20, 4, 0x3b, PorscheCatalog::sensorBoost, new int[]{0x16}, 1);
+        add("boost_c", "Boost (combined)", "psi", -15, 20, 4, 0x16, PorscheCatalog::combinedBoost, new int[]{0x3b}, 4);
+        add("boost_x", "Boost (air flow, experimental)", "psi", -15, 20, 4, 0x16, PorscheCatalog::airFlowBoost,
+                new int[]{0x0a, 0x0b}, 2);
+        // the highest boost since the key came on, each way; vacuum does not count, so it starts at zero
+        add("boost_peak", "Peak boost", "psi", 0, 20, 4, 0x16, peak("boost_peak", PorscheCatalog::boost));
+        add("boost_peak_s", "Peak boost (sensor)", "psi", 0, 20, 4, 0x3b,
+                peak("boost_peak_s", PorscheCatalog::sensorBoost), new int[]{0x16}, 1);
+        add("boost_peak_c", "Peak boost (combined)", "psi", 0, 20, 4, 0x16,
+                peak("boost_peak_c", PorscheCatalog::combinedBoost), new int[]{0x3b}, 4);
+        add("boost_peak_x", "Peak boost (air flow, experimental)", "psi", 0, 20, 4, 0x16,
+                peak("boost_peak_x", PorscheCatalog::airFlowBoost), new int[]{0x0a, 0x0b}, 2);
         add("coolant", "Coolant", "°F", 100, 260, 1, 0x0b, b -> f(b.v(1, KwpBlocks.TEMP_C)));
         add("oil_temp", "Oil temp", "°F", 100, 300, 1, 0x16, b -> f(b.v(6, KwpBlocks.TEMP_DIFF_C)));
         add("iat", "Intake air", "°F", 0, 200, 1, 0x0b, b -> f(b.v(2, KwpBlocks.TEMP_C)));

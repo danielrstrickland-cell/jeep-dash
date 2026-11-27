@@ -14,6 +14,8 @@ public final class Param {
     public final double min, max;
     public final int weight;           // relative poll frequency
     public final boolean tablet;       // worked out from the tablet's own sensors; never asked of the Jeep
+    /** Where the gauge's red zone starts, in this Param's unit; null = the look's own (see GaugeSpec.redFrom). */
+    public final Double redLine;
     private final Formula sciFormula, genericFormula;
 
     public Param(String id, String name, String unit, int[] sciIds, Formula sciFormula,
@@ -28,6 +30,12 @@ public final class Param {
 
     private Param(String id, String name, String unit, String baseUnit, int[] sciIds, Formula sciFormula,
                   Integer pid, Formula genericFormula, double min, double max, int weight, boolean tablet) {
+        this(id, name, unit, baseUnit, sciIds, sciFormula, pid, genericFormula, min, max, weight, tablet, null);
+    }
+
+    private Param(String id, String name, String unit, String baseUnit, int[] sciIds, Formula sciFormula,
+                  Integer pid, Formula genericFormula, double min, double max, int weight, boolean tablet, Double redLine) {
+        this.redLine = redLine;
         this.id = id; this.name = name; this.unit = unit; this.baseUnit = baseUnit;
         this.sciIds = sciIds; this.sciFormula = sciFormula;
         this.pid = pid; this.genericFormula = genericFormula;
@@ -43,6 +51,11 @@ public final class Param {
     /** The same value labelled in another unit with its scale already converted (see Units.display). */
     Param inUnit(String newUnit, double newMin, double newMax) {
         return new Param(id, name, newUnit, baseUnit, sciIds, sciFormula, pid, genericFormula, newMin, newMax, weight, tablet);
+    }
+
+    /** The same value on another scale, with the gauge's own red line (all in this Param's unit; see Units.forGauge). */
+    Param withScale(double newMin, double newMax, Double newRedLine) {
+        return new Param(id, name, unit, baseUnit, sciIds, sciFormula, pid, genericFormula, newMin, newMax, weight, tablet, newRedLine);
     }
 
     /** True when the value can only be read over generic OBD2 (polled in occasional blocks). */

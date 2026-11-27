@@ -19,6 +19,7 @@ import com.strickland.jeepdash.core.GaugeType;
 import com.strickland.jeepdash.core.HoloFace;
 import com.strickland.jeepdash.core.Layout;
 import com.strickland.jeepdash.core.Param;
+import com.strickland.jeepdash.core.PorscheCatalog;
 import com.strickland.jeepdash.core.Units;
 
 import java.util.ArrayList;
@@ -26,8 +27,9 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * What a gauge shows, the unit it is shown in, how it looks, and its warning flash. Opened by tapping a gauge
- * in edit mode. The warning limit is typed in the unit shown and kept in the value's own unit.
+ * What a gauge shows (and, for boost, how it is worked out), the unit it is shown in, its range and red zone,
+ * how it looks, and its warning flash. Opened by tapping a gauge in edit mode. The limit, range and red zone are
+ * typed in the unit shown and kept in the value's own unit.
  */
 final class GaugeSettingsDialog {
     private GaugeSettingsDialog() { }
@@ -59,6 +61,14 @@ final class GaugeSettingsDialog {
         what.setSelection(current);
         box.addView(what);
 
+        // boost and peak boost: how the reading is worked out (PorscheCatalog.BOOST_FROM)
+        final TextView fromLabel = label(a, "Calculated from");
+        box.addView(fromLabel);
+        final Spinner from = new Spinner(a);
+        from.setAdapter(adapter(a, PorscheCatalog.BOOST_FROM));
+        box.addView(from);
+        showFrom(fromLabel, from, params.get(current).id);
+
         // only for values that have other units (see Units); the base unit is always the first choice
         final TextView unitLabel = label(a, "Unit");
         box.addView(unitLabel);
@@ -68,6 +78,40 @@ final class GaugeSettingsDialog {
         // the unit the limit box is in right now
         final String[] shownUnit = {Units.offers(params.get(current).unit, g.unit) ? g.unit : params.get(current).unit};
         showUnits(a, unitLabel, unitPick, units, shownUnit[0]);
+
+        // the owner's own scale and red zone; empty = the value's standard range, no red zone of its own
+        final Param start = Units.display(params.get(current), shownUnit[0]);
+        box.addView(label(a, "Range (empty = standard)"));
+        LinearLayout rangeRow = new LinearLayout(a);
+        rangeRow.setOrientation(LinearLayout.HORIZONTAL);
+        final EditText lo = numberBox(a), hi = numberBox(a);
+        lo.setHint(number(start.min));
+        hi.setHint(number(start.max));
+        if (g.rangeMin != null) lo.setText(number(Units.convert(g.rangeMin, params.get(current).unit, shownUnit[0])));
+        if (g.rangeMax != null) hi.setText(number(Units.convert(g.rangeMax, params.get(current).unit, shownUnit[0])));
+        rangeRow.addView(lo);
+        TextView toWord = new TextView(a);
+        toWord.setText("to");
+        toWord.setPadding(pad / 2, 0, pad / 2, 0);
+        rangeRow.addView(toWord);
+        rangeRow.addView(hi);
+        final TextView rangeUnit = new TextView(a);
+        rangeUnit.setText(shownUnit[0]);
+        rangeUnit.setPadding(pad / 2, 0, 0, 0);
+        rangeRow.addView(rangeUnit);
+        box.addView(rangeRow);
+
+        box.addView(label(a, "Red zone from (empty = none; for boost, mark overboost)"));
+        LinearLayout redRow = new LinearLayout(a);
+        redRow.setOrientation(LinearLayout.HORIZONTAL);
+        final EditText red = numberBox(a);
+        if (g.redFrom != null) red.setText(number(Units.convert(g.redFrom, params.get(current).unit, shownUnit[0])));
+        redRow.addView(red);
+        final TextView redUnit = new TextView(a);
+        redUnit.setText(shownUnit[0]);
+        redUnit.setPadding(pad / 2, 0, 0, 0);
+        redRow.addView(redUnit);
+        box.addView(redRow);
 
         box.addView(label(a, "Style"));
         final Spinner style = new Spinner(a);
@@ -119,6 +163,12 @@ final class GaugeSettingsDialog {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
                 Param p = params.get(pos);
+                showFrom(fromLabel, from, p.id);
+                if (!sameFamily(p.id, g.paramId)) {
+                    lo.setText("");
+                    hi.setText("");
+                    red.setText("");
+                }
                 List<String> choices = Units.choices(p.unit);
                 String keep = p.id.equals(g.paramId) && Units.offers(p.unit, g.unit) ? g.unit : p.unit;
                 if (!choices.equals(units) || !keep.equals(shownUnit[0])) {
@@ -133,6 +183,11 @@ final class GaugeSettingsDialog {
                     showUnits(a, unitLabel, unitPick, choices, keep);
                 }
                 unit.setText(shownUnit[0]);
+                rangeUnit.setText(shownUnit[0]);
+                redUnit.setText(shownUnit[0]);
+                Param shownP = Units.display(p, shownUnit[0]);
+                lo.setHint(number(shownP.min));
+                hi.setHint(number(shownP.max));
                 if (limit.getText().length() == 0 || !p.id.equals(g.paramId)) {
                     Param d = Units.display(p, shownUnit[0]);
                     limit.setText(number(Math.round(d.min + 0.85 * (d.max - d.min))));
@@ -143,7 +198,20 @@ final class GaugeSettingsDialog {
             public void onNothingSelected(AdapterView<?> parent) { }
         });
 
-        unitPick.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+        from.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
+                String[] fam = PorscheCatalog.boostFamily(params.get(what.getSelectedItemPosition()).id);
+                if (fam == null || pos < 0 || pos >= fam.length) return;
+                for (int i = 0; i < params.size(); i++)
+                    if (params.get(i).id.equals(fam[pos]) && i != what.getSelectedItemPosition()) what.setSelection(i);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) { }
+        });
+
+                unitPick.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
                 if (pos < 0 || pos >= units.size()) return;
@@ -151,8 +219,17 @@ final class GaugeSettingsDialog {
                 if (to.equals(shownUnit[0])) return;
                 Double lim = parse(limit.getText().toString());
                 if (lim != null) limit.setText(number(Units.convert(lim, shownUnit[0], to)));
+                for (EditText e : new EditText[]{lo, hi, red}) {
+                    Double x = parse(e.getText().toString());
+                    if (x != null) e.setText(number(Units.convert(x, shownUnit[0], to)));
+                }
+                Param base = params.get(what.getSelectedItemPosition()), shownP = Units.display(base, to);
+                lo.setHint(number(shownP.min));
+                hi.setHint(number(shownP.max));
                 shownUnit[0] = to;
                 unit.setText(to);
+                rangeUnit.setText(to);
+                redUnit.setText(to);
             }
 
             @Override
@@ -176,6 +253,13 @@ final class GaugeSettingsDialog {
                     if (lim != null) lim = Units.offers(chosen.unit, shownUnit[0]) ? Units.convert(lim, shownUnit[0], chosen.unit) : lim;
                     if (lim != null) g.warnLimit = lim;
                     g.warnOn = warn.isChecked() && lim != null;
+                    // range and red zone: typed in the unit shown, kept in the value's own; an upside-down range is dropped
+                    Double rl = own(parse(lo.getText().toString()), chosen.unit, shownUnit[0]);
+                    Double rh = own(parse(hi.getText().toString()), chosen.unit, shownUnit[0]);
+                    if (rl != null && rh != null && rh <= rl) rl = rh = null;
+                    g.rangeMin = rl;
+                    g.rangeMax = rh;
+                    g.redFrom = own(parse(red.getText().toString()), chosen.unit, shownUnit[0]);
                     onChanged.run();
                 })
                 .setNegativeButton("Cancel", null)
@@ -183,6 +267,37 @@ final class GaugeSettingsDialog {
                     layout.remove(g.key);
                     onChanged.run();
                 }), holo, true);
+    }
+
+    /** Shows the "Calculated from" picker on its choice for a boost value; hides it for everything else. */
+    private static void showFrom(TextView label, Spinner pick, String id) {
+        String[] fam = PorscheCatalog.boostFamily(id);
+        int vis = fam == null ? View.GONE : View.VISIBLE;
+        label.setVisibility(vis);
+        pick.setVisibility(vis);
+        if (fam == null) return;
+        int at = java.util.Arrays.asList(fam).indexOf(id);
+        if (at >= 0 && pick.getSelectedItemPosition() != at) pick.setSelection(at);
+    }
+
+    /** True for the same value, or two ways of working out the same boost gauge. */
+    private static boolean sameFamily(String a, String b) {
+        if (a.equals(b)) return true;
+        String[] fa = PorscheCatalog.boostFamily(a);
+        return fa != null && java.util.Arrays.asList(fa).contains(b);
+    }
+
+    /** A figure typed in the unit shown, in the value's own unit (left alone when the unit is not one of its). */
+    private static Double own(Double typed, String ownUnit, String shown) {
+        if (typed == null) return null;
+        return Units.offers(ownUnit, shown) ? Units.convert(typed, shown, ownUnit) : typed;
+    }
+
+    private static EditText numberBox(Activity a) {
+        EditText e = new EditText(a);
+        e.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        e.setEms(5);
+        return e;
     }
 
     /** Fills the unit picker, or hides it when the value has no other units. */

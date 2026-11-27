@@ -70,4 +70,24 @@ public class LayoutCodecTest {
             T.eq(java.util.Collections.emptySet(), s.slowIds(), look + ": every default gauge is on the working line");
         }
     }
+
+    public static void aGaugesOwnRangeAndRedZoneRoundTrip() {
+        Layout l = new Layout(1280, 800);
+        GaugeSpec g = new GaugeSpec("g1", "boost_c", GaugeType.DIAL, 10, 10, 300, 300);
+        g.rangeMin = -10.0;
+        g.rangeMax = 25.0;
+        g.redFrom = 18.5;
+        l.add(g);
+        GaugeSpec plain = new GaugeSpec("g2", "rpm", GaugeType.DIAL, 400, 10, 300, 300);
+        plain.redFrom = 6000.0;
+        l.add(plain);
+        String text = LayoutCodec.encode(l);
+        Layout back = LayoutCodec.decode(text, "xp", 1280, 800);
+        T.eq(g, back.find("g1"), "range and red zone kept");
+        T.eq(plain, back.find("g2"), "a red zone alone kept");
+        T.ok(back.find("g2").rangeMin == null && back.find("g2").rangeMax == null, "no range set: none read back");
+        Layout none = new Layout(1280, 800);
+        none.add(new GaugeSpec("g1", "rpm", GaugeType.DIAL, 10, 10, 300, 300));
+        T.ok(!LayoutCodec.encode(none).contains(";"), "a gauge without them is written as before");
+    }
 }

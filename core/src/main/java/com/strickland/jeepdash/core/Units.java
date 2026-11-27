@@ -78,4 +78,20 @@ public final class Units {
         if (p == null || unit == null || unit.equals(p.unit) || !offers(p.baseUnit, unit)) return p;
         return p.inUnit(unit, convert(p.min, p.unit, unit), convert(p.max, p.unit, unit));
     }
+
+    /**
+     * The value as this gauge shows it: in its chosen unit, on the owner's own range and with its own red zone
+     * when set (both kept in the value's own unit and converted here). A range that is empty or upside down is
+     * ignored. The same Param when the gauge sets none of these.
+     */
+    public static Param forGauge(Param p, GaugeSpec g) {
+        if (p == null || g == null) return p;
+        Param d = display(p, g.unit);
+        if (g.rangeMin == null && g.rangeMax == null && g.redFrom == null) return d;
+        double lo = g.rangeMin != null ? convert(g.rangeMin, p.unit, d.unit) : d.min;
+        double hi = g.rangeMax != null ? convert(g.rangeMax, p.unit, d.unit) : d.max;
+        if (!(hi > lo)) { lo = d.min; hi = d.max; }
+        Double red = g.redFrom != null ? convert(g.redFrom, p.unit, d.unit) : null;
+        return d.withScale(lo, hi, red);
+    }
 }

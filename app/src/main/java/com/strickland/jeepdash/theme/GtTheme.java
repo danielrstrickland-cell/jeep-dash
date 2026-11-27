@@ -67,6 +67,12 @@ public final class GtTheme implements Theme {
     }
 
     private static Art.Scale scale(Param p) {
+        Art.Scale s = gtScale(p);
+        if (p.redLine != null) s.redFrom = p.redLine;            // the gauge's own red zone (see GaugeSpec)
+        return s;
+    }
+
+    private static Art.Scale gtScale(Param p) {
         Art.Scale s = new Art.Scale();
         double range = p.max - p.min;
         if (Art.converted(p)) return Art.scale(p);          // shown in another unit: plain spacings
@@ -74,7 +80,7 @@ public final class GtTheme implements Theme {
             s.major = 1000; s.minor = 500; s.labelEvery = 1000; s.labelDiv = 1000; s.redFrom = Math.min(6500.0, p.max * 0.93);
         } else if (p.id.equals("speed")) {
             s.major = 20; s.minor = 10; s.labelEvery = range > 150 ? 40 : 20;
-        } else if (p.id.equals("boost")) {
+        } else if (com.strickland.jeepdash.core.PorscheCatalog.boostFamily(p.id) != null && p.max - p.min <= 40) {
             s.major = 5; s.minor = 2.5; s.labelEvery = 5;
         } else {
             return Art.scale(p);

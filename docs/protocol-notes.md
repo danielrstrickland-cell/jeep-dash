@@ -229,6 +229,20 @@ Where the dash's values sit (group, slot from 0):
 The dash's boost gauge is manifold pressure minus outside air pressure (both in group 16). It has not been
 seen under boost yet.
 
+Since 2026-11-26 a boost or peak-boost gauge can be worked out four ways, picked in the gauge's settings
+("Calculated from"); each is its own value id, so two gauges can compare them side by side:
+
+| Choice | Id (peak) | How |
+|---|---|---|
+| Manifold | `boost` (`boost_peak`) | 16/3 minus 16/4, as before |
+| Boost sensor | `boost_s` (`boost_peak_s`) | 3b/6 minus the latest 16/4 (1013.25 mbar until one is read) |
+| Combined (the default on the Porsche faces) | `boost_c` (`boost_peak_c`) | vacuum: the manifold; in boost: the average of manifold and sensor |
+| Experimental: from air flow | `boost_x` (`boost_peak_x`) | the manifold pressure that would take in the measured air flow (16/1) at this engine speed (0a/0) and intake air temperature (0b/2): ideal gas, 4.511 L, 85 % filling, minus 16/4; blank under 400 rpm |
+
+Readings from other groups are the latest answer of that group (`PorscheCatalog.seen`). At the captured idle the
+air-flow estimate gives about 287 mbar against the manifold's 380. Any gauge can also have its own range and red
+zone (gauge settings; kept with the layout).
+
 ### Stored codes on the Cayenne (capture of 2026-11-22)
 
 The GearWrench app's Read DTC and Clear DTC on the engine computer, on the same line and session as live data:

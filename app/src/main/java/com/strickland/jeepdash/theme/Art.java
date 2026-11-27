@@ -140,6 +140,12 @@ final class Art {
     static double fromBase(Param p, double v) { return Units.convert(v, p.baseUnit, p.unit); }
 
     static Scale scale(Param p) {
+        Scale s = lookScale(p);
+        if (p.redLine != null) s.redFrom = p.redLine;            // the gauge's own red zone (see GaugeSpec)
+        return s;
+    }
+
+    private static Scale lookScale(Param p) {
         if (converted(p)) {
             // the tick spacings below are for the value's own unit: work out plain ones, and move the red line
             Double red = scale(base(p)).redFrom;

@@ -68,4 +68,26 @@ public class UnitsTest {
         T.ok(offered >= 20, "temperatures, pressures, speeds, air flow and the fuel gauges all offer a choice: " + offered);
         T.ok(Units.choices(Catalog.jeep("map_v").unit).isEmpty(), "the MAP sensor voltage stays in volts");
     }
+
+    public static void aGaugeCanHaveItsOwnRangeAndRedZone() {
+        Param p = Catalog.byId("coolant");
+        GaugeSpec g = new GaugeSpec("g1", "coolant", GaugeType.DIAL, 0, 0, 100, 100);
+        T.ok(Units.forGauge(p, g) == p, "nothing set: the value as it is");
+        g.rangeMin = 150.0;
+        g.rangeMax = 250.0;
+        g.redFrom = 225.0;
+        Param d = Units.forGauge(p, g);
+        T.near(150, d.min, 1e-9, "own low end");
+        T.near(250, d.max, 1e-9, "own high end");
+        T.near(225, d.redLine, 1e-9, "own red zone");
+        g.unit = "°C";
+        d = Units.forGauge(p, g);
+        T.near(Units.convert(150, "°F", "°C"), d.min, 1e-6, "range shown in the gauge's unit");
+        T.near(Units.convert(225, "°F", "°C"), d.redLine, 1e-6, "and the red zone");
+        g.unit = null;
+        g.rangeMax = 100.0;
+        d = Units.forGauge(p, g);
+        T.near(p.min, d.min, 1e-9, "an upside-down range is ignored");
+        T.near(225, d.redLine, 1e-9, "but the red zone still stands");
+    }
 }

@@ -634,6 +634,7 @@ public final class HoloTheme implements Theme {
     }
 
     private static Double redFrom(GaugeSpec g, Param pr) {
+        if (pr.redLine != null) return pr.redLine;              // the gauge's own red zone
         if (g.warnOn && g.warnAbove) return g.warnLimit;
         if (pr.id.equals("rpm")) return pr.max * 0.867;
         return null;

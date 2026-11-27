@@ -14,6 +14,11 @@ public final class GaugeSpec {
     public boolean warnOn = false, warnAbove = true;
     public double warnLimit = 0;
     public String unit;
+    /**
+     * The owner's own scale and red zone, in the value's own unit like the warning limit: null = the value's
+     * standard range, and no red zone of the gauge's own (the look keeps its usual red line, rpm's say).
+     */
+    public Double rangeMin, rangeMax, redFrom;
     /** Holo look: how far in front of (+) or behind (-) the truck the panel floats, -2..2. */
     public int depth;
 
@@ -28,7 +33,9 @@ public final class GaugeSpec {
         return key.equals(g.key) && Objects.equals(paramId, g.paramId) && type == g.type
                 && x == g.x && y == g.y && w == g.w && h == g.h
                 && warnOn == g.warnOn && warnAbove == g.warnAbove && warnLimit == g.warnLimit
-                && Objects.equals(unit, g.unit) && depth == g.depth;
+                && Objects.equals(unit, g.unit) && depth == g.depth
+                && Objects.equals(rangeMin, g.rangeMin) && Objects.equals(rangeMax, g.rangeMax)
+                && Objects.equals(redFrom, g.redFrom);
     }
 
     @Override public int hashCode() { return Objects.hash(key, paramId, type, x, y, w, h); }
@@ -36,6 +43,8 @@ public final class GaugeSpec {
     @Override public String toString() {
         return key + "[" + paramId + " " + type + " " + x + "," + y + " " + w + "x" + h
                 + (warnOn ? " warn" + (warnAbove ? ">" : "<") + warnLimit : "") + (unit != null ? " in " + unit : "")
-                + (depth != 0 ? " depth " + depth : "") + "]";
+                + (depth != 0 ? " depth " + depth : "")
+                + (rangeMin != null || rangeMax != null ? " range " + rangeMin + ".." + rangeMax : "")
+                + (redFrom != null ? " red " + redFrom : "") + "]";
     }
 }

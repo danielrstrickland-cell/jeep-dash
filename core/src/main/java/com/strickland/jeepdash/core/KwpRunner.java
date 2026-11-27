@@ -77,6 +77,7 @@ public final class KwpRunner implements Poller {
             if (v == null) continue;
             list.add(v);
             weight.merge(v.group, v.param.weight, Math::max);
+            for (int g : v.also) weight.merge(g, v.alsoWeight, Math::max);
         }
         active = list;
         cycle = spread(weight);
@@ -134,6 +135,7 @@ public final class KwpRunner implements Poller {
         }
         misses = 0;
         answering = true;
+        PorscheCatalog.seen(group, block);
         now = clock.getAsLong();
         for (PorscheCatalog.Value v : active) {
             if (v.group != group) continue;

@@ -243,7 +243,7 @@ public class DashView extends View implements HoloLoop.Layers {
                     if (s != null && !s.equals(v)) moving = true;
                     boolean warn = Layout.shouldFlash(g, v);         // the limit is kept in the value's own unit
                     flashing |= warn;
-                    Param d = display(p, g.unit);
+                    Param d = display(p, g);
                     if (d != p) {
                         if (v != null) v = Units.convert(v, p.unit, d.unit);
                         if (s != null) s = Units.convert(s, p.unit, d.unit);
@@ -346,7 +346,7 @@ public class DashView extends View implements HoloLoop.Layers {
             boolean warn = Layout.shouldFlash(g, v);
             String partnerId = HoloFace.partner(p.id);
             Double partner = partnerId == null || values == null ? null : values.get(partnerId, now);
-            Param d = display(p, g.unit);
+            Param d = display(p, g);
             if (d != p) {
                 if (v != null) v = Units.convert(v, p.unit, d.unit);
                 if (s != null) s = Units.convert(s, p.unit, d.unit);
@@ -366,7 +366,7 @@ public class DashView extends View implements HoloLoop.Layers {
             if (p == null) continue;
             Materialize m = anim.get(g.key);
             if (m != null && !m.done(LinkService.now())) continue;
-            Param d = display(p, g.unit);
+            Param d = display(p, g);
             Double s = shown.get(g.key);
             if (s != null && d != p) s = Units.convert(s, p.unit, d.unit);
             holo.drawGlow(c, g, d, s, wDp, hDp);
@@ -434,13 +434,13 @@ public class DashView extends View implements HoloLoop.Layers {
         return true;
     }
 
-    /** The value as its gauge shows it: converted to the gauge's chosen unit, made once and kept. */
-    private Param display(Param p, String unit) {
-        if (unit == null) return p;
-        String key = System.identityHashCode(p) + "|" + p.id + "|" + unit;
+    /** The value as its gauge shows it: in the gauge's chosen unit, range and red zone, made once and kept. */
+    private Param display(Param p, GaugeSpec g) {
+        if (g.unit == null && g.rangeMin == null && g.rangeMax == null && g.redFrom == null) return p;
+        String key = System.identityHashCode(p) + "|" + p.id + "|" + g.unit + "|" + g.rangeMin + "|" + g.rangeMax + "|" + g.redFrom;
         Param d = inUnits.get(key);
         if (d == null) {
-            d = Units.display(p, unit);
+            d = Units.forGauge(p, g);
             inUnits.put(key, d);
         }
         return d;

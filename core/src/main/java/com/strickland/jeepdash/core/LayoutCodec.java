@@ -3,8 +3,9 @@ package com.strickland.jeepdash.core;
 /**
  * Layout <-> text. First line "v1", then one gauge per line:
  * key|paramId|TYPE|x|y|w|h|warnOn|warnAbove|warnLimit, then |unit only for a gauge shown in another unit, then
- * |depth only for a Holo panel floating in front of or behind the truck (the unit then empty if it has none), so
- * layouts without them are written exactly as before. Anything unreadable falls back to the look's default.
+ * |depth only for a Holo panel floating in front of or behind the truck (the unit then empty if it has none),
+ * then |min;max;red only for a gauge with its own range or red zone (each part empty when not set; unit and depth
+ * then written too), so layouts without them are written exactly as before. Anything unreadable falls back to the look's default.
  */
 public final class LayoutCodec {
     private LayoutCodec() { }
@@ -16,8 +17,10 @@ public final class LayoutCodec {
                     .append(g.x).append('|').append(g.y).append('|').append(g.w).append('|').append(g.h).append('|')
                     .append(g.warnOn).append('|').append(g.warnAbove).append('|').append(g.warnLimit);
             boolean unit = g.unit != null && !g.unit.isEmpty() && g.unit.indexOf('|') < 0 && g.unit.indexOf('\n') < 0;
-            if (unit || g.depth != 0) sb.append('|').append(unit ? g.unit : "");
-            if (g.depth != 0) sb.append('|').append(g.depth);
+            boolean scale = g.rangeMin != null || g.rangeMax != null || g.redFrom != null;
+            if (unit || g.depth != 0 || scale) sb.append('|').append(unit ? g.unit : "");
+            if (g.depth != 0 || scale) sb.append('|').append(g.depth);
+            if (scale) sb.append('|').append(num(g.rangeMin)).append(';').append(num(g.rangeMax)).append(';').append(num(g.redFrom));
             sb.append('\n');
         }
         return sb.toString();
@@ -30,7 +33,7 @@ public final class LayoutCodec {
         Layout l = new Layout(w, h, HoloFace.minSize(look));
         for (int i = 1; i < lines.length; i++) {
             String[] f = lines[i].trim().split("\\|", -1);
-            if (f.length < 10 || f.length > 12) continue;
+            if (f.length < 10 || f.length > 13) continue;
             try {
                 GaugeSpec g = new GaugeSpec(f[0], f[1], GaugeType.valueOf(f[2]),
                         Float.parseFloat(f[3]), Float.parseFloat(f[4]), Float.parseFloat(f[5]), Float.parseFloat(f[6]));
@@ -38,7 +41,15 @@ public final class LayoutCodec {
                 g.warnAbove = Boolean.parseBoolean(f[8]);
                 g.warnLimit = Double.parseDouble(f[9]);
                 if (f.length >= 11 && !f[10].isEmpty()) g.unit = f[10];
-                if (f.length == 12) g.depth = Math.max(-2, Math.min(2, Integer.parseInt(f[11].trim())));
+                if (f.length >= 12) g.depth = Math.max(-2, Math.min(2, Integer.parseInt(f[11].trim())));
+                if (f.length == 13) {
+                    String[] sc = f[12].split(";", -1);
+                    if (sc.length == 3) {
+                        g.rangeMin = num(sc[0]);
+                        g.rangeMax = num(sc[1]);
+                        g.redFrom = num(sc[2]);
+                    }
+                }
                 if (l.find(g.key) == null) l.add(g);
             } catch (IllegalArgumentException e) {
                 // skip an unreadable line
@@ -47,6 +58,14 @@ public final class LayoutCodec {
         if (l.gauges.isEmpty()) return defaultFor(look, w, h);
         l.clampAll();
         return l;
+    }
+
+    private static String num(Double v) { return v == null ? "" : String.valueOf(v); }
+
+    private static Double num(String s) {
+        if (s == null || s.trim().isEmpty()) return null;
+        double v = Double.parseDouble(s.trim());          // unreadable: the caller skips the line
+        return Double.isNaN(v) || Double.isInfinite(v) ? null : v;
     }
 
     /** The approved mockup layouts at 1280x800 dp, scaled to the given screen. */
@@ -68,7 +87,7 @@ public final class LayoutCodec {
             // the Cayenne in 1980s digital: the same plan with its own nine values
             put(l, sx, sy, "g1", "rpm", GaugeType.DIAL, 40, 20, 1200, 296);
             put(l, sx, sy, "g2", "speed", GaugeType.DIGITAL, 430, 330, 420, 232);
-            put(l, sx, sy, "g3", "boost", GaugeType.BAR, 430, 574, 420, 142);
+            put(l, sx, sy, "g3", "boost_c", GaugeType.BAR, 430, 574, 420, 142);
             String[] left = {"coolant", "oil_temp", "iat"}, right = {"boost_set", "cam_r", "cam_l"};
             for (int i = 0; i < 3; i++) {
                 put(l, sx, sy, "g" + (4 + i), left[i], GaugeType.BAR, 40, 330 + i * 132, 370, 122);
@@ -76,7 +95,7 @@ public final class LayoutCodec {
             }
         } else if ("p_gt".equals(look)) {
             // three dials across the top (boost, engine speed, road speed), six readouts underneath
-            put(l, sx, sy, "g1", "boost", GaugeType.DIAL, 24, 54, 380, 380);
+            put(l, sx, sy, "g1", "boost_c", GaugeType.DIAL, 24, 54, 380, 380);
             put(l, sx, sy, "g2", "rpm", GaugeType.DIAL, 420, 20, 440, 448);
             put(l, sx, sy, "g3", "speed", GaugeType.DIAL, 876, 54, 380, 380);
             String[] row = {"coolant", "oil_temp", "iat", "cam_r", "cam_l", "boost_set"};

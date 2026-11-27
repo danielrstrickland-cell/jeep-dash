@@ -232,7 +232,8 @@ public class KwpTest {
     }
 
     public static void everyPorscheValueHasAGaugeRange() {
-        T.eq(38, PorscheCatalog.all().size(), "the nine recorded values, the boost sensor, battery volts, peak boost,"
+        T.eq(44, PorscheCatalog.all().size(), "the nine recorded values, the boost sensor, battery volts, peak boost,"
+                + " boost and peak boost three more ways each,"
                 + " the sixteen from the warm-idle capture, the six worked out by the screen itself and the four fuel gauges");
         for (Param p : PorscheCatalog.all()) T.ok(!p.unit.isEmpty(), p.id + " has a unit to show in the gauge picker");
         for (Param p : PorscheCatalog.all()) {
@@ -313,10 +314,10 @@ public class KwpTest {
 
     public static void thePorscheScreenStartsWithTheRecordedGauges() {
         java.util.Set<String> want = new java.util.HashSet<>(Arrays.asList(
-                "boost", "rpm", "speed", "coolant", "oil_temp", "iat", "cam_r", "cam_l", "boost_set"));
+                "boost_c", "rpm", "speed", "coolant", "oil_temp", "iat", "cam_r", "cam_l", "boost_set"));
         for (String look : new String[]{"p_retro", "p_gt"}) {
             Layout l = LayoutCodec.defaultFor(look, 1024, 600);
-            T.eq(want, new java.util.HashSet<>(l.activeParamIds()), look + ": the eight recorded values plus real boost");
+            T.eq(want, new java.util.HashSet<>(l.activeParamIds()), look + ": the eight recorded values plus boost, combined");
             T.eq(9, l.gauges.size(), look + ": nine gauges");
             for (GaugeSpec g : l.gauges)
                 T.ok(g.x >= 0 && g.y >= 0 && g.x + g.w <= 1024 && g.y + g.h <= 600, look + " " + g.key + " fits the head unit");
@@ -371,5 +372,53 @@ public class KwpTest {
         KwpBlocks.Block b = KwpBlocks.parse(0x0e, Hex.bytes(withSum("9a f1 10 61 0e 21 00 0b 21 ff 0b 21 ff 0c 21 ff 00 21 ff 00 25 00 00 25 00 00 25 00 00")));
         T.ok(Double.isNaN(b.v(0, KwpBlocks.SHARE)), "no full-scale figure: no reading, not a division by zero");
         T.near(4.31, b.v(1, KwpBlocks.SHARE), 0.005, "the next slot still reads");
+    }
+
+    public static void boostComesFourWaysAtIdle() throws Exception {
+        Rig r = new Rig("boost", "boost_s", "boost_c", "boost_x");
+        r.steps(40);
+        double k = 0.0145038;
+        T.near((380 - 1000) * k, r.get("boost"), 0.01, "manifold: vacuum at idle");
+        T.near((980 - 1000) * k, r.get("boost_s"), 0.01, "boost sensor ahead of the throttle: about outside air");
+        T.near((380 - 1000) * k, r.get("boost_c"), 0.01, "combined: vacuum comes from the manifold");
+        double est = PorscheCatalog.fromAirFlow((256 * 6 + 0xf9) * 0.044, 920, 24, 1000);
+        T.near(est, r.get("boost_x"), 0.05, "air flow, experimental");
+        T.ok(est < -8 && est > -12, "and near the manifold's vacuum at idle: " + est);
+        java.util.Set<Integer> groups = new java.util.HashSet<>(r.car.groupsRead());
+        T.eq(new java.util.HashSet<>(Arrays.asList(0x16, 0x3b, 0x0a, 0x0b)), groups, "the groups the four ways need");
+    }
+
+    public static void combinedAveragesOnlyInBoost() {
+        T.near(11, PorscheCatalog.combined(10, 12), 1e-9, "in boost: the average");
+        T.near(-5, PorscheCatalog.combined(-5, 1), 1e-9, "in vacuum: the manifold");
+        T.near(3, PorscheCatalog.combined(Double.NaN, 3), 1e-9, "no manifold: the sensor");
+        T.near(4, PorscheCatalog.combined(4, Double.NaN), 1e-9, "no sensor yet: the manifold");
+    }
+
+    public static void airFlowNeedsTheEngineTurning() {
+        T.ok(Double.isNaN(PorscheCatalog.fromAirFlow(80, 0, 24, 1000)), "engine stopped: nothing");
+        T.ok(Double.isNaN(PorscheCatalog.fromAirFlow(Double.NaN, 3000, 24, 1000)), "no air flow: nothing");
+        T.ok(PorscheCatalog.fromAirFlow(2700, 4500, 40, 1000) > 10, "full air flow high up: boost");
+    }
+
+    public static void theBoostChoicesAreFamilies() {
+        T.eq(Arrays.asList("boost", "boost_s", "boost_c", "boost_x"), Arrays.asList(PorscheCatalog.boostFamily("boost_c")), "boost");
+        T.eq(Arrays.asList("boost_peak", "boost_peak_s", "boost_peak_c", "boost_peak_x"),
+                Arrays.asList(PorscheCatalog.boostFamily("boost_peak")), "peak boost");
+        T.eq(4, PorscheCatalog.BOOST_FROM.length, "four names for the drop-down");
+        T.ok(PorscheCatalog.boostFamily("rpm") == null && PorscheCatalog.boostFamily("boost_set") == null, "others have no choice");
+        for (String id : PorscheCatalog.boostFamily("boost")) T.ok(PorscheCatalog.value(id) != null, id + " is read from the car");
+        for (String id : PorscheCatalog.boostFamily("boost_peak")) T.ok(PorscheCatalog.value(id) != null, id + " is read from the car");
+    }
+
+    public static void everyPeakStartsAtZeroAndHoldsItsOwn() throws Exception {
+        Rig r = new Rig("boost_peak", "boost_peak_s", "boost_peak_c", "boost_peak_x");
+        r.steps(40);
+        for (String id : PorscheCatalog.boostFamily("boost_peak")) T.near(0, r.get(id), 1e-9, id + ": no boost at idle");
+        r.car.replies.put(0x16, group16(0xff));               // 250 x 255 x 0.04 = 2550 mbar: 1550 over outside air
+        r.steps(40);
+        T.near(1550 * 0.0145038, r.get("boost_peak"), 1e-6, "manifold peak");
+        T.near((1550 * 0.0145038 + (980 - 1000) * 0.0145038) / 2, r.get("boost_peak_c"), 1e-6, "combined peak: the average");
+        T.near(0, r.get("boost_peak_s"), 1e-9, "the sensor still read outside air: its own peak stays at zero");
     }
 }
