@@ -47,7 +47,17 @@ public class VisualizerActivity extends Activity
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         view = new VisualizerView(this, this);
-        setContentView(view);
+        if (MilkDrop.ready()) {                                     // MilkDrop draws in its own view, under the buttons
+            android.widget.FrameLayout stack = new android.widget.FrameLayout(this);
+            android.view.TextureView milkView = new android.view.TextureView(this);
+            milkView.setAlpha(0);
+            stack.addView(milkView);
+            stack.addView(view);
+            view.attachMilk(new MilkDrop(this, milkView));
+            setContentView(stack);
+        } else {
+            setContentView(view);
+        }
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
@@ -212,6 +222,7 @@ public class VisualizerActivity extends Activity
                     }
                     long t = System.nanoTime();
                     tapSpectrum.feed(tapSamples, Math.min(0.1f, (t - lastFeed) / 1e9f));
+                    view.milkPcm(tapSamples, tapSize);
                     lastFeed = t;
                     Thread.sleep(20);
                     continue;
@@ -238,6 +249,7 @@ public class VisualizerActivity extends Activity
                 System.arraycopy(window, HOP, window, 0, SIZE - HOP);
                 System.arraycopy(hop, 0, window, SIZE - HOP, HOP);
                 micSpectrum.feed(window, (float) HOP / RATE);
+                view.milkPcm(hop, HOP);
                 lastFeed = System.nanoTime();
             }
         } catch (InterruptedException ignored) {

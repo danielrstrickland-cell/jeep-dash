@@ -43,6 +43,7 @@ public final class TestMain {
             VizTuneTest.class,
             SubPhysicsTest.class,
             GfxStatsTest.class,
+            MilkPlaylistTest.class,
             MotionTest.class,
             OrbitViewTest.class,
             TrailWorldTest.class,

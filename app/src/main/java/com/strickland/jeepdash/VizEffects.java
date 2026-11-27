@@ -26,7 +26,7 @@ final class VizEffects {
     /** True when this device can run the effects at all. */
     static boolean supported() { return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S; }
 
-    private static final String CRT = ""
+    static final String CRT = ""
             + "uniform shader content;\n"
             + "uniform float2 size;\n"
             + "uniform float amount;\n"

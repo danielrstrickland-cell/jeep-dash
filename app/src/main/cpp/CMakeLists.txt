@@ -1,5 +1,6 @@
-# MilkDrop for the visualizer: libprojectM (LGPL-2.1, linked as its own shared library, unmodified) plus a small
-# JNI bridge. Built for the tablet's 64-bit ARM only; on other ABIs the bridge is a stub that reports MilkDrop
+# MilkDrop for the visualizer: libprojectM (LGPL-2.1, unmodified, fetched from its own repository at a pinned
+# commit) linked into a small JNI bridge. The app's full source and this build script are public, so anyone can
+# rebuild it against a changed projectM, as the LGPL asks. Built for the tablet's 64-bit ARM only; on other ABIs the bridge is a stub that reports MilkDrop
 # as unavailable, so the app still installs and the look falls back to smooth bars.
 cmake_minimum_required(VERSION 3.22.1)
 project(jeepdash_milkdrop C CXX)
@@ -16,7 +17,7 @@ if(ANDROID_ABI STREQUAL "arm64-v8a")
     set(BUILD_DOCS OFF CACHE BOOL "" FORCE)
     set(ENABLE_SDL_UI OFF CACHE BOOL "" FORCE)
     set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
-    set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     # pinned commits; the evaluator is projectM's one submodule, so it is fetched alongside and put in place
     FetchContent_Declare(pmeval
             URL https://github.com/projectM-visualizer/projectm-eval/archive/22fb0cfd8f2dfbcd2b68f2443e7f44e19b32c09a.zip)

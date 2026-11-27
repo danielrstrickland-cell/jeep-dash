@@ -75,6 +75,7 @@ public final class VizTune {
      */
     /** Ferrofluid (5) and lava lamp (8) were taken out too; their numbers stay so the rest keep their settings. */
     public static final int[] CHOICES = {0, 1, 3, 4, 6, 7, 9, 10, 11, 12};
+    /** Look 6 was the milk-drop splash; it is now MilkDrop itself (projectM). */
     public static final int FERRO = 5, MILK = 6, ROAD = 7, LAVA = 8, MANDEL = 9, RACER = 10, SUBS = 11, DOLPHINS = 12;
     public static final int SMOOTH = 1;
 
@@ -101,8 +102,11 @@ public final class VizTune {
                     slider("zoom", "Zoom", 0, 2, 1), toggle("drops", "Droplets")},
             {GAIN, GLOW, slider("size", "Blob size", 0.6f, 1.4f, 1), slider("spikes", "Spike size", 0, 2, 1),
                     slider("shine", "Shine", 0, 1.5f, 1), slider("spin", "Spin", 0, 2, 0.5f), toggle("drops", "Droplets")},
-            {GAIN, GLOW, slider("ripples", "Ripple size", 0, 2, 1), slider("splash", "Splash height", 0, 2, 1),
-                    slider("view", "Camera height", 0.6f, 1.6f, 1)},
+            {toggle("drop", "Change on the drop"), slider("hold", "Hold at least", 5, 60, 15),
+                    slider("sens", "Drop sensitivity", 0.5f, 2, 1),
+                    new Knob("play", "Play", 0, 2, 1, false, new String[]{"All", "Favour \u2605", "Only \u2605"}),
+                    slider("hue", "RPM colour shift", 0, 1, 0.5f), toggle("sway", "G-meter sway"),
+                    toggle("names", "Preset name flash")},
             {GAIN, GLOW, toggle("city", "City buildings"), slider("build", "Building height", 0, 4, 1),
                     slider("bwidth", "Building width", 0.5f, 1.5f, 1), slider("turns", "Turn strength", 0, 2, 1),
                     slider("pace", "Speed feel", 0.5f, 2, 1), toggleOff("flip", "Flip turns")},
@@ -136,6 +140,7 @@ public final class VizTune {
     public static String unit(String id) {
         if (id.equals("angle")) return "\u00B0";
         if (id.equals("tune")) return " Hz";
+        if (id.equals("hold")) return " s";
         return null;
     }
 

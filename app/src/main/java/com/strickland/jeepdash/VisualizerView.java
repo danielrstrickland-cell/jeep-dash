@@ -76,7 +76,6 @@ public class VisualizerView extends View {
         prefs = context.getSharedPreferences("viz", Context.MODE_PRIVATE);
         painter.swirl = new SwirlLook();
         if (GpuLook.supported()) {                           // a shader that does not build leaves smooth bars
-            build(VizTune.MILK, () -> new GpuMilk(motion));
             build(VizTune.ROAD, () -> new GpuRoad(motion));
             build(VizTune.MANDEL, GpuMandel::new);
             build(VizTune.RACER, () -> new GpuRacer(motion));
@@ -104,6 +103,52 @@ public class VisualizerView extends View {
     }
 
     void setSpectrum(Spectrum s) { spectrum = s; }
+
+    private MilkDrop milk;
+
+    /** MilkDrop's view and engine, set by the screen when this tablet can run it. */
+    void attachMilk(MilkDrop m) {
+        milk = m;
+        painter.milkReady = m != null;
+    }
+
+    /** Sound for MilkDrop, from the screen's sound thread. */
+    void milkPcm(short[] samples, int n) {
+        MilkDrop m = milk;
+        if (m != null) m.pcmIn(samples, n);
+    }
+
+    /** Hands MilkDrop this frame's settings and shows its state in the side menu. */
+    private void milkFrame() {
+        MilkDrop m = milk;
+        if (m == null) return;
+        VizPainter p = painter;
+        float alpha = p.milkAlpha();
+        if (m.view.getAlpha() != alpha) m.view.setAlpha(alpha);
+        m.active = alpha > 0 && running;
+        int look = VizTune.MILK;
+        m.drop = p.tune.on(look, "drop");
+        m.hold = p.tune.get(look, "hold");
+        m.sensitivity = p.tune.get(look, "sens");
+        m.locked = p.milkLocked;
+        m.quality = Math.round(p.tune.get(VizTune.GLOBAL, "quality"));
+        m.mode = Math.round(p.tune.get(look, "play"));
+        m.delay = p.tune.get(VizTune.GLOBAL, "delay");
+        if (m.active) {
+            float hue = p.rpm == null ? 0 : (float) Math.min(1, p.rpm / 4500.0) * 180 * p.tune.get(look, "hue");
+            m.effects(p.tune.get(VizTune.GLOBAL, "bloom"), p.tune.get(VizTune.GLOBAL, "crt"), hue,
+                    p.sloshX, p.sloshY, p.tune.on(look, "sway"));
+        }
+        String now = m.current;
+        p.milkName = com.strickland.jeepdash.core.MilkPlaylist.name(now);
+        p.milkChangedMs = m.changedMs;
+        p.milkNumber = m.list.number();
+        p.milkCount = m.list.size();
+        p.milkStarred = m.list.starred(now);
+        p.milkMode = m.mode;
+        p.milkStatus = m.download;
+        p.milkPack = m.packInstalled();
+    }
 
     void setRunning(boolean on) {
         running = on;
@@ -213,6 +258,7 @@ public class VisualizerView extends View {
         boolean fade = painter.tune.on(VizTune.GLOBAL, "autohide") && !painter.drawerOpen && !painter.menuOpen
                 && System.currentTimeMillis() - touchedMs > FADE_AFTER_MS;
         painter.chromeAlpha = Math.max(0, Math.min(1, painter.chromeAlpha + (fade ? -dt * 2 : dt * 4)));
+        milkFrame();
         int w = getWidth(), h = getHeight();
         float seconds = (now - startNs) / 1e9f;
         if (effects != null && canvas.isHardwareAccelerated()) effects.draw(canvas, painter, w, h, dt, seconds);
@@ -377,6 +423,17 @@ public class VisualizerView extends View {
             p.menuTab = p.rowTune.contains(x, y) ? VizPainter.TAB_LOOK : VizPainter.TAB_EFFECTS;
             p.menuOpen = true;
             p.drawerOpen = false;
+        } else if (milk != null && p.milkPrev.contains(x, y)) {
+            milk.step.set(-1);
+        } else if (milk != null && p.milkNext.contains(x, y)) {
+            milk.step.set(1);
+        } else if (milk != null && p.milkLock.contains(x, y)) {
+            p.milkLocked = !p.milkLocked;
+        } else if (milk != null && p.milkStar.contains(x, y)) {
+            milk.list.star(milk.current, !milk.list.starred(milk.current));
+            milk.saveStars();
+        } else if (milk != null && p.milkPlay.contains(x, y)) {
+            p.tune.set(VizTune.MILK, "play", (Math.round(p.tune.get(VizTune.MILK, "play")) + 1) % 3);
         } else if (p.rowHide.contains(x, y)) {
             p.drawerOpen = false;
             p.hidden = true;
@@ -415,6 +472,8 @@ public class VisualizerView extends View {
             }
         } else if (p.resetButton.contains(x, y)) {
             p.tune.reset(p.target());
+        } else if (milk != null && p.milkDownload.contains(x, y) && !milk.packInstalled()) {
+            milk.downloadPack();
         }
     }
 

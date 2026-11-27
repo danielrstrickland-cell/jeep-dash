@@ -21,7 +21,7 @@ public final class VizPainter {
     public static final int BANDS = 96;                              // how finely the sound is analysed
     public static final int[] COUNTS = {16, 24, 32, 48, 64, 96};    // how many bars are drawn
     /** By look number; number 2 (the boom meters) was taken out, see VizTune.CHOICES. */
-    public static final String[] LOOKS = {"Blocks", "Smooth", "", "Bass ring", "Swirl", "Ferrofluid", "Milk drop", "Road", "Lava lamp", "Mandelbrot", "Street racer", "Sub cam", "Dolphins"};
+    public static final String[] LOOKS = {"Blocks", "Smooth", "", "Bass ring", "Swirl", "Ferrofluid", "MilkDrop", "Road", "Lava lamp", "Mandelbrot", "Street racer", "Sub cam", "Dolphins"};
     public static final String[] COLORS = {"RPM", "Vice", "Factory", "XP", "Fire", "Ice", "Classic"};
     /** low, middle, high, accent. The first profile follows the engine instead. */
     private static final int[][] PROFILES = {
@@ -45,7 +45,15 @@ public final class VizPainter {
     /** The graphics-chip looks, by look number; null where the device cannot run them (smooth bars instead). */
     public final Extra[] gpu = new Extra[13];
     public float sloshX, sloshY;       // the G-meter's push, from VizMotion
-    public float fps = 60;             // frames a second, smoothed, for the optional counter
+    public float fps = 60;
+    // MilkDrop (projectM, drawn in its own view under this one): what the side menu and name flash show
+    public boolean milkReady;
+    public String milkName, milkStatus;
+    public int milkNumber, milkCount, milkMode = 1;
+    public boolean milkLocked, milkStarred, milkPack;
+    public long milkChangedMs;
+    public final RectF milkPrev = new RectF(), milkLock = new RectF(), milkNext = new RectF();
+    public final RectF milkStar = new RectF(), milkPlay = new RectF(), milkDownload = new RectF();             // frames a second, smoothed, for the optional counter
     public Double speed;                 // mph from the Jeep, null when not connected
 
     // What to draw; the view fills these in before every frame.
@@ -120,7 +128,8 @@ public final class VizPainter {
         vu = clamp(vu * gain);
         bass = clamp(bass * gain);
         palette(dt, seconds);
-        c.drawColor(0xFF000000);
+        boolean milk = milkReady && (look == VizTune.MILK || fromLook == VizTune.MILK);
+        c.drawColor(milk ? 0 : 0xFF000000, milk ? android.graphics.PorterDuff.Mode.CLEAR : android.graphics.PorterDuff.Mode.SRC_OVER);
         // the room lights up with the bass
         if (roomShader == null || roomColor != pal[0] || roomW != w || roomH != h) {
             roomShader = new RadialGradient(w / 2f, h, h * 0.95f, pal[0], pal[0] & 0x00FFFFFF, Shader.TileMode.CLAMP);
@@ -131,7 +140,7 @@ public final class VizPainter {
         fill(0);
         paint.setShader(roomShader);
         paint.setAlpha(Math.min(255, (int) ((40 + 110 * bass + 90 * beat) * tune.get(look, "glow"))));
-        c.drawRect(0, 0, w, h, paint);
+        if (!milk) c.drawRect(0, 0, w, h, paint);
 
         group(dt, gain);
         float time = tune.get(VizTune.GLOBAL, "blend");
@@ -276,7 +285,16 @@ public final class VizPainter {
         c.drawRect(x0, yt, x1, yb, paint);
     }
 
+    /** How much of MilkDrop's view should show: 1 while it is the look, fading in or out during a blend. */
+    public float milkAlpha() {
+        if (!milkReady) return 0;
+        float t = fromLook >= 0 ? blendT * blendT * (3 - 2 * blendT) : 1;
+        if (look == VizTune.MILK) return fromLook >= 0 ? t : 1;
+        return fromLook == VizTune.MILK ? 1 - t : 0;
+    }
+
     private void look(Canvas c, int which, int w, int h, float dt, float seconds) {
+        if (which == VizTune.MILK && milkReady) return;                // MilkDrop draws itself, underneath
         boolean caps = tune.on(which, "caps");
         if (which < gpu.length && gpu[which] != null) {
             try {
@@ -299,6 +317,13 @@ public final class VizPainter {
         float u = h / 800f;
         theme(tune.on(VizTune.GLOBAL, "dark"));
         if (message != null) text(c, message, w / 2f, h - 30 * u, 26 * u, 0xFFFFFFFF, Paint.Align.CENTER);
+        long since = System.currentTimeMillis() - milkChangedMs;
+        if (look == VizTune.MILK && milkReady && milkName != null && tune.on(VizTune.MILK, "names") && since < 3000) {
+            int a = Math.round(255 * Math.min(1, (3000 - since) / 600f));
+            text(c, milkName, w / 2f, h - 64 * u, 24 * u, (a << 24) | 0xFFFFFF, Paint.Align.CENTER);
+        }
+        if (look == VizTune.MILK && !milkReady && message == null)
+            text(c, "MilkDrop needs the 64-bit tablet build", w / 2f, h - 30 * u, 22 * u, 0xFFFFFFFF, Paint.Align.CENTER);
         if (tune.on(VizTune.GLOBAL, "fps"))                          // tiny and faint, bottom right
             text(c, Math.round(fps) + " fps", w - 12 * u, h - 10 * u, 14 * u, 0x77FFFFFF, Paint.Align.RIGHT);
         if (hidden) {
@@ -339,11 +364,20 @@ public final class VizPainter {
         stroke(xpEdge, 2 * u);
         c.drawLine(x + dw, 0, x + dw, h, paint);
 
-        float rowH = Math.min(78 * u, (h - bar - 20 * u) / 8), left = x + 24 * u, right = x + dw - 24 * u, r = bar + 8 * u;
+        boolean milk = look == VizTune.MILK && milkReady;
+        float rowH = Math.min(78 * u, (h - bar - 20 * u) / (milk ? 11 : 8)), left = x + 24 * u, right = x + dw - 24 * u, r = bar + 8 * u;
         r = row(c, rowDash, left, right, r, rowH, "Dash", "\u203A", u);
         divider(c, left, right, r, u);
         r = chooser(c, lookPrev, lookNext, left, right, r, rowH, "Look", LOOKS[look], u);
         r = chooser(c, colorPrev, colorNext, left, right, r, rowH, "Colors", COLORS[color], u);
+        if (milk) r = milkRows(c, left, right, r, rowH, u);
+        else {
+            milkPrev.setEmpty();
+            milkLock.setEmpty();
+            milkNext.setEmpty();
+            milkStar.setEmpty();
+            milkPlay.setEmpty();
+        }
         // bars: a slider with six stops
         text(c, "Bars", left, r + rowH * 0.42f, 21 * u, xpInk, Paint.Align.LEFT);
         text(c, String.valueOf(shown), right, r + rowH * 0.42f, 20 * u, xpInk, Paint.Align.RIGHT);
@@ -361,6 +395,31 @@ public final class VizPainter {
         r = row(c, rowHide, left, right, r, rowH, "Hide controls", "3 fingers", u);
         if (music) row(c, musicButton, left, right, r, rowH, "Music", musicOpen ? "Close" : "\u203A", u);
         else musicButton.setEmpty();
+    }
+
+    /** MilkDrop's rows: which preset, Prev / Lock / Next, the star, and what to play. */
+    private float milkRows(Canvas c, float left, float right, float r, float rowH, float u) {
+        divider(c, left, right, r, u);
+        text(c, String.format(java.util.Locale.US, "Preset %,d of %,d", milkNumber, milkCount), left, r + rowH * 0.6f,
+                18 * u, xpMuted, Paint.Align.LEFT);
+        r += rowH;
+        float gap = 10 * u, bw = (right - left - 2 * gap) / 3, bh = Math.min(48 * u, rowH * 0.8f), by = r + (rowH - bh) / 2;
+        milkPrev.set(left, by, left + bw, by + bh);
+        milkLock.set(left + bw + gap, by, left + 2 * bw + gap, by + bh);
+        milkNext.set(right - bw, by, right, by + bh);
+        xpBox(c, milkPrev, "\u25C0 Prev", u);
+        fill(milkLocked ? xpFill : xpButtonFill);
+        c.drawRoundRect(milkLock, 5 * u, 5 * u, paint);
+        stroke(milkLocked ? xpFill : xpButtonEdge, 1.5f * u);
+        c.drawRoundRect(milkLock, 5 * u, 5 * u, paint);
+        text(c, milkLocked ? "Locked" : "Lock", milkLock.centerX(), milkLock.centerY() + 7 * u, 17 * u,
+                milkLocked ? 0xFFFFFFFF : xpInk, Paint.Align.CENTER);
+        xpBox(c, milkNext, "Next \u25B6", u);
+        r += rowH;
+        r = row(c, milkStar, left, right, r, rowH, (milkStarred ? "\u2605" : "\u2606") + " Favourite",
+                milkStarred ? "starred" : "tap to star", u);
+        String[] modes = {"All presets", "Favour starred", "Only starred"};
+        return row(c, milkPlay, left, right, r, rowH, "Play", modes[Math.max(0, Math.min(2, milkMode))] + " \u203A", u);
     }
 
     private float row(Canvas c, RectF hit, float left, float right, float top, float rowH, String label, String end, float u) {
@@ -651,6 +710,12 @@ public final class VizPainter {
             text(c, shows, right, mid + 7 * u, 18 * u, xpInk, Paint.Align.RIGHT);
         }
         xpButton(c, resetButton, left, bottom - 44 * u, "Reset", u);
+        if (t == VizTune.MILK && milkReady) {                          // the full preset pack
+            String label = milkStatus != null ? milkStatus : milkPack ? "Preset pack installed" : "Download 10K preset pack";
+            xpWide(c, milkDownload, left + 120 * u, bottom - 44 * u, Math.min(right - left - 120 * u, 420 * u), label, u);
+        } else {
+            milkDownload.setEmpty();
+        }
     }
 
     private void colorsTab(Canvas c, float left, float top, float right, float u) {

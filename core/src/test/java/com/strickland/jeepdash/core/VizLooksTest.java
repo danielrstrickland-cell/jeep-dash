@@ -19,7 +19,7 @@ public class VizLooksTest {
         T.eq(1, VizTune.nextLook(0), "blocks to smooth");
         T.eq(3, VizTune.nextLook(1), "smooth skips the old meters to the ring");
         T.eq(4, VizTune.nextLook(3), "ring to swirl");
-        T.eq(6, VizTune.nextLook(4), "swirl to milk drop");
+        T.eq(6, VizTune.nextLook(4), "swirl to MilkDrop");
         T.eq(VizTune.SMOOTH, VizTune.savedLook(5), "a saved ferrofluid becomes smooth");
         
         T.eq(9, VizTune.nextLook(7), "road to Mandelbrot");
