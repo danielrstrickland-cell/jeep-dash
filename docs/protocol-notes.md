@@ -143,6 +143,12 @@ the line back to 7812.5 baud). So no Jeep-line read may carry an id from f0 to f
 scan has its own list that passes only the one-id form (`Protocols.allowedScan`). Nothing else is sent apart
 from the Jeep-line set-up above when the dongle is not on that line already.
 
+2026-11-26, the first scan on the truck: id 00 came back as a lone `00` (no id echoed) and every id after it
+went unanswered, rpm and coolant included, until the scan stopped itself; live data came back afterwards once it
+had set the line up again. So the scan now starts at 01 (00 is written as "skipped"), and when an id goes
+unanswered it sets the Jeep line up from the start and asks that id once more; the CSV marks such answers
+" (retry)", so an id that knocks the engine computer out stands out.
+
 ## Jeep engine computer: stock spark table
 
 The "Timing pulled" gauge compares the timing read over F4 id 2f with the main spark table of the owner's own

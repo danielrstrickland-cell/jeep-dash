@@ -499,8 +499,9 @@ public class LinkService extends Service {
             endScan(s);
             return true;
         }
-        if (s.done() == 0) note("-- value scan: every live-data id, " + ValueScan.PASSES + " passes");
-        s.record(id, ((PollRunner) r).scanRead(id));
+        if (s.done() == 0) note("-- value scan: every live-data id from 01 (00 is skipped), " + ValueScan.PASSES + " passes");
+        PollRunner.ScanAnswer a = ((PollRunner) r).scanReadRetrying(id);
+        s.record(id, a.data, a.retried);
         setStatus(Status.LIVE, "Scanning all values: pass " + s.pass() + " of " + ValueScan.PASSES + ", "
                 + (100 * s.done() / s.total()) + "%");
         return true;

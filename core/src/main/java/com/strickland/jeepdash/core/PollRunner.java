@@ -274,6 +274,30 @@ public final class PollRunner implements Poller {
         return answer;
     }
 
+    /** A scan read's answer (null = none) and whether it took the second ask. */
+    public static final class ScanAnswer {
+        public final byte[] data;
+        public final boolean retried;
+
+        ScanAnswer(byte[] data, boolean retried) {
+            this.data = data;
+            this.retried = retried;
+        }
+    }
+
+    /**
+     * {@link #scanRead}, and when nothing comes back, the Jeep line set up again from the start (what live
+     * data does after missed readings) and the same id asked once more. On the truck one unanswered id left
+     * every id after it silent until the line was set up again; this gets the scan going again instead.
+     */
+    public synchronized ScanAnswer scanReadRetrying(int id) throws IOException {
+        byte[] first = scanRead(id);
+        if (first != null) return new ScanAnswer(first, false);
+        note(String.format(java.util.Locale.US, "-- value scan: id %02x went unanswered; line set up again, asked once more", id));
+        onLine = null;                              // scanRead sets the Jeep line up from the start
+        return new ScanAnswer(scanRead(id), true);
+    }
+
     /**
      * Clears the stored codes: the dash's one write to the engine computer. Sent only after the engine
      * speed has been read as zero, as the two frames the GearWrench app sends, and followed by a fresh read

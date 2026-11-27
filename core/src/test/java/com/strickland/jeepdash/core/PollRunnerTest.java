@@ -389,6 +389,32 @@ public class PollRunnerTest {
         T.ok(r.values.get("rpm", 0) != null, "and clears nothing");
     }
 
+    public static void anUnansweredScanIdSetsTheLineUpAgainAndAsksOnceMore() throws Exception {
+        Rig r = new Rig("rpm");
+        r.steps(2);
+        r.car.engineAnswers = false;
+        r.car.sent.clear();
+        PollRunner.ScanAnswer a = r.runner.scanReadRetrying(0x20);
+        T.eq(null, a.data, "still nothing");
+        T.ok(a.retried, "asked twice");
+        List<String> want = new ArrayList<>(Arrays.asList(Protocols.SCI_FAST, "61 04 00 02 f4 20 01"));
+        want.addAll(plus(Protocols.STOP_KEEPALIVE, Protocols.SCI_SETUP));
+        want.add(Protocols.SCI_FAST);
+        want.add("61 04 00 02 f4 20 01");
+        T.eq(want, r.car.sent, "read, line set up from the start, the same read again");
+        for (String c : r.car.sent) T.ok(Protocols.allowed(Hex.bytes(c)), "read-only list: " + c);
+    }
+
+    public static void anAnsweredScanIdIsAskedOnce() throws Exception {
+        Rig r = new Rig("rpm");
+        r.steps(2);
+        r.car.sent.clear();
+        PollRunner.ScanAnswer a = r.runner.scanReadRetrying(0x3c);
+        T.eq("3c 80", Hex.str(a.data), "the answer");
+        T.ok(!a.retried, "no second ask");
+        T.eq(2, r.car.sent.size(), "fast switch and one read");
+    }
+
     public static void scanReadRefusesAnIdOutsideTheTable() throws Exception {
         Rig r = new Rig("rpm");
         r.steps(2);
@@ -415,6 +441,7 @@ public class PollRunnerTest {
             if (read) reads++;
             T.ok(read || setup.contains(c), "only line setup and one-id reads: " + c);
         }
-        T.eq(ValueScan.PASSES * 240, reads, "every id of the table, three times");
+        T.eq(ValueScan.PASSES * 239, reads, "every id of the table but 00, three times");
+        for (String c : r.car.sent) T.ok(!c.equals("61 04 00 02 f4 00 01"), "00 is never asked");
     }
 }
