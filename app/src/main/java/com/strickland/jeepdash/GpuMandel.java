@@ -21,22 +21,28 @@ final class GpuMandel extends GpuLook {
             + "uniform float beat;\n"
             + "uniform float fade;\n"
             + "uniform float shift;\n"
+            + "uniform float limit;\n"
             + "half4 main(float2 p) {\n"
             + "    float2 q = (p - 0.5 * size) / size.y;\n"
             + "    float cr = cos(rot);\n"
             + "    float sr = sin(rot);\n"
             + "    q = float2(cr * q.x - sr * q.y, sr * q.x + cr * q.y);\n"
             + "    float2 c = float2(-0.743643887, 0.131825904) + q * zoom;\n"
+            // inside the main cardioid or the big bulb: never escapes, so skip the sums (most of the dark area)
+            + "    float qx = c.x - 0.25;\n"
+            + "    float qq = qx * qx + c.y * c.y;\n"
+            + "    if (qq * (qq + qx) < 0.25 * c.y * c.y || (c.x + 1.0) * (c.x + 1.0) + c.y * c.y < 0.0625) return half4(0.0, 0.0, 0.0, 1.0);\n"
             + "    float2 z = float2(0.0);\n"
             + "    float n = 0.0;\n"
             + "    float m2 = 0.0;\n"
             + "    for (int i = 0; i < 110; i++) {\n"
+            + "        if (float(i) >= limit) break;\n"
             + "        z = float2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;\n"
             + "        m2 = dot(z, z);\n"
             + "        if (m2 > 256.0) break;\n"
             + "        n += 1.0;\n"
             + "    }\n"
-            + "    if (n > 109.5) return half4(0.0, 0.0, 0.0, 1.0);\n"
+            + "    if (n > limit - 0.5) return half4(0.0, 0.0, 0.0, 1.0);\n"
             + "    float sn = n - log2(log2(m2)) + 4.0;\n"
             + "    float t = fract(sn * 0.035 + shift);\n"
             + "    half3 col = t < 0.3333 ? mix(c0.rgb, c1.rgb, half(t * 3.0))\n"
@@ -65,5 +71,6 @@ final class GpuMandel extends GpuLook {
         shader.setFloatUniform("beat", p.beat);
         shader.setFloatUniform("fade", Math.max(0, fade));
         shader.setFloatUniform("shift", shift % 1);
+        shader.setFloatUniform("limit", 48 + depth * 5.5f);                // more steps only as the dive gets deeper
     }
 }

@@ -12,8 +12,7 @@ import com.strickland.jeepdash.core.VizTune;
 
 /**
  * A look drawn entirely by the graphics chip from one shader. It is drawn at the resolution the Quality choice
- * sets (full, 85% or 60%) and scaled up; at Max quality the shader runs every other frame (30 a second) so it
- * has twice the time per picture, and that resolution drops by itself when frames run slow and comes back when there is room,
+ * sets (full, 90% or 60%) and scaled up, and that resolution drops by itself when frames run slow and comes back when there is room,
  * so the screen stays smooth. Every shader gets size and the colour profile as c0 (low), c1 (middle), c2
  * (high). Android 13 and up.
  */
@@ -31,7 +30,6 @@ abstract class GpuLook implements VizPainter.Extra {
     private final RenderNode node;
     private final Paint layer = new Paint(), fill = new Paint();
     private float auto = 1, slowFor, fastFor;
-    private boolean skip;
     private float shown = 1;
 
     /** The share of full resolution the last picture was drawn at, for the graphics log. */
@@ -51,14 +49,7 @@ abstract class GpuLook implements VizPainter.Extra {
     public final void draw(Canvas c, int w, int h, float dt, float seconds, VizPainter p) {
         int quality = Math.round(p.tune.get(VizTune.GLOBAL, "quality"));
         float want = VizTune.detail(quality);
-        adapt(dt, want, quality != VizTune.SMOOTH_90);
-        skip = quality == VizTune.MAX_QUALITY && !skip;               // Max quality: a new picture every other frame
-        if (skip && node.hasDisplayList()) {
-            uniforms(p, node.getWidth(), node.getHeight(), dt, seconds); // the look still moves on in time
-            show(c, w, h);
-            overlay(c, w, h, p);
-            return;
-        }
+        adapt(dt, want, p.frameBudget, VizTune.floor(Math.round(p.tune.get(p.look, "priority"))));
         float scale = Math.min(want, auto);
         shown = scale;
         int lw = Math.max(64, Math.round(w * scale)), lh = Math.max(64, Math.round(h * scale));
@@ -91,25 +82,26 @@ abstract class GpuLook implements VizPainter.Extra {
     }
 
     /**
-     * Lowers the drawing size when frames run slow and raises it again once there is room, judged against the
-     * frame rate in use (60 when capped, else the screen's fastest).
+     * Lowers the drawing size when pictures take longer than the Quality setting gives them, and raises it again
+     * once there is room; never below the look's Priority floor (Sharp: not at all, Balance: 60%, Smooth: 30%).
      */
-    private void adapt(float dt, float want, boolean capped) {
-        float frame = capped ? 1 / 60f : 1 / 90f;
-        if (dt > frame * 1.3f) {
+    private void adapt(float dt, float want, float budget, float floorShare) {
+        if (dt > budget * 1.25f) {
             slowFor += dt;
             fastFor = 0;
-        } else if (dt < frame * 1.1f) {
+        } else if (dt < budget * 1.1f) {
             fastFor += dt;
             slowFor = 0;
         }
+        float lowest = Math.max(0.3f, want * floorShare);
         if (slowFor > 0.6f) {
-            auto = Math.max(0.3f, Math.min(auto, want) - 0.05f);
+            auto = Math.max(lowest, Math.min(auto, want) - 0.05f);
             slowFor = 0;
         }
         if (fastFor > 3 && auto < want) {
             auto = Math.min(want, auto + 0.05f);
             fastFor = 0;
         }
+        auto = Math.max(auto, lowest);
     }
 }

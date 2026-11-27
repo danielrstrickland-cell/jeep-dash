@@ -103,12 +103,12 @@ final class MilkDrop implements TextureView.SurfaceTextureListener {
     private long pm;
     private int viewW, viewH, bufW, bufH;
     private long lastFrameNs;
-    private boolean odd;
 
     // settings, written by the visualizer screen every frame, read by the GL thread
     volatile boolean active, drop = true, locked;
     volatile float hold = 15, sensitivity = 1, delay = 0.2f;
-    volatile int quality = VizTune.BALANCED, mode = MilkPlaylist.FAVOUR;
+    volatile int quality = VizTune.BALANCED, mode = MilkPlaylist.FAVOUR, pace = 2;
+    private int vsyncs;
     private String settingsShown = "";
     /** Next (1) or Prev (-1), asked from the side menu. */
     final AtomicInteger step = new AtomicInteger();
@@ -269,15 +269,18 @@ final class MilkDrop implements TextureView.SurfaceTextureListener {
         if (!now.equals(settingsShown)) {
             settingsShown = now;
             settings(pm, drop && !locked, hold, sensitivity, locked, mesh[0], mesh[1],
-                    quality == VizTune.MAX_QUALITY ? 30 : quality == VizTune.SMOOTH_90 ? 90 : 60);
+                    quality == VizTune.MAX_QUALITY ? 30 : quality == VizTune.SMOOTH_90 ? 90 : 45);
         }
         int asked = step.getAndSet(0);
         if (asked > 0) show(list.next(mode), true);
         else if (asked < 0) show(list.prev(), true);
         feed();
-        if (quality == VizTune.MAX_QUALITY && (odd = !odd)) return;       // Max quality: a new picture every other frame
+        if (++vsyncs < pace) return;                                     // evenly paced, like the rest of the visualizer
+        vsyncs = 0;
+        long t0 = System.nanoTime();
         int request = render(pm);
         EGL14.eglSwapBuffers(dpy, surf);
+        stats.metrics((System.nanoTime() - t0) / 1e6, 0);                // render + swap time, the GPU's share
         if (lastFrameNs != 0) stats.frame((frameNs - lastFrameNs) / 1e6, VizTune.detail(quality));
         lastFrameNs = frameNs;
         String bad = failed(pm);

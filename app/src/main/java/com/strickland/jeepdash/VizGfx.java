@@ -42,6 +42,7 @@ final class VizGfx {
     private final GfxStats stats = new GfxStats();
     private final String startedWhen = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
     private final StringBuilder summary = new StringBuilder();
+    private final java.util.List<String> overBudget = new java.util.ArrayList<>();
     private HandlerThread metricsThread;
     private Window.OnFrameMetricsAvailableListener listener;
     private Window window;
@@ -122,9 +123,18 @@ final class VizGfx {
             }
             stats.frame(dt * 1000, detail);
             if (stepTime >= STEP_S) {
-                String line = String.format(Locale.US, "%-13s %-4s %s", VizPainter.LOOKS[p.look],
-                        effectsOn() ? "fx" : "bare", stats.line());
-                Diag.info(DiagLog.GFX, "test " + line);
+                float target = 1 / p.frameBudget;
+                boolean over = stats.fps() < target * 0.9;               // checked against this tablet's profile
+                String line = String.format(Locale.US, "%-13s %-4s %s%s", VizPainter.LOOKS[p.look],
+                        effectsOn() ? "fx" : "bare", stats.line(),
+                        over ? String.format(Locale.US, "  OVER BUDGET (target %.0f fps)", target) : "");
+                if (over) {
+                    Diag.warn(DiagLog.GFX, "test " + line);
+                    String name = VizPainter.LOOKS[p.look];
+                    if (!overBudget.contains(name)) overBudget.add(name);
+                } else {
+                    Diag.info(DiagLog.GFX, "test " + line);
+                }
                 summary.append(line).append('\n');
                 next(p);
             }
@@ -183,6 +193,7 @@ final class VizGfx {
         savedTune = p.tune.save();
         savedLook = p.look;
         summary.setLength(0);
+        overBudget.clear();
         Diag.info(DiagLog.GFX, "test start  " + effects(p) + "  " + heat());
         testing = true;
         step = -1;
@@ -215,8 +226,9 @@ final class VizGfx {
         testing = false;
         p.tune = VizTune.load(savedTune);
         p.changeLook(savedLook);
-        Diag.info(DiagLog.GFX, (done ? "test done" : "test stopped") + "  " + heat() + "\n" + summary);
-        p.message = done ? "Graphics test done. Share the log from Tune › Presets" : null;
+        String over = overBudget.isEmpty() ? "every look within budget" : "over budget: " + String.join(", ", overBudget);
+        Diag.info(DiagLog.GFX, (done ? "test done, " + over : "test stopped") + "  " + heat() + "\n" + summary);
+        p.message = done ? "Graphics test done, " + over + ". Share the log from Tune › Presets" : null;
         lookShown = -1;
     }
 

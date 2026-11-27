@@ -46,6 +46,9 @@ public final class VizPainter {
     public final Extra[] gpu = new Extra[13];
     public float sloshX, sloshY;       // the G-meter's push, from VizMotion
     public float fps = 60;
+    /** Screen refreshes per picture (from the Quality setting) and the time each picture has, in seconds. */
+    public int pace = 1;
+    public float frameBudget = 1 / 90f;
     // MilkDrop (projectM, drawn in its own view under this one): what the side menu and name flash show
     public boolean milkReady;
     public String milkName, milkStatus;
@@ -129,7 +132,8 @@ public final class VizPainter {
         bass = clamp(bass * gain);
         palette(dt, seconds);
         boolean milk = milkReady && (look == VizTune.MILK || fromLook == VizTune.MILK);
-        c.drawColor(milk ? 0 : 0xFF000000, milk ? android.graphics.PorterDuff.Mode.CLEAR : android.graphics.PorterDuff.Mode.SRC_OVER);
+        // with MilkDrop showing, draw nothing here: MilkDrop is underneath, and clearing would wipe it out
+        if (!milk) c.drawColor(0xFF000000);
         // the room lights up with the bass
         if (roomShader == null || roomColor != pal[0] || roomW != w || roomH != h) {
             roomShader = new RadialGradient(w / 2f, h, h * 0.95f, pal[0], pal[0] & 0x00FFFFFF, Shader.TileMode.CLAMP);

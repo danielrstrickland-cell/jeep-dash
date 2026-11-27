@@ -94,4 +94,15 @@ public class VizTuneTest {
         T.ok(VizTune.detail(VizTune.SMOOTH_90) < VizTune.detail(VizTune.BALANCED), "less detail at 90");
         T.ok(!t.on(VizTune.GLOBAL, "fps"), "the FPS counter starts hidden");
     }
+
+    public static void framePacingFitsA90HzScreen() {
+        T.eq(3, VizTune.pace(VizTune.MAX_QUALITY, 90), "Max: every third refresh, 30 fps");
+        T.eq(2, VizTune.pace(VizTune.BALANCED, 90), "Balanced: every second refresh, 45 fps");
+        T.eq(1, VizTune.pace(VizTune.SMOOTH_90, 90), "Smooth: every refresh");
+        T.eq(2, VizTune.pace(VizTune.MAX_QUALITY, 60), "a 60 Hz screen: Max at 30");
+        T.eq(1, VizTune.pace(VizTune.BALANCED, 60), "and Balanced at 60");
+        T.near(1, VizTune.floor(0), 1e-6, "Sharp never lowers detail");
+        T.near(0.3, VizTune.floor(2), 1e-6, "Smooth may go down to 30%");
+        T.eq(1, Math.round(new VizTune().get(VizTune.ROAD, "priority")), "Balance to start");
+    }
 }

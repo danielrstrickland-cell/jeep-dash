@@ -4,7 +4,7 @@ package com.strickland.jeepdash.core;
 public class VizLooksTest {
 
     public static void theBoomMetersAreNoLongerAChoice() {
-        T.eq("[0, 1, 3, 4, 6, 7, 9, 10, 11, 12]", java.util.Arrays.toString(VizTune.CHOICES), "no ferrofluid or lava lamp; racer, subs, dolphins");
+        T.eq("[0, 1, 3, 4, 6, 7, 9, 11, 12]", java.util.Arrays.toString(VizTune.CHOICES), "no ferrofluid, lava lamp or street racer");
     }
 
     public static void aSavedBoomMeterOrNonsenseBecomesSmooth() {
@@ -23,7 +23,7 @@ public class VizLooksTest {
         T.eq(VizTune.SMOOTH, VizTune.savedLook(5), "a saved ferrofluid becomes smooth");
         
         T.eq(9, VizTune.nextLook(7), "road to Mandelbrot");
-        T.eq(10, VizTune.nextLook(9), "Mandelbrot to street racer");
+        T.eq(11, VizTune.nextLook(9), "Mandelbrot to sub cam");
         T.eq(0, VizTune.nextLook(12), "dolphins round to blocks");
         T.eq(3, VizTune.nextLook(2), "from the old meters, on to the ring");
     }

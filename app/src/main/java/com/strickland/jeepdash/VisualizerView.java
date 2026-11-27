@@ -48,6 +48,16 @@ public class VisualizerView extends View {
     private final Host host;
     private final VizMotion motion = new VizMotion();
     private final VizGfx gfx = new VizGfx();
+    // even frame pacing: a new picture every Nth screen refresh (the screen only runs at 90 Hz)
+    private int vsyncs;
+    private final android.view.Choreographer.FrameCallback tick = new android.view.Choreographer.FrameCallback() {
+        @Override
+        public void doFrame(long frameNs) {
+            if (!running) return;
+            if (++vsyncs >= painter.pace) invalidate();
+            else android.view.Choreographer.getInstance().postFrameCallback(this);
+        }
+    };
     private final VizEffects effects = VizEffects.supported() ? new VizEffects() : null;
     private volatile Spectrum spectrum;
     private long lastNs, startNs, touchedMs = System.currentTimeMillis();
@@ -74,11 +84,15 @@ public class VisualizerView extends View {
         this.host = host;
         density = context.getResources().getDisplayMetrics().density;
         prefs = context.getSharedPreferences("viz", Context.MODE_PRIVATE);
-        painter.swirl = new SwirlLook();
+        SwirlLook plain = new SwirlLook();                          // the old main-processor swirl, as a fallback
+        GpuSwirl xp = GpuSwirl.supported() ? new GpuSwirl() : null;
+        painter.swirl = (c, w, h, dt, sec, p) -> {
+            if (xp != null && xp.working()) xp.draw(c, w, h, dt, sec, p);
+            else plain.draw(c, w, h, dt, sec, p);
+        };
         if (GpuLook.supported()) {                           // a shader that does not build leaves smooth bars
             build(VizTune.ROAD, () -> new GpuRoad(motion));
             build(VizTune.MANDEL, GpuMandel::new);
-            build(VizTune.RACER, () -> new GpuRacer(motion));
             build(VizTune.SUBS, () -> new GpuSubs(motion));
         }
         painter.gpu[VizTune.DOLPHINS] = new DolphinLook();                // plain drawing: every tablet
@@ -132,6 +146,7 @@ public class VisualizerView extends View {
         m.sensitivity = p.tune.get(look, "sens");
         m.locked = p.milkLocked;
         m.quality = Math.round(p.tune.get(VizTune.GLOBAL, "quality"));
+        m.pace = p.pace;
         m.mode = Math.round(p.tune.get(look, "play"));
         m.delay = p.tune.get(VizTune.GLOBAL, "delay");
         if (m.active) {
@@ -246,6 +261,9 @@ public class VisualizerView extends View {
         gfx.frame(painter, dt, getContext());
         painter.testing = gfx.testing;
         applyMode();
+        float refresh = getDisplay() != null ? getDisplay().getRefreshRate() : 60;
+        painter.pace = VizTune.pace(Math.round(painter.tune.get(VizTune.GLOBAL, "quality")), refresh);
+        painter.frameBudget = painter.pace / Math.max(30f, refresh);
         Spectrum s = spectrum;
         if (s != null) {
             s.fallSpeed = painter.tune.get(painter.look, "fall");
@@ -265,7 +283,8 @@ public class VisualizerView extends View {
         else painter.drawScene(canvas, w, h, dt, seconds);
         painter.drawChrome(canvas, w, h);
         drawMusic(canvas);
-        if (running) postInvalidateOnAnimation();
+        vsyncs = 0;
+        if (running) android.view.Choreographer.getInstance().postFrameCallback(tick);
     }
 
     /** Stores this moment's sound, then hands the painter the sound from "Speaker delay" ago. */

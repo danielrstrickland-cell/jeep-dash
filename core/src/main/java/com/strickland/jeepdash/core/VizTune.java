@@ -40,15 +40,35 @@ public final class VizTune {
 
     private static Knob toggleOff(String id, String label) { return new Knob(id, label, 0, 1, 0, true); }
 
+    /** Sharp, Balance or Smooth: how far a heavy 3D look may lower its detail to keep the frame rate. */
+    private static Knob priority() { return new Knob("priority", "Priority", 0, 2, 1, false, PRIORITY); }
+
     /**
      * Not a look: the settings every look shares, on the hidden menu's Effects tab. Kept under its own number
      * so it saves and loads with the looks' settings.
      */
     public static final int GLOBAL = 99;
-    /** The Quality choices: sharpest at 30 fps, balanced at 60, smoothest at the screen's 90. */
-    public static final String[] QUALITY = {"Max \u00B7 30", "Balanced \u00B7 60", "Smooth \u00B7 90"};
+    /**
+     * The Quality choices, as steady frame rates the tablet's 90 Hz screen can show evenly: every third screen
+     * refresh (30), every second (45) or every one (90).
+     */
+    public static final String[] QUALITY = {"Max \u00B7 30", "Balanced \u00B7 45", "Smooth \u00B7 90"};
+    private static final float[] TARGET_FPS = {30, 45, 90};
+
+    /** How many screen refreshes each picture stays up for, at this refresh rate. */
+    public static int pace(int quality, float refreshHz) {
+        float target = TARGET_FPS[Math.max(0, Math.min(2, quality))];
+        return Math.max(1, Math.round(refreshHz / target));
+    }
+
+    /** The priority choices for the heavy 3D looks, and the lowest detail each allows. */
+    public static final String[] PRIORITY = {"Sharp", "Balance", "Smooth"};
+    private static final float[] FLOOR = {1f, 0.6f, 0.3f};
+
+    /** The lowest share of the Quality detail the look may drop to when frames run slow. */
+    public static float floor(int priority) { return FLOOR[Math.max(0, Math.min(2, priority))]; }
     public static final int MAX_QUALITY = 0, BALANCED = 1, SMOOTH_90 = 2;
-    private static final float[] DETAIL = {1f, 0.85f, 0.6f};
+    private static final float[] DETAIL = {1f, 0.9f, 0.6f};
 
     /** How much of full resolution the 3D looks draw at, for a Quality choice. */
     public static float detail(int quality) { return DETAIL[Math.max(0, Math.min(2, quality))]; }
@@ -74,7 +94,7 @@ public final class VizTune {
      * taken out; the numbers stay as they were so every look keeps its saved settings.
      */
     /** Ferrofluid (5) and lava lamp (8) were taken out too; their numbers stay so the rest keep their settings. */
-    public static final int[] CHOICES = {0, 1, 3, 4, 6, 7, 9, 10, 11, 12};
+    public static final int[] CHOICES = {0, 1, 3, 4, 6, 7, 9, 11, 12};   // street racer (10) retired too
     /** Look 6 was the milk-drop splash; it is now MilkDrop itself (projectM). */
     public static final int FERRO = 5, MILK = 6, ROAD = 7, LAVA = 8, MANDEL = 9, RACER = 10, SUBS = 11, DOLPHINS = 12;
     public static final int SMOOTH = 1;
@@ -107,16 +127,16 @@ public final class VizTune {
                     new Knob("play", "Play", 0, 2, 1, false, new String[]{"All", "Favour \u2605", "Only \u2605"}),
                     slider("hue", "RPM colour shift", 0, 1, 0.5f), toggle("sway", "G-meter sway"),
                     toggle("names", "Preset name flash")},
-            {GAIN, GLOW, toggle("city", "City buildings"), slider("build", "Building height", 0, 4, 1),
+            {GAIN, GLOW, priority(), toggle("city", "City buildings"), slider("build", "Building height", 0, 4, 1),
                     slider("bwidth", "Building width", 0.5f, 1.5f, 1), slider("turns", "Turn strength", 0, 2, 1),
                     slider("pace", "Speed feel", 0.5f, 2, 1), toggleOff("flip", "Flip turns")},
             {GAIN, GLOW, slider("blobs", "Blobs", 3, 8, 6), slider("flow", "Flow speed", 0, 2, 1),
                     slider("heat", "Heat glow", 0, 1.5f, 1)},
-            {GAIN, GLOW, slider("dive", "Dive speed", 0, 2, 1), slider("spin", "Spin", 0, 2, 0.3f),
+            {GAIN, GLOW, priority(), slider("dive", "Dive speed", 0, 2, 1), slider("spin", "Spin", 0, 2, 0.3f),
                     toggle("rpmdive", "RPM sets dive speed")},
             {GAIN, GLOW, slider("under", "Underglow", 0, 2, 1), slider("pace", "Speed feel", 0.5f, 2, 1),
                     toggle("hud", "Racing overlay")},
-            {GAIN, new Knob("motion", "Motion", 0, 1, 0, false, new String[]{"Slowed", "Real speed"}),
+            {GAIN, priority(), new Knob("motion", "Motion", 0, 1, 0, false, new String[]{"Slowed", "Real speed"}),
                     slider("angle", "Camera angle", 5, 80, 38), slider("zoom", "Zoom", 0.6f, 2.5f, 1),
                     slider("drive", "Excursion", 0, 2, 1), slider("stiff", "Stiffness", 0.5f, 2, 1),
                     slider("damp", "Damping", 0.5f, 2, 1), slider("tune", "Box tune", 25, 45, 34),
