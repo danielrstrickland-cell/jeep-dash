@@ -42,6 +42,7 @@ public final class TestMain {
             SpectrumTest.class,
             VizTuneTest.class,
             SubPhysicsTest.class,
+            GfxStatsTest.class,
             MotionTest.class,
             OrbitViewTest.class,
             TrailWorldTest.class,

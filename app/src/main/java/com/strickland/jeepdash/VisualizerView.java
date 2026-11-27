@@ -47,6 +47,7 @@ public class VisualizerView extends View {
     private final SharedPreferences prefs;
     private final Host host;
     private final VizMotion motion = new VizMotion();
+    private final VizGfx gfx = new VizGfx();
     private final VizEffects effects = VizEffects.supported() ? new VizEffects() : null;
     private volatile Spectrum spectrum;
     private long lastNs, startNs, touchedMs = System.currentTimeMillis();
@@ -75,11 +76,11 @@ public class VisualizerView extends View {
         prefs = context.getSharedPreferences("viz", Context.MODE_PRIVATE);
         painter.swirl = new SwirlLook();
         if (GpuLook.supported()) {                           // a shader that does not build leaves smooth bars
-            try { painter.gpu[VizTune.MILK] = new GpuMilk(motion); } catch (RuntimeException ignored) { }
-            try { painter.gpu[VizTune.ROAD] = new GpuRoad(motion); } catch (RuntimeException ignored) { }
-            try { painter.gpu[VizTune.MANDEL] = new GpuMandel(); } catch (RuntimeException ignored) { }
-            try { painter.gpu[VizTune.RACER] = new GpuRacer(motion); } catch (RuntimeException ignored) { }
-            try { painter.gpu[VizTune.SUBS] = new GpuSubs(motion); } catch (RuntimeException ignored) { }
+            build(VizTune.MILK, () -> new GpuMilk(motion));
+            build(VizTune.ROAD, () -> new GpuRoad(motion));
+            build(VizTune.MANDEL, GpuMandel::new);
+            build(VizTune.RACER, () -> new GpuRacer(motion));
+            build(VizTune.SUBS, () -> new GpuSubs(motion));
         }
         painter.gpu[VizTune.DOLPHINS] = new DolphinLook();                // plain drawing: every tablet
         painter.look = VizTune.savedLook(prefs.getInt("look2", 0));      // the old boom meters become Smooth
@@ -90,6 +91,18 @@ public class VisualizerView extends View {
         for (int i = 0; i < VizPainter.PRESETS; i++) painter.presetInfo[i] = describe(prefs.getString("preset" + i, null));
     }
 
+    /** Builds one graphics-chip look, timing it for the graphics log. */
+    private void build(int look, java.util.function.Supplier<VizPainter.Extra> make) {
+        long t = System.nanoTime();
+        try {
+            painter.gpu[look] = make.get();
+            VizGfx.shader(VizPainter.LOOKS[look], t, null);
+        } catch (RuntimeException e) {
+            painter.gpu[look] = null;
+            VizGfx.shader(VizPainter.LOOKS[look], t, e);
+        }
+    }
+
     void setSpectrum(Spectrum s) { spectrum = s; }
 
     void setRunning(boolean on) {
@@ -97,9 +110,11 @@ public class VisualizerView extends View {
         lastNs = 0;
         if (on) {
             motion.start(getContext());
+            if (getContext() instanceof Activity) gfx.start((Activity) getContext());
             invalidate();
         } else {
             motion.stop();
+            gfx.stop(painter);
         }
     }
 
@@ -183,6 +198,8 @@ public class VisualizerView extends View {
         float dt = lastNs == 0 ? 0.016f : Math.min(0.1f, (now - lastNs) / 1e9f);
         lastNs = now;
         if (dt > 0) painter.fps += (1 / dt - painter.fps) * Math.min(1, dt * 2);
+        gfx.frame(painter, dt, getContext());
+        painter.testing = gfx.testing;
         applyMode();
         Spectrum s = spectrum;
         if (s != null) {
@@ -386,6 +403,12 @@ public class VisualizerView extends View {
         if (p.menuTab == VizPainter.TAB_COLORS) {
             for (int i = 0; i < p.colorCells.length; i++) if (p.colorCells[i].contains(x, y)) p.color = i;
         } else if (p.menuTab == VizPainter.TAB_PRESETS) {
+            if (p.gfxTest.contains(x, y)) {
+                gfx.startTest(p);
+                p.menuOpen = !gfx.testing;                          // close the window so the test sees the looks
+            }
+            if (p.gfxShare.contains(x, y) && getContext() instanceof Activity) gfx.share((Activity) getContext());
+            p.testing = gfx.testing;
             for (int i = 0; i < VizPainter.PRESETS; i++) {
                 if (p.presetSave[i].contains(x, y)) savePreset(i);
                 else if (p.presetLoad[i].contains(x, y)) loadPreset(i);
@@ -396,6 +419,10 @@ public class VisualizerView extends View {
     }
 
     private void save() {
+        if (gfx.testing) {                                          // the test's temporary settings are never saved
+            invalidate();
+            return;
+        }
         prefs.edit().putInt("look2", painter.look).putInt("color", painter.color).putInt("bars", painter.shown)
                 .putString("tune", painter.tune.save()).apply();
         invalidate();

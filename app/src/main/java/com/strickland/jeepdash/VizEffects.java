@@ -5,6 +5,7 @@ import android.graphics.BlendMode;
 import android.graphics.Canvas;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
+import android.graphics.Paint;
 import android.graphics.RecordingCanvas;
 import android.graphics.RenderEffect;
 import android.graphics.RenderNode;
@@ -46,11 +47,24 @@ final class VizEffects {
             + "}\n";
 
     private final RenderNode scene = new RenderNode("viz-scene");
+    private final RenderNode glow = new RenderNode("viz-glow");    // the glow, worked out at quarter size
+    private final RenderNode out = new RenderNode("viz-out");      // picture plus glow, for the CRT filter
     private RuntimeShader crt;
     private float madeBloom = -1, madeCrt = -1;
     private int madeW, madeH;
 
-    /** Draws the picture with its effects onto a hardware canvas. */
+    VizEffects() {
+        Paint add = new Paint();
+        add.setBlendMode(BlendMode.PLUS);                             // the glow is added on top of the picture
+        add.setFilterBitmap(true);
+        glow.setUseCompositingLayer(true, add);
+    }
+
+    /**
+     * Draws the picture with its effects onto a hardware canvas. The glow is blurred from a quarter-size copy
+     * of the picture (a sixteenth of the pixels) and stretched back up on top, which looks the same as a
+     * full-size blur at a fraction of the work.
+     */
     void draw(Canvas screen, VizPainter p, int w, int h, float dt, float seconds) {
         scene.setPosition(0, 0, w, h);
         RecordingCanvas rc = scene.beginRecording(w, h);
@@ -61,41 +75,65 @@ final class VizEffects {
         }
         float bloom = step(p.tune.get(VizTune.GLOBAL, "bloom"));
         float tv = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? step(p.tune.get(VizTune.GLOBAL, "crt")) : 0;
+        int gw = Math.max(16, w / 4), gh = Math.max(16, h / 4);
         if (bloom != madeBloom || tv != madeCrt || w != madeW || h != madeH) {
-            scene.setRenderEffect(effect(bloom, tv, w, h));       // rebuilt only when a setting or the size changes
+            glow.setRenderEffect(bloom > 0 ? glowEffect(bloom, gw, gh) : null);
+            out.setRenderEffect(tv > 0 ? crtEffect(tv, w, h) : null);
             madeBloom = bloom;
             madeCrt = tv;
             madeW = w;
             madeH = h;
         }
-        screen.drawRenderNode(scene);
+        if (bloom > 0) {
+            glow.setPosition(0, 0, gw, gh);
+            RecordingCanvas g = glow.beginRecording(gw, gh);
+            try {
+                g.scale(gw / (float) w, gh / (float) h);
+                g.drawRenderNode(scene);
+            } finally {
+                glow.endRecording();
+            }
+        }
+        Canvas target = screen;
+        if (tv > 0) {
+            out.setPosition(0, 0, w, h);
+            target = out.beginRecording(w, h);
+        }
+        try {
+            target.drawRenderNode(scene);
+            if (bloom > 0) {
+                int saved = target.save();
+                target.scale(w / (float) gw, h / (float) gh);
+                target.drawRenderNode(glow);
+                target.restoreToCount(saved);
+            }
+        } finally {
+            if (tv > 0) out.endRecording();
+        }
+        if (tv > 0) screen.drawRenderNode(out);
     }
 
     /** Settings move in small steps, so dragging a slider does not rebuild the effect every frame. */
     private static float step(float v) { return Math.round(v * 20) / 20f; }
 
-    private RenderEffect effect(float bloom, float tv, int w, int h) {
-        RenderEffect out = null;
-        if (bloom > 0) {
-            // keep only what is brighter than about 40%, blur it wide, and add it back on top
-            float k = 1.6f * bloom, off = -k * 0.4f * 255;
-            ColorMatrix bright = new ColorMatrix(new float[]{
-                    k, 0, 0, 0, off,
-                    0, k, 0, 0, off,
-                    0, 0, k, 0, off,
-                    0, 0, 0, 1, 0});
-            float r = Math.max(8, Math.min(w, h) * 0.035f);
-            RenderEffect glow = RenderEffect.createBlurEffect(r, r,
-                    RenderEffect.createColorFilterEffect(new ColorMatrixColorFilter(bright)), Shader.TileMode.DECAL);
-            out = RenderEffect.createBlendModeEffect(RenderEffect.createOffsetEffect(0, 0), glow, BlendMode.PLUS);
-        }
-        if (tv > 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (crt == null) crt = new RuntimeShader(CRT);
-            crt.setFloatUniform("size", w, h);
-            crt.setFloatUniform("amount", tv);
-            RenderEffect screen = RenderEffect.createRuntimeShaderEffect(crt, "content");
-            out = out == null ? screen : RenderEffect.createChainEffect(screen, out);
-        }
-        return out;
+    /** Keeps only what is brighter than about 40%, then blurs it wide. */
+    private static RenderEffect glowEffect(float bloom, int gw, int gh) {
+        float k = 1.6f * bloom, off = -k * 0.4f * 255;
+        ColorMatrix bright = new ColorMatrix(new float[]{
+                k, 0, 0, 0, off,
+                0, k, 0, 0, off,
+                0, 0, k, 0, off,
+                0, 0, 0, 1, 0});
+        float r = Math.max(2, Math.min(gw, gh) * 0.035f);
+        return RenderEffect.createBlurEffect(r, r,
+                RenderEffect.createColorFilterEffect(new ColorMatrixColorFilter(bright)), Shader.TileMode.DECAL);
+    }
+
+    private RenderEffect crtEffect(float tv, int w, int h) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return null;
+        if (crt == null) crt = new RuntimeShader(CRT);
+        crt.setFloatUniform("size", w, h);
+        crt.setFloatUniform("amount", tv);
+        return RenderEffect.createRuntimeShaderEffect(crt, "content");
     }
 }

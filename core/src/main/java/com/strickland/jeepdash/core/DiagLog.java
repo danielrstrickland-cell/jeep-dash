@@ -20,7 +20,7 @@ public final class DiagLog {
 
     /** Subsystem tags, so the view can filter by where a line came from. */
     public static final String BT = "BT", CMD = "CMD", DONGLE = "DONGLE",
-            CAL = "CAL", DSP = "DSP", APP = "APP";
+            CAL = "CAL", DSP = "DSP", APP = "APP", GFX = "GFX";
 
     /** One line: when it happened, how bad, which subsystem, and the message. */
     public static final class Entry {

@@ -32,6 +32,10 @@ abstract class GpuLook implements VizPainter.Extra {
     private final Paint layer = new Paint(), fill = new Paint();
     private float auto = 1, slowFor, fastFor;
     private boolean skip;
+    private float shown = 1;
+
+    /** The share of full resolution the last picture was drawn at, for the graphics log. */
+    float detailNow() { return shown; }
 
     GpuLook(String name, String source) {
         shader = new RuntimeShader(COMMON + source);
@@ -56,6 +60,7 @@ abstract class GpuLook implements VizPainter.Extra {
             return;
         }
         float scale = Math.min(want, auto);
+        shown = scale;
         int lw = Math.max(64, Math.round(w * scale)), lh = Math.max(64, Math.round(h * scale));
         shader.setFloatUniform("size", lw, lh);
         shader.setColorUniform("c0", p.color(0));

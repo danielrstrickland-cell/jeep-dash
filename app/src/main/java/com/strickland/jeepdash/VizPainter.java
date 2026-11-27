@@ -80,6 +80,8 @@ public final class VizPainter {
     public final RectF[] tabRects = rects(TABS.length), colorCells = rects(COLORS.length);
     public final RectF[] presetSave = rects(PRESETS), presetLoad = rects(PRESETS);
     public final String[] presetInfo = {"Empty", "Empty", "Empty"};
+    public final RectF gfxTest = new RectF(), gfxShare = new RectF();
+    public boolean testing;                 // the graphics test is running
 
     // a look change fades and zooms from the old look into the new one
     private int fromLook = -1;
@@ -681,6 +683,22 @@ public final class VizPainter {
         }
         text(c, "Save keeps the look, colours and every tune setting.", left, top + PRESETS * 74 * u + 20 * u,
                 16 * u, xpMuted, Paint.Align.LEFT);
+        float gy = top + PRESETS * 74 * u + 44 * u;                      // the graphics log
+        divider(c, left, right, gy, u);
+        text(c, "Graphics log", left, gy + 34 * u, 20 * u, xpInk, Paint.Align.LEFT);
+        xpWide(c, gfxTest, right - 400 * u, gy + 10 * u, 200 * u, testing ? "Stop test" : "Run graphics test", u);
+        xpWide(c, gfxShare, right - 190 * u, gy + 10 * u, 190 * u, "Share log", u);
+        text(c, "The test runs every look for 4 s with effects on and off (about 80 s).", left, gy + 80 * u,
+                15 * u, xpMuted, Paint.Align.LEFT);
+    }
+
+    private void xpWide(Canvas c, RectF where, float x, float y, float bw, String label, float u) {
+        where.set(x, y, x + bw, y + 42 * u);
+        fill(xpButtonFill);
+        c.drawRoundRect(where, 5 * u, 5 * u, paint);
+        stroke(xpButtonEdge, 1.5f * u);
+        c.drawRoundRect(where, 5 * u, 5 * u, paint);
+        text(c, label, where.centerX(), y + 28 * u, 17 * u, xpInk, Paint.Align.CENTER);
     }
 
     private void xpButton(Canvas c, RectF where, float x, float y, String label, float u) {
