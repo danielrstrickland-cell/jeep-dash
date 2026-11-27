@@ -132,13 +132,41 @@ public final class SoundTune {
     }
 
     /**
+     * Where the two kinds of correction meet. Up to FULL_BELOW_HZ a cabin's peaks and dips are real and
+     * steady, and are corrected in full. From BROAD_ABOVE_HZ up, what one mic position hears is mostly
+     * reflections that change a few inches away, so only the broad shape is corrected, and by no more than
+     * BROAD_LIMIT_DB either way. Between the two the one eases into the other. This is the usual practice
+     * of room-correction tools: fix the bass, only tilt the rest.
+     */
+    public static final double FULL_BELOW_HZ = 200, BROAD_ABOVE_HZ = 500, BROAD_LIMIT_DB = 3;
+    /** How far up the tablet's own mic can be trusted: its correction is faded out over the octave below this. */
+    public static final double BUILT_IN_TOP_HZ = 8000;
+    private static final int BROAD_BANDS = 3;                    // an octave each side
+
+    /** The average of raw over the bands within reach bands of i, keeping to [lo, hi] when i is inside it. */
+    private static double around(double[] raw, int i, int span, int lo, int hi) {
+        boolean in = i >= lo && i <= hi;
+        double total = 0;
+        int k = 0;
+        for (int j = Math.max(0, i - span); j <= Math.min(raw.length - 1, i + span); j++) {
+            if (in && (j < lo || j > hi)) continue;
+            total += raw[j];
+            k++;
+        }
+        return total / k;
+    }
+
+    /**
      * The correction per band, in dB, that moves a measurement toward a target. The two are first lined up
      * on their average between 300 Hz and 3 kHz, over the bands the system actually plays (see
      * {@link #reach}), so overall loudness does not count as an error and neither does a small speaker's
-     * missing low end. Each band's gain is then averaged with its neighbours, and held to at most maxBoost
-     * up and maxCut down: a deep dip is usually a cancellation in the cabin that more power cannot fill, so
-     * boost is kept small. Outside what the system plays nothing is boosted at all: power sent where a
-     * speaker cannot play only costs headroom and adds distortion.
+     * missing low end.
+     *
+     * In the bass each band's error is averaged with its neighbours and held to at most maxBoost up and
+     * maxCut down: a deep dip is usually a cancellation in the cabin that more power cannot fill, so boost
+     * is kept small. Higher up only the broad shape is corrected, gently (see {@link #FULL_BELOW_HZ}).
+     * Outside what the system plays nothing is boosted at all: power sent where a speaker cannot play only
+     * costs headroom and adds distortion.
      */
     public static double[] correction(double[] measuredDb, double[] targetDb, double maxBoost, double maxCut) {
         double[] c = bandCentres();
@@ -152,15 +180,31 @@ public final class SoundTune {
         double shift = count > 0 ? sum / count : 0;
         double[] raw = new double[n];
         for (int i = 0; i < n; i++) raw[i] = targetDb[i] - (measuredDb[i] - shift);
+        double up = Math.abs(maxBoost), down = Math.abs(maxCut);
+        double gentleUp = Math.min(up, BROAD_LIMIT_DB), gentleDown = Math.min(down, BROAD_LIMIT_DB);
         double[] out = new double[n];
         for (int i = 0; i < n; i++) {
-            boolean in = i >= lo && i <= hi;
-            double total = raw[i];
-            int k = 1;
-            if (i > 0 && (!in || i - 1 >= lo)) { total += raw[i - 1]; k++; }
-            if (i < n - 1 && (!in || i + 1 <= hi)) { total += raw[i + 1]; k++; }
-            double v = SoundAdapt.clamp(total / k, -Math.abs(maxCut), Math.abs(maxBoost));
-            out[i] = in ? v : Math.min(v, 0);
+            double full = SoundAdapt.clamp(around(raw, i, 1, lo, hi), -down, up);
+            double broad = SoundAdapt.clamp(around(raw, i, BROAD_BANDS, lo, hi), -gentleDown, gentleUp);
+            double w = SoundAdapt.clamp(Math.log(BROAD_ABOVE_HZ / c[i]) / Math.log(BROAD_ABOVE_HZ / FULL_BELOW_HZ), 0, 1);
+            double v = w * full + (1 - w) * broad;
+            out[i] = i >= lo && i <= hi ? v : Math.min(v, 0);
+        }
+        return out;
+    }
+
+    /**
+     * A correction faded out toward the top of what the mic can be trusted over: whole up to an octave
+     * below topHz, nothing from topHz up, easing between. Null stays null.
+     */
+    public static double[] fadedAbove(double[] correctionDb, double topHz) {
+        if (correctionDb == null) return null;
+        double[] c = bandCentres();
+        double[] out = new double[correctionDb.length];
+        for (int i = 0; i < out.length; i++) {
+            double hz = i < c.length ? c[i] : c[c.length - 1];
+            double keep = hz >= topHz * 0.99 ? 0 : SoundAdapt.clamp(Math.log(topHz / hz) / Math.log(2), 0, 1);
+            out[i] = correctionDb[i] * keep;
         }
         return out;
     }

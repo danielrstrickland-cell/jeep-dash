@@ -1130,7 +1130,7 @@ public class SoundActivity extends Activity implements ServiceConnection {
         boolean trusted = calText != null;
         if (trusted) measured = SoundTune.applyMicCal(measured, SoundTune.parseMicCal(calText));
         // a tablet mic cannot be trusted at the extremes, so the correction only covers its honest range
-        double loHz = trusted ? 25 : 40, hiHz = trusted ? 16000 : 12500;
+        double loHz = trusted ? 25 : 40, hiHz = trusted ? 16000 : SoundTune.BUILT_IN_TOP_HZ;
         int lo = 0, hi = c.length - 1;
         for (int i = 0; i < c.length; i++) {
             if (c[i] < loHz) lo = i + 1;

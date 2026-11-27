@@ -26,6 +26,8 @@ final class SoundPrefs {
     private static final String[] SCENE_KEYS = {ENABLED, TARGET, BASS, TREBLE, SCENE_EQ, NOISE, STRENGTH, VOLT, PORT, DROP, MODE};
     static final String[] SCENE_NAMES = {"Solo drive", "Full car", "Bass demo"};
     static final double MAX_BOOST = 6, MAX_CUT = 12;
+    /** The 16 kHz band: a measurement trusted that far up came from a mic with its calibration file. */
+    static final int TRUSTED_TOP_BAND = 29;
 
     private SoundPrefs() { }
 
@@ -51,7 +53,8 @@ final class SoundPrefs {
 
     /**
      * The correction toward the chosen target from the stored measurement, or null before Calibrate has run.
-     * Bands outside the range the mic could be trusted over are left alone.
+     * Bands outside the range the mic could be trusted over are left alone, and the tablet's own mic is eased
+     * out below its top (see {@link SoundTune#BUILT_IN_TOP_HZ}).
      */
     static double[] correction(SharedPreferences p) {
         double[] measured = SoundPlan.fromText(p.getString(MEASURED, null));
@@ -59,6 +62,8 @@ final class SoundPrefs {
         double[] c = SoundTune.correction(measured, targetBands(p), MAX_BOOST, MAX_CUT);
         int lo = p.getInt(VALID_LO, 0), hi = p.getInt(VALID_HI, c.length - 1);
         for (int i = 0; i < c.length; i++) if (i < lo || i > hi) c[i] = 0;
+        // a mic with no calibration file (the tablet's own) is not believed near the top: ease the correction out there
+        if (hi < TRUSTED_TOP_BAND) c = SoundTune.fadedAbove(c, SoundTune.BUILT_IN_TOP_HZ);
         return SoundTune.scaled(c, p.getInt(CORR, 100) / 100.0);
     }
 

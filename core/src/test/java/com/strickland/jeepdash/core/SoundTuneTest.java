@@ -45,7 +45,7 @@ public class SoundTuneTest {
         m[24] = -30; m[25] = -30; m[26] = -30;                   // a deep hole in the treble
         double[] g = SoundTune.correction(m, target, 6, 12);
         T.near(-9, g[6], 1e-9, "the hump is cut by its height");
-        T.near(6, g[25], 1e-9, "the hole is only boosted to the limit");
+        T.near(3, g[25], 1e-9, "the hole is above the bass, so it only gets the gentle limit");
         T.near(0, g[15], 1e-9, "untouched bands stay put");
     }
 
@@ -90,8 +90,8 @@ public class SoundTuneTest {
             bottom = Math.min(bottom, c[i]);
         }
         T.ok(top <= 2, "nothing much to boost in what they do play, so little headroom is spent: " + top);
-        T.ok(bottom >= -8, "and the treble is trimmed, not buried (build 79 took 12 dB off): " + bottom);
-        T.ok(c[26] < -3, "the Harman target still eases the top down: " + c[26]);
+        T.ok(bottom >= -3, "and the treble is trimmed by 3 dB at most (build 79 took 12 dB off): " + bottom);
+        T.ok(c[26] < 0, "the Harman target still eases the top down: " + c[26]);
     }
 
     public static void correctionStrengthScalesTheWholeCorrection() {
@@ -114,5 +114,51 @@ public class SoundTuneTest {
         double[] c = SoundTune.correction(m, target, 6, 12);
         T.near(-10, c[3], 1e-9, "the bass is brought down to the mids");
         T.near(0, c[17], 1e-9, "the mids are the reference and stay put");
+    }
+
+    /** What Calibrate measured in the owner's Jeep with the tablet's own mic (build 94 log), 20 Hz to 20 kHz. */
+    static final double[] JEEP = {-45.51, -45.51, -38.39, -38.39, -33.96, -34.41, -36.05, -34.69, -34.43, -35.76, -36.79,
+            -32.4, -37.62, -33.02, -43.29, -47.14, -46.1, -45.83, -38.93, -39.99, -43.51, -43.97, -42.54, -41.72, -38.01,
+            -37.22, -35.69, -27.8, -23.93, -38.32, -43.97};
+
+    public static void aboveTheBassOnlyTheBroadShapeIsCorrected() {
+        double[] target = SoundTune.targetBands(SoundTune.Target.FLAT);
+        double[] m = new double[31];
+        m[20] = 9;                                                      // one narrow 9 dB peak at 2 kHz
+        double[] g = SoundTune.correction(m, target, 6, 12);
+        T.ok(g[20] < 0 && g[20] > -2, "a narrow peak up there is barely touched, not notched out: " + g[20]);
+        double[] bright = new double[31];
+        for (int i = 21; i < 31; i++) bright[i] = 8;                    // everything above 2 kHz 8 dB hot
+        double[] t = SoundTune.correction(bright, target, 6, 12);
+        T.near(-3, t[26], 1e-9, "a broad excess is eased by the gentle limit, no more");
+    }
+
+    public static void theBassIsStillCorrectedInFull() {
+        double[] target = SoundTune.targetBands(SoundTune.Target.FLAT);
+        double[] m = new double[31];
+        m[5] = 10; m[6] = 10; m[7] = 10;                                // a 10 dB cabin boom around 80 Hz
+        T.near(-10, SoundTune.correction(m, target, 6, 12)[6], 1e-9, "a bass peak is cut by its full height");
+    }
+
+    public static void theJeepKeepsItsTreble() {
+        double[] c = SoundTune.bandCentres();
+        double[] fix = SoundTune.fadedAbove(SoundTune.correction(JEEP, SoundTune.targetBands(SoundTune.Target.HARMAN), 6, 12),
+                SoundTune.BUILT_IN_TOP_HZ);
+        for (int i = 0; i < 31; i++) {
+            if (c[i] >= 500) T.ok(Math.abs(fix[i]) <= 3 + 1e-9, "no more than 3 dB either way at " + Math.round(c[i]) + " Hz: " + fix[i]);
+            if (c[i] >= 7900) T.near(0, fix[i], 1e-9, "nothing at all where the tablet's mic cannot be trusted, " + Math.round(c[i]) + " Hz");
+        }
+        T.ok(fix[10] < -3, "the bass that sits above the target is still brought down: " + fix[10]);
+    }
+
+    public static void aCorrectionFadesOutBelowTheTopOfWhatTheMicCanBeTrustedOver() {
+        double[] flat = new double[31];
+        java.util.Arrays.fill(flat, -6.0);
+        double[] f = SoundTune.fadedAbove(flat, 8000);
+        T.near(-6, f[23], 1e-9, "whole at 4 kHz, an octave below the top");
+        T.ok(f[24] > -6 && f[24] < f[25] && f[25] < 0, "easing out through 5 and 6.3 kHz: " + f[24] + ", " + f[25]);
+        T.near(0, f[26], 1e-9, "gone by 8 kHz");
+        T.near(0, f[30], 1e-9, "and above");
+        T.ok(SoundTune.fadedAbove(null, 8000) == null, "no correction stays no correction");
     }
 }
