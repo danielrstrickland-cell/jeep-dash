@@ -41,6 +41,7 @@ public final class TestMain {
             TombstoneTest.class,
             SpectrumTest.class,
             VizTuneTest.class,
+            SubPhysicsTest.class,
             MotionTest.class,
             OrbitViewTest.class,
             TrailWorldTest.class,

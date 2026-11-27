@@ -68,7 +68,7 @@ public final class VizPainter {
     private int xpBody, xpInk, xpMuted, xpTitle0, xpTitle1, xpEdge, xpLine, xpTrack, xpFill, xpTabOn, xpTabOff,
             xpButtonFill, xpButtonEdge;
     public boolean music, musicOpen;     // the music button (set on the dash's menu) and its window
-    private final RectF[] rows = new RectF[12];
+    private final RectF[] rows = new RectF[16];
     private float trackLeft, trackRight;
 
     // the hidden tune menu (hold TUNE): tabs Look, Colors, Effects, Presets
@@ -643,7 +643,8 @@ public final class VizPainter {
             }
             float v = tune.get(t, k.id), knob = trackLeft + (trackRight - trackLeft) * tune.at(t, k.id);
             track(c, trackLeft, trackRight, knob, mid, u);
-            String shows = VizTune.seconds(k.id) ? Math.round(v * 100) / 100f + " s"
+            String unit = VizTune.unit(k.id);
+            String shows = unit != null ? Math.round(v) + unit : VizTune.seconds(k.id) ? Math.round(v * 100) / 100f + " s"
                     : k.id.equals("crt") && v < 0.01f ? "Off" : Math.round(v * 100) + "%";
             text(c, shows, right, mid + 7 * u, 18 * u, xpInk, Paint.Align.RIGHT);
         }

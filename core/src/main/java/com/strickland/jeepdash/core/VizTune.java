@@ -111,8 +111,13 @@ public final class VizTune {
                     toggle("rpmdive", "RPM sets dive speed")},
             {GAIN, GLOW, slider("under", "Underglow", 0, 2, 1), slider("pace", "Speed feel", 0.5f, 2, 1),
                     toggle("hud", "Racing overlay")},
-            {GAIN, GLOW, slider("throw", "Cone throw", 0, 2, 1), slider("pan", "Camera pan", 0, 2, 1),
-                    toggle("rings", "LED rings")},
+            {GAIN, new Knob("motion", "Motion", 0, 1, 0, false, new String[]{"Slowed", "Real speed"}),
+                    slider("angle", "Camera angle", 5, 80, 38), slider("zoom", "Zoom", 0.6f, 2.5f, 1),
+                    slider("drive", "Excursion", 0, 2, 1), slider("stiff", "Stiffness", 0.5f, 2, 1),
+                    slider("damp", "Damping", 0.5f, 2, 1), slider("tune", "Box tune", 25, 45, 34),
+                    toggle("box", "Show box"), toggle("cut", "Cutaway (box off)"),
+                    toggle("readout", "Excursion readout"), toggle("port", "Port air"),
+                    toggle("rings", "LED ring"), toggle("sway", "Camera sway")},
             {GAIN, GLOW, slider("jump", "Jump height", 0, 2, 1), toggle("grid", "LCD grid"),
                     toggleOff("profile", "Use colour profile")},
     };
@@ -126,6 +131,13 @@ public final class VizTune {
     }
 
     /** True for knobs measured in seconds rather than percent. */
+    /** A unit shown after the plain value (degrees, hertz), or null to show it as a percent or seconds. */
+    public static String unit(String id) {
+        if (id.equals("angle")) return "\u00B0";
+        if (id.equals("tune")) return " Hz";
+        return null;
+    }
+
     public static boolean seconds(String id) { return id.equals("trail") || id.equals("blend") || id.equals("delay"); }
 
     private static Knob knob(int look, String id) {
