@@ -13,6 +13,7 @@ import java.util.Locale;
 public final class DashMenu {
     private DashMenu() { }
 
+    public static final String RECORD_ALL = "record_all";
     public static final String VEHICLE = "vehicle", FAST = "fast", SPEED_CORRECTION = "speed_correction",
             BLUETOOTH = "bluetooth", LINK_LOG = "link_log",
             EDIT = "edit", ADD = "add", SNAP = "snap", RESET = "reset",
@@ -32,6 +33,7 @@ public final class DashMenu {
         public boolean linked;                 // the link service is bound
         public boolean codes, fastAvailable;
         public String fast = "off";            // off, on, backed_off
+        public boolean recordAll;              // the drive log gets every value, not only the ones on screen
         public String xpScheme, xpMode, jeepBacklight;
         public boolean musicButton;
         public String volume = "OFF";          // SpeedVolume.Strength name
@@ -65,6 +67,8 @@ public final class DashMenu {
         List<Entry> car = new ArrayList<>();
         car.add(new Entry(VEHICLE, "Vehicle: " + (s.porsche ? "Porsche Cayenne" : "Jeep Grand Cherokee")));
         if (s.linked && s.fastAvailable) car.add(new Entry(FAST, fastLabel(s.fast)));
+        car.add(new Entry(RECORD_ALL, "Record everything in the drive log: " + onOff(s.recordAll)
+                + (s.recordAll ? " (every value read; each updates less often)" : " (only what is on screen)")));
         car.add(new Entry(SPEED_CORRECTION, correctionLabel(s.speedCorrectionPct)));
         car.add(new Entry(BLUETOOTH, "Android Bluetooth settings (to pair the dongle)"));
         car.add(new Entry(LINK_LOG, "Share link log (for troubleshooting)"));

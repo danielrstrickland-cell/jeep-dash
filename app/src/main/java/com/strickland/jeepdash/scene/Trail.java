@@ -14,7 +14,10 @@ import java.util.ArrayDeque;
  * that failed its check). Only set-up steps and the first frames are marked, not every frame.
  */
 public final class Trail {
-    private static final String NOW = "3d_trail.txt", PREV = "3d_trail_prev.txt";
+    private static final String NOW = "3d_trail.txt", PREV = "3d_trail_prev.txt";   // older builds' names, still read
+    /** One file per run, named by process id, so a crash's trail survives later runs; the last few are kept. */
+    private static final String PER_RUN = "3d_trail_", TXT = ".txt";
+    private static final int KEEP_RUNS = 8;
     private static final int KEEP = 40;
     private static final ArrayDeque<String> steps = new ArrayDeque<>();
     private static File file;
@@ -26,11 +29,11 @@ public final class Trail {
     static synchronized void start(Context c) {
         if (file != null) return;
         File dir = c.getApplicationContext().getFilesDir();
-        file = new File(dir, NOW);
-        File prev = new File(dir, PREV);
-        if (file.exists()) {
-            prev.delete();
-            file.renameTo(prev);
+        file = new File(dir, PER_RUN + android.os.Process.myPid() + TXT);
+        File[] runs = dir.listFiles((d, n) -> n.startsWith(PER_RUN) && n.endsWith(TXT));
+        if (runs != null && runs.length >= KEEP_RUNS) {
+            java.util.Arrays.sort(runs, (x, y) -> Long.compare(x.lastModified(), y.lastModified()));
+            for (int i = 0; i <= runs.length - KEEP_RUNS; i++) runs[i].delete();     // oldest first
         }
         t0 = android.os.SystemClock.elapsedRealtime();
         steps.clear();
@@ -55,7 +58,7 @@ public final class Trail {
     /** The trail of the run with this process id, or null when none was kept. */
     public static String forPid(Context c, int pid) {
         File dir = c.getApplicationContext().getFilesDir();
-        for (String name : new String[]{NOW, PREV}) {
+        for (String name : new String[]{PER_RUN + pid + TXT, NOW, PREV}) {
             File f = new File(dir, name);
             if (!f.exists() || f.length() > 64 * 1024) continue;
             try {

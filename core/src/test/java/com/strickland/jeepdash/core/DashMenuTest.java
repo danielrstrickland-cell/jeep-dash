@@ -175,4 +175,20 @@ public class DashMenuTest {
         s.porsche = true;
         T.eq(null, find(DashMenu.build(s), DashMenu.SCAN), "not on the Porsche");
     }
+
+    public static void recordEverythingIsInTheCarMenu() {
+        DashMenu.State st = new DashMenu.State();
+        boolean found = false;
+        for (DashMenu.Group g : DashMenu.build(st))
+            for (DashMenu.Entry e : g.entries)
+                if (e.id.equals(DashMenu.RECORD_ALL)) {
+                    found = true;
+                    T.ok(e.label.contains(": off"), "off to start: " + e.label);
+                }
+        T.ok(found, "offered");
+        st.recordAll = true;
+        for (DashMenu.Group g : DashMenu.build(st))
+            for (DashMenu.Entry e : g.entries)
+                if (e.id.equals(DashMenu.RECORD_ALL)) T.ok(e.label.contains(": on"), "shows on: " + e.label);
+    }
 }

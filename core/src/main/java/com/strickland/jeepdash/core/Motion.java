@@ -44,7 +44,7 @@ public final class Motion {
      * Worked out by the link service from the car's readings alone, whichever screen is in front (the drive log
      * gets them too). GPS speed, G-force and Speedo vs GPS need the tablet's sensors and stay with the screen.
      */
-    public static final List<String> CAR_GAUGES = Collections.unmodifiableList(Arrays.asList("g_accel", "zero_sixty", "gear"));
+    public static final List<String> CAR_GAUGES = Collections.unmodifiableList(Arrays.asList("g_accel", "zero_sixty", "gear", Gears.SLIP));
 
     /** True when the link service has car-made values to work out: one of them is in front or on the dash. */
     public static boolean carWanted(Collection<String> requested, Collection<String> dashShown) {
@@ -58,19 +58,22 @@ public final class Motion {
      */
     public static Set<String> withCarInputs(Set<String> ids, Collection<String> dashShown) {
         Set<String> out = new LinkedHashSet<>(ids);
-        if (dashShown.contains("g_accel") || dashShown.contains("zero_sixty") || dashShown.contains("gear")) out.add("speed");
-        if (dashShown.contains("gear")) out.add("rpm");
+        boolean slip = dashShown.contains(Gears.SLIP);
+        if (dashShown.contains("g_accel") || dashShown.contains("zero_sixty") || dashShown.contains("gear") || slip) out.add("speed");
+        if (dashShown.contains("gear") || slip) out.add("rpm");
         return out;
     }
 
     /** True when a value on screen is worked out from the Jeep's speed, so the speed has to be read as well. */
     public static boolean needsJeepSpeed(Collection<String> shownIds) {
         return shownIds.contains("g_accel") || shownIds.contains("zero_sixty") || shownIds.contains("speedo_err")
-                || shownIds.contains("gear");
+                || shownIds.contains("gear") || shownIds.contains(Gears.SLIP);
     }
 
     /** True when a value on screen is worked out from engine speed, so that has to be read as well. */
-    public static boolean needsRpm(Collection<String> shownIds) { return shownIds.contains("gear"); }
+    public static boolean needsRpm(Collection<String> shownIds) {
+        return shownIds.contains("gear") || shownIds.contains(Gears.SLIP);
+    }
 
     /** True when a value on screen cannot be worked out without GPS. */
     public static boolean needsGps(Collection<String> shownIds) {

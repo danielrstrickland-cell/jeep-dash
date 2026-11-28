@@ -1014,6 +1014,7 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
         s.linked = service != null;
         s.codes = service != null && service.codesAvailable();
         s.fastAvailable = service != null && service.fastRefreshAvailable();
+        s.recordAll = service != null && service.recordAll();
         if (s.fastAvailable) {
             PollRunner.Fast f = service.fastRefresh();
             s.fast = f == PollRunner.Fast.ON ? "on" : f == PollRunner.Fast.OFF ? "off" : "backed_off";
@@ -1067,6 +1068,9 @@ public class DashActivity extends Activity implements LinkService.Listener, Serv
             case DashMenu.VEHICLE: confirmVehicle(); break;
             case DashMenu.FAST:
                 if (service != null) service.setFastRefresh(service.fastRefresh() != PollRunner.Fast.ON);
+                break;
+            case DashMenu.RECORD_ALL:
+                if (service != null) service.setRecordAll(!service.recordAll());
                 break;
             case DashMenu.SPEED_CORRECTION: chooseSpeedCorrection(); break;
             case DashMenu.BLUETOOTH: openBluetoothSettings(); break;

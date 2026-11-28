@@ -81,6 +81,9 @@ public final class Catalog {
         add(Param.tablet("speedo_err", "Speedo vs GPS", "%", -15, 15));
         // Worked out from engine speed against road speed (see Gears).
         add(Param.tablet("gear", "Gear", "of 4", 0, 4));
+        // Engine speed above what 4th with the converter locked gives at this road speed (see Gears): it jumps
+        // when the converter clutch lets go or slips, and on a downshift. Blank under 30 mph.
+        add(Param.tablet(Gears.SLIP, "Converter slip (4th)", "rpm", -200, 1500));
         // Worked out from injector time and engine speed (see FuelUse); the Jeep does not report fuel use.
         add(Param.tablet("mpg", "MPG now", "mpg", 0, 40));
         add(Param.tablet("mpg_avg", "MPG this drive", "mpg", 0, 40));

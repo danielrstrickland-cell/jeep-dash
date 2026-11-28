@@ -154,6 +154,7 @@ public class LinkService extends Service {
 
     private volatile Set<String> active = new LinkedHashSet<>();
     private volatile Set<String> requested = new LinkedHashSet<>();     // what the screen in front asked for
+    private volatile boolean recordAll;                     // "Record everything": every value read, for the drive log
     private volatile Set<String> dashShown = new LinkedHashSet<>();     // the dash's gauges, in front or not
     private FuelUse fuel;                   // the one fuel counter (see FuelStore); fed here, every tick
     private NormalReadings normal;          // the learning alerts (see NormalStore); fed here once a second
@@ -227,7 +228,7 @@ public class LinkService extends Service {
     /** Works the read list out again (also after a fill-up was marked). */
     public void refreshActive() {
         FuelUse f = fuel;
-        Set<String> ids = FuelUse.withInputs(requested, dashShown, Catalog.porsche(), f != null && f.fillStarted());
+        Set<String> ids = FuelUse.withInputs(wanted(), dashShown, Catalog.porsche(), f != null && f.fillStarted());
         ids = Motion.withCarInputs(ids, dashShown);              // gear, pull and 0-60 behind another screen
         ids = TimingPulled.withInputs(ids, dashShown, Catalog.porsche());     // timing pulled, likewise
         // the learning alerts: engine speed, then road speed and coolant near idle, the idle values at warm idle
@@ -252,7 +253,7 @@ public class LinkService extends Service {
 
     /** Ticker thread: hands carMotion and the gear indicator each new speed reading once, then puts their figures. */
     private void workOutMotion() {
-        if (!Motion.carWanted(requested, dashShown)) return;
+        if (!Motion.carWanted(wanted(), dashShown)) return;
         Long at = values.timeOf("speed");
         if (at != null && at != lastSpeedAt) {
             Double mph = values.get("speed", at);              // corrected (see SpeedCorrection)
@@ -271,6 +272,31 @@ public class LinkService extends Service {
         putIf("g_accel", carMotion.gAccel(now), now);
         putIf("zero_sixty", carMotion.zeroSixty(now), now);
         putIf("gear", gears.gear(now), now);
+        Long rpmAt = values.timeOf("rpm"), mphAt = values.timeOf("speed");
+        Double slip = rpmAt != null && mphAt != null && Math.abs(rpmAt - mphAt) <= RPM_WITHIN_MS
+                ? gears.slip(values.get("rpm", now), values.get("speed", now)) : null;
+        if (slip != null) values.put(Gears.SLIP, slip, now);
+        else values.remove(Gears.SLIP);                         // under 30 mph, or the readings are not together
+    }
+
+    // ---------------- record everything ----------------
+
+    /** What the screen asked for, plus every value of this car while "Record everything" is on. */
+    private Set<String> wanted() {
+        if (!recordAll) return requested;
+        Set<String> all = new LinkedHashSet<>(requested);
+        for (Param p : Catalog.all()) all.add(p.id);
+        return all;
+    }
+
+    /** "Record everything" (kept for the next start): the drive log gets every value, not only those on screen. */
+    public boolean recordAll() { return recordAll; }
+
+    public void setRecordAll(boolean on) {
+        recordAll = on;
+        getSharedPreferences("link", MODE_PRIVATE).edit().putBoolean("record_all", on).apply();
+        note("-- record everything " + (on ? "on: every value read for the drive log" : "off"));
+        refreshActive();
     }
 
     /** Saves the learned gearing when it has moved by more than half a percent since it was last saved. */
@@ -396,7 +422,7 @@ public class LinkService extends Service {
     }
 
     private boolean fuelWanted() {
-        return fuel != null && (FuelUse.needsInputs(requested, fuel.fillStarted()) || FuelUse.needsInputs(dashShown, false));
+        return fuel != null && (FuelUse.needsInputs(wanted(), fuel.fillStarted()) || FuelUse.needsInputs(dashShown, false));
     }
 
     /** Ticker thread: hands the fuel counter the latest readings, and puts its figures with the others. */
@@ -424,7 +450,7 @@ public class LinkService extends Service {
 
     /** Ticker thread: while the gauge is on screen or on the dash, works it out; blank at once when it means nothing. */
     private void workOutTiming() {
-        if (Catalog.porsche() || !(TimingPulled.needsInputs(requested) || TimingPulled.needsInputs(dashShown))) return;
+        if (Catalog.porsche() || !(TimingPulled.needsInputs(wanted()) || TimingPulled.needsInputs(dashShown))) return;
         long now = now();
         Double pulled = timing.update(values, now);
         if (pulled != null) values.put(TimingPulled.GAUGE, pulled, now);
@@ -650,6 +676,7 @@ public class LinkService extends Service {
         normal = NormalStore.get(this);
         volumeStrength = SpeedVolume.Strength.of(getSharedPreferences("link", MODE_PRIVATE).getString(VOLUME_PREF, null));
         SharedPreferences dash = getSharedPreferences(DashApp.PREFS, MODE_PRIVATE);
+        recordAll = getSharedPreferences("link", MODE_PRIVATE).getBoolean("record_all", false);
         savedGearing = dash.getFloat(GEARING_KEY, 0);
         gears.restore(savedGearing);                // what earlier drives taught it about this car
         speedCorrection = SpeedCorrection.clamp(dash.getFloat(correctionKey(), 0));

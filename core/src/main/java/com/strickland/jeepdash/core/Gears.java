@@ -89,6 +89,21 @@ public final class Gears {
     }
 
     /** The gear number, or null when stopped, between gears or without recent readings. */
+    /** The converter-slip value's id. */
+    public static final String SLIP = "tcc_slip";
+    /** Below this road speed the slip value is blank: the converter does not lock down there. */
+    public static final double SLIP_MIN_MPH = 30;
+
+    /**
+     * Engine speed above what top gear with the converter locked gives at this road speed, from the learned
+     * gearing: near 0 when locked, a few hundred when it lets go or slips, more after a downshift. Null below
+     * SLIP_MIN_MPH or without both readings.
+     */
+    public synchronized Double slip(Double rpm, Double mph) {
+        if (rpm == null || mph == null || mph < SLIP_MIN_MPH || top <= 0) return null;
+        return rpm - top * mph;
+    }
+
     public synchronized Double gear(long nowMs) {
         return shown == 0 || nowMs - lastMs > STALE_MS ? null : (double) shown;
     }

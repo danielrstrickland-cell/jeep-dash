@@ -234,4 +234,11 @@ public class MotionTest {
         u = drive(shift, u, 38.5, 10, 61);
         T.ok(shift.zeroSixty(u) != null, "a gear change dip keeps the run");
     }
+
+    public static void theConverterSlipNeedsSpeedAndRpm() {
+        java.util.Set<String> out = Motion.withCarInputs(new java.util.LinkedHashSet<>(), java.util.Collections.singleton(Gears.SLIP));
+        T.ok(out.contains("speed") && out.contains("rpm"), "both read behind another screen");
+        T.ok(Motion.carWanted(java.util.Collections.singleton(Gears.SLIP), java.util.Collections.emptySet()), "worked out by the service");
+        T.ok(Catalog.byId(Gears.SLIP) != null && Catalog.byId(Gears.SLIP).tablet, "a value of its own, never asked of the Jeep");
+    }
 }

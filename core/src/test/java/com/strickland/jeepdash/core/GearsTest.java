@@ -127,4 +127,13 @@ public class GearsTest {
         T.ok(Motion.needsRpm(Arrays.asList("gear")), "and engine speed");
         T.ok(!Motion.needsRpm(Arrays.asList("zero_sixty", "speed")), "but not for the timer");
     }
+
+    public static void converterSlipIsRpmAboveLockedTopGear() {
+        Gears g = Gears.jeep();
+        double top = g.topRpmPerMph();
+        T.near(0, g.slip(top * 50, 50.0), 1e-9, "locked in 4th: no slip");
+        T.near(400, g.slip(top * 50 + 400, 50.0), 1e-9, "let go: 400 rpm over");
+        T.ok(g.slip(2000.0, 25.0) == null, "under 30 mph: blank");
+        T.ok(g.slip(null, 50.0) == null && g.slip(1800.0, null) == null, "a reading missing: blank");
+    }
 }

@@ -26,6 +26,10 @@ public class DashApp extends Application {
         super.onCreate();
         catchCrashes();
         Catalog.useVehicle(vehicle(this));
+        // the last run's crash report is written now, while the system log still has why it stopped
+        Thread keep = new Thread(() -> exitReport(this, false), "keep-crash-report");
+        keep.setDaemon(true);
+        keep.start();
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
             @Override public void onActivityStarted(Activity a) { visible++; }
             @Override public void onActivityStopped(Activity a) { visible = Math.max(0, visible - 1); }
@@ -128,6 +132,15 @@ public class DashApp extends Application {
             }
             if (onlyNew) p.edit().putLong(EXIT_SEEN, newest).apply();
             if (pick == null) return null;
+            // written down at the first start after the crash, with its log; later starts read that copy
+            java.io.File kept = new java.io.File(c.getFilesDir(), "exit-" + pick.getTimestamp() + ".txt");
+            if (kept.exists() && kept.length() < 256 * 1024) {
+                try {
+                    return new String(java.nio.file.Files.readAllBytes(kept.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+                } catch (java.io.IOException ignored) {
+                    // unreadable: build it again below
+                }
+            }
             StringBuilder sb = new StringBuilder();
             String when = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(new java.util.Date(pick.getTimestamp()));
             sb.append("Jeep Dash dash-").append(build(c)).append(": last exit was a ")
@@ -158,9 +171,26 @@ public class DashApp extends Application {
             if (trail != null) sb.append("\n3D steps before the crash (last one was running):\n").append(trail);
             String log = logOf(pick.getPid());
             if (log != null) sb.append("\nLog of that run (warnings and errors):\n").append(log);
-            return sb.toString();
+            else sb.append("\n(the system log no longer had that run's lines)\n");
+            String text = sb.toString();
+            keepReport(c, kept, text);
+            return text;
         } catch (RuntimeException e) {
             return null;
+        }
+    }
+
+    /** Keeps a built report (the newest few) so later starts show the same text, log and all. */
+    private static void keepReport(Context c, java.io.File f, String text) {
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
+            out.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (java.io.IOException | RuntimeException ignored) {
+            return;
+        }
+        java.io.File[] all = c.getFilesDir().listFiles((d, n) -> n.startsWith("exit-") && n.endsWith(".txt"));
+        if (all != null && all.length > 5) {
+            java.util.Arrays.sort(all, (x, y) -> Long.compare(x.lastModified(), y.lastModified()));
+            for (int i = 0; i < all.length - 5; i++) all[i].delete();
         }
     }
 
